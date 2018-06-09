@@ -1,7 +1,7 @@
 # evio submodule
 
 This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
-embedding a minimum amount of libev for io event support using epoll.
+embedding a minimum amount of [libev](http://software.schmorp.de/pkg/libev.html) for io event support using epoll.
 
 The root project should be using
 [autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools) and
