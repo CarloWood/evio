@@ -9,3 +9,4 @@ m4_append_uniq([CW_SUBMODULE_CONFIG_FILES], cwm4_quote(cwm4_submodule_path[/libe
 # Do not include the select and poll backends to keep the library small.
 AC_DEFINE([EV_USE_POLL], 0, [Don't use poll(2)])
 AC_DEFINE([EV_USE_SELECT], 0, [Don't use select(2)])
+AC_DEFINE([EV_MULTIPLICITY], 0, [Don't support multiple loops])
