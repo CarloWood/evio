@@ -188,10 +188,11 @@ struct ev_loop;
 # define EV_DEFAULT_UC
 # define EV_DEFAULT_UC_
 # undef EV_EMBED_ENABLE
+# define EV_EMBED_ENABLE 0
 #endif
 
 /* EV_INLINE is used for functions in header files */
-#if __STDC_VERSION__ >= 199901L || __GNUC__ >= 3
+#if __cplusplus || __STDC_VERSION__ >= 199901L || __GNUC__ >= 3
 # define EV_INLINE static inline
 #else
 # define EV_INLINE static

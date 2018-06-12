@@ -3610,9 +3610,11 @@ ev_run (EV_P_ int flags)
       if (expect_false (loop_done))
         break;
 
+#if EV_FORK_ENABLE
       /* we might have forked, so reify kernel state if necessary */
       if (expect_false (postfork))
         loop_fork (EV_A);
+#endif
 
       /* update fd-related kernel structures */
       fd_reify (EV_A);
