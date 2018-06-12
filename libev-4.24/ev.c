@@ -3740,6 +3740,12 @@ ev_break (EV_P_ int how) EV_THROW
   loop_done = how;
 }
 
+int
+ev_requested_break(EV_P) EV_THROW
+{
+  return loop_done;
+}
+
 void
 ev_ref (EV_P) EV_THROW
 {

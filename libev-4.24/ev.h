@@ -639,6 +639,7 @@ enum {
 #if EV_PROTOTYPES
 EV_API_DECL int  ev_run (EV_P_ int flags EV_CPP (= 0));
 EV_API_DECL void ev_break (EV_P_ int how EV_CPP (= EVBREAK_ONE)) EV_THROW; /* break out of the loop */
+EV_API_DECL int  ev_requested_break (EV_P) EV_THROW;
 
 /*
  * ref/unref can be used to add or remove a refcount on the mainloop. every watcher
