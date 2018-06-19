@@ -7,7 +7,9 @@ noinst_LTLIBRARIES = libevio.la
 SOURCES = EventLoopThread.cxx \
 	  EventLoopThread.h \
 	  FileDescriptor.cxx \
-	  FileDescriptor.h
+	  FileDescriptor.h \
+	  dbstreambuf.cxx \
+	  dbstreambuf.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@ -pthread
