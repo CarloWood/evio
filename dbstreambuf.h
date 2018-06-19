@@ -737,7 +737,7 @@ class link_buffer_ct : public dbstreambuf_ct
   // Administration:
   void reduce_buf_if_empty(void) { reduce_buffer_if_empty(); }
     // Should be called to make sure that the buffer also decreases.
- 
+
   // Reading by the device:
   size_t buf2dev_contiguous(void) const				// Returns the number of bytes that can be read directly
       { return next_contiguous_number_of_bytes(); }		// from memory from position buf2dev_ptr().
