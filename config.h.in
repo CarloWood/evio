@@ -1,0 +1,9 @@
+// DEBUGBUFFERS
+//
+// Turns on debugging for the buffers library itself. Only
+// interesting when working on the source of this library.
+
+#@CW_CONFIG_DEBUGBUFFERS@ DEBUGDBSTREAMBUF
+
+//
+//

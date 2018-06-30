@@ -1,7 +1,7 @@
 // evio -- Event Driven I/O support.
 //
 //! @file
-//! @brief Definition of namespace evio; class dbstreambuf_ct.
+//! @brief Definition of namespace evio; class StreamBuf.
 //
 // Copyright (C) 2004, 2018 Carlo Wood.
 //
@@ -26,8 +26,8 @@
 
 #include "sys.h"
 #include "debug.h"
-#include "dbstreambuf.h"
-#include "FileDescriptor.h"
+#include "StreamBuf.h"
+//#include "FileDescriptor.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #else
@@ -47,65 +47,67 @@ NAMESPACE_DEBUG_CHANNELS_END
 namespace evio {
 
 #ifdef CWDEBUG
-void dbstreambuf_ct::printOn(ostream& o) const
+void StreamBuf::printOn(ostream& os) const
 {
-  o << "----------------------------------------------------------------------" << endl;
-  o << "max_alloc = " << get_max_alloc() << "; buffer_full_watermark = " << max_used_size;
-  o << "; current_number_of_blocks = " << output_buffer.size() << endl;
-  o << "Block nodes: " << endl;
+  os << "----------------------------------------------------------------------" << endl;
+  os << "max_alloc = " << get_max_alloc() << "; buffer_full_watermark = " << max_used_size;
+  os << "; current_number_of_blocks = " << output_buffer.size() << endl;
+  os << "Block nodes: " << endl;
   unsigned int block_count = 0;
   size_t total_size = 0;
-  o << "Start\t\tSize\n";
-  for (memory_blocks_buffer_ct::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
+  os << "Start\t\tSize\n";
+  for (MemoryBlocksBuffer::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
   {
-    memory_block_st const* block(*i);
-    o << (void*)block->block_start() << '\t' << block->get_size() << endl;
+    MemoryBlock const* block(*i);
+    os << (void*)block->block_start() << '\t' << block->get_size() << endl;
     total_size += block->get_size();
     ++block_count;
   }
   if (block_count != output_buffer.size())
-    DoutFatal( dc::core, "Counted inconsistent number of blocks!" );
-  o << "Total size: " << total_size << endl;
+    DoutFatal(dc::core, "Counted inconsistent number of blocks!");
+  os << "Total size: " << total_size << endl;
   if (total_size != output_buffer.get_total_block_size())
-    DoutFatal( dc::core, "Inconsistent total allocated size!" );
-  o << "get_area_block_node = " << (void*)get_area_block_node;
-  o << "; put_area_block_node = " << (void*)put_area_block_node << endl;
-  o << "get area: " << (void*)ieback() << " - " << (void*)igptr() << "(" << igptr() - ieback() << ")" << " - " << (void*)iegptr() << "(" << iegptr() - ieback() << ")";
+    DoutFatal(dc::core, "Inconsistent total allocated size!");
+  os << "get_area_block_node = " << (void*)get_area_block_node;
+  os << "; put_area_block_node = " << (void*)put_area_block_node << endl;
+  void* volatile ptr = (void*)gptr();
+  os << "get area: " << (void*)ieback() << " - " << (void*)igptr() << "(" << igptr() - ieback() << ")" << " - " << (void*)iegptr() << "(" << iegptr() - ieback() << ")";
 #if CWDEBUG_ALLOC
-  o << "\t[ " << find_alloc(ieback())->start() << " (" << find_alloc(ieback())->start() << ") ]";
+  os << "\t[ " << find_alloc(ieback())->start() << " (" << find_alloc(ieback())->size() << ") ]";
 #endif
-  o << endl;
-  o << "put area: " << (void*)pbase() << " - " << (void*)pptr() << "(" << pptr() - pbase() << ")" << " - " << (void*)epptr() << "(" << epptr() - pbase() << ")";
+  os << endl;
+  os << "put area: " << (void*)pbase() << " - " << (void*)pptr() << "(" << pptr() - pbase() << ")" << " - " << (void*)epptr() << "(" << epptr() - pbase() << ")";
 #if CWDEBUG_ALLOC
-  o << "\t[ " << find_alloc(pbase())->start() << " (" << find_alloc(pbase())->size() << ") ]";
+  os << "\t[ " << find_alloc(pbase())->start() << " (" << find_alloc(pbase())->size() << ") ]";
 #endif
-  o << endl;
+  os << endl;
 #if CWDEBUG_ALLOC
-  if (find_alloc(ieback())->start() != ieback())
-    DoutFatal( dc::core, "get area points to non-allocated block !" );
-  if (igptr() != ieback() && find_alloc(igptr() - 1)->start() != ieback())
-    DoutFatal( dc::core, "get area get pointer points outside allocated block !" );
-  if (iegptr() != ieback() && find_alloc(iegptr() - 1)->start() != ieback())
-    DoutFatal( dc::core, "end of get area points outside allocated block !" );
-  if (find_alloc(pbase())->start() != pbase())
-    DoutFatal( dc::core, "put area points to non-allocated block !" );
-  if (pptr() != pbase() && find_alloc(pptr() - 1)->start() != pbase())
-    DoutFatal( dc::core, "put area put pointer points outside allocated block !" );
-  if (epptr() != pbase() && find_alloc(epptr() - 1)->start() != pbase())
-    DoutFatal( dc::core, "end of put area points outside allocated block !" );
+  if ((char*)find_alloc(ieback())->start() + sizeof(MemoryBlock) != ieback())
+    DoutFatal(dc::core, "get area points to non-allocated block !");
+  if (igptr() != ieback() && (char*)find_alloc(igptr() - 1)->start() + sizeof(MemoryBlock) != ieback())
+    DoutFatal(dc::core, "get area get pointer points outside allocated block !");
+  if (iegptr() != ieback() && (char*)find_alloc(iegptr() - 1)->start() + sizeof(MemoryBlock) != ieback())
+    DoutFatal(dc::core, "end of get area points outside allocated block !");
+  if ((char*)find_alloc(pbase())->start() + sizeof(MemoryBlock) != pbase())
+    DoutFatal(dc::core, "put area points to non-allocated block !");
+  if (pptr() != pbase() && (char*)find_alloc(pptr() - 1)->start() + sizeof(MemoryBlock) != pbase())
+    DoutFatal(dc::core, "put area put pointer points outside allocated block !");
+  if (epptr() != pbase() && (char*)find_alloc(epptr() - 1)->start() + sizeof(MemoryBlock) != pbase())
+    DoutFatal(dc::core, "end of put area points outside allocated block !");
 #endif
-  o << "Total string length: " << total_size - (igptr() - ieback()) - (epptr() - pptr()) << endl;
-  for (memory_blocks_buffer_ct::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
+  os << "Total string length: " << total_size - (igptr() - ieback()) - (epptr() - pptr()) << endl;
+  for (MemoryBlocksBuffer::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
   {
-    memory_block_st const* block2(*i);
+    MemoryBlock const* block2(*i);
+    os << "[" << (void*)block2 << "] ";
     if (block2 == get_area_block_node && block2 == put_area_block_node)
-      o << "\"" << buf2str(igptr(), pptr() - igptr()) << "\"" << endl;
+      os << "\"" << buf2str(igptr(), pptr() - igptr()) << "\"" << endl;     // Print from igptr() to pptr().
     else if (block2 == get_area_block_node)
-      o << "\"" << buf2str(igptr(), iegptr() - igptr()) << endl;
+      os << "\"" << buf2str(igptr(), block2->get_size() - (igptr() - ieback())) << endl;      // Print from igptr() to the end of the buffer.
     else if (block2 == put_area_block_node)
-      o << buf2str(block2->block_start(), pptr() - pbase()) << "\"" << endl;
-    if (block2 != get_area_block_node && block2 != put_area_block_node)
-      o << buf2str(block2->block_start(), block2->get_size()) << endl;
+      os << buf2str(block2->block_start(), pptr() - pbase()) << "\"" << endl;   // Print from start of buffer to pptr().
+    else
+      os << buf2str(block2->block_start(), block2->get_size()) << endl;         // Print the whole buffer.
   }
   if (ieback() != get_area_block_node->block_start() ||
       pbase() != put_area_block_node->block_start() ||
@@ -114,12 +116,12 @@ void dbstreambuf_ct::printOn(ostream& o) const
       iegptr() > ieback() + get_area_block_node->get_size() ||
       igptr() < ieback() || igptr() > iegptr() ||
       pptr() < pbase() || pptr() > epptr())
-    DoutFatal( dc::core, "Pointers inconsistent" );
-  o << "----------------------------------------------------------------------" << endl;
+    DoutFatal(dc::core, "Pointers inconsistent");
+  os << "----------------------------------------------------------------------" << endl;
 }
 #endif
 
-dbstreambuf_ct::int_type dbstreambuf_ct::overflow(int_type c)
+StreamBuf::int_type StreamBuf::overflow(int_type c)
 {
 #ifdef DEBUGDBSTREAMBUF
   cerr << "overflow(" << (char)c << "):" << endl;
@@ -139,7 +141,7 @@ dbstreambuf_ct::int_type dbstreambuf_ct::overflow(int_type c)
   return 0;
 }
 
-int dbstreambuf_ct::iunderflow(void)
+int StreamBuf::iunderflow(void)
 {
 #ifdef DEBUGDBSTREAMBUF
   cerr << "iunderflow(void):" << endl;
@@ -193,7 +195,7 @@ int dbstreambuf_ct::iunderflow(void)
   return 0;
 }
 
-dbstreambuf_ct::int_type dbstreambuf_ct::ipbackfail(int_type c)
+StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 {
 #ifdef DEBUGDBSTREAMBUF
   cerr << "ipbackfail(" << c << ")" << endl;
@@ -234,19 +236,19 @@ dbstreambuf_ct::int_type dbstreambuf_ct::ipbackfail(int_type c)
   return 0;
 }
 
-std::streamsize dbstreambuf_ct::ishowmanyc(void)
+std::streamsize StreamBuf::ishowmanyc(void)
 {
   if (get_area_block_node == put_area_block_node)
     isetg(ieback(), igptr(), pptr());
   else if (iegptr() < ieback() + get_area_block_node->get_size())
     isetg(ieback(), igptr(), ieback() + get_area_block_node->get_size());
-  return (iegptr() - igptr());
+  return iegptr() - igptr();
 }
 
-streamsize dbstreambuf_ct::ixsgetn(char* s, streamsize n)
+streamsize StreamBuf::ixsgetn(char* s, streamsize n)
 {
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "dbstreambuf_ct::ixsgetn(s, " << n << ")" << endl;
+  cerr << "StreamBuf::ixsgetn(s, " << n << ")" << endl;
   printOn(cerr);
 #endif
 
@@ -332,10 +334,10 @@ streamsize dbstreambuf_ct::ixsgetn(char* s, streamsize n)
   return len + left;
 }
 
-streamsize dbstreambuf_ct::xsputn(char const* s, streamsize n)
+streamsize StreamBuf::xsputn(char const* s, streamsize n)
 {
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "dbstreambuf_ct::xsputn(" << buf2str(s, n) << ", " << n << ")" << endl;
+  cerr << "StreamBuf::xsputn(" << buf2str(s, n) << ", " << n << ")" << endl;
   printOn(cerr);
 #endif
   register char const* sp = s;
@@ -374,7 +376,7 @@ streamsize dbstreambuf_ct::xsputn(char const* s, streamsize n)
 	printOn(cerr);
 #endif
 	pbump(block_size);
-	return (s - sp);
+	return s - sp;
       }
       put_area_block_node = output_buffer.back();
       block_size = put_area_block_node->get_size();
@@ -390,15 +392,15 @@ streamsize dbstreambuf_ct::xsputn(char const* s, streamsize n)
   return n;
 }
 
-dbstreambuf_ct::dbstreambuf_ct(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     max_used_size(buffer_full_watermark), output_buffer(max_alloc), idevice(NULL), odevice(NULL), device_counter(0)
 {
-  Dout( dc::io, "this = " << (void*)this << "; dbstreambuf_ct(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ')' );
+  Dout(dc::io, "this = " << (void*)this << "; StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ')');
 #ifdef CWDEBUG
   if (minimum_blocksize < 64)
-    Dout( dc::warning, "dbstreambuf_ct with a minimum_blocksize smaller then 64 !" );
+    Dout(dc::warning, "StreamBuf with a minimum_blocksize smaller then 64 !");
   if (((minimum_blocksize - 1) & minimum_blocksize) != 0)
-    DoutFatal( dc::core, "Please use a minimum_blocksize that is a power of 2 for dbstreambuf_ct" );
+    DoutFatal(dc::core, "Please use a minimum_blocksize that is a power of 2 for StreamBuf");
 #endif
   log2_min_buf_size = 6; // log(64)/log(2)
   while (minimum_blocksize > 64)
@@ -406,7 +408,7 @@ dbstreambuf_ct::dbstreambuf_ct(size_t minimum_blocksize, size_t buffer_full_wate
     log2_min_buf_size++;
     minimum_blocksize = minimum_blocksize >> 1;
   }
-  output_buffer.push_front((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(memory_block_st));
+  output_buffer.push_front((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
   get_area_block_node = put_area_block_node = output_buffer.front();
   input_dbstreambuf = this;
   register char* start = get_area_block_node->block_start();
@@ -414,7 +416,7 @@ dbstreambuf_ct::dbstreambuf_ct(size_t minimum_blocksize, size_t buffer_full_wate
   isetg(start, start, start);
 }
 
-size_t dbstreambuf_ct::new_block_size(void) const
+size_t StreamBuf::new_block_size(void) const
 {
   register size_t nl = used_size();
   register size_t l2 = get_log2_min_buf_size();
@@ -425,10 +427,10 @@ size_t dbstreambuf_ct::new_block_size(void) const
   else
     for (nl = 1 << l2, l = l >> l2; l > 0; nl = nl << 1)
       l = l >> 1;
-  return nl - malloc_overhead_c - sizeof(memory_block_st);
+  return nl - malloc_overhead_c - sizeof(MemoryBlock);
 }
 
-void dbstreambuf_ct::reduce_buffer(void)
+void StreamBuf::reduce_buffer(void)
 {
   size_t new_block_size = minimum_block_size();
   if (get_area_block_node->used() == 1)		// Only used by buffer
@@ -450,35 +452,35 @@ void dbstreambuf_ct::reduce_buffer(void)
   setp(start, start + new_block_size);		// note: get_area_block_node == put_area_block_node (the buffer is empty)
 }
 
-int dbstreambuf_ct::sync(void)
+int StreamBuf::sync(void)
 {
   //FIXME return ((odevice && odevice->sync(this)) || (idevice && idevice->sync(NULL)));
   return 0;
 }
 
-void dbstreambuf_ct::idevice_del(void)
+void StreamBuf::idevice_del(void)
 {
-  DoutFatal( dc::core, "When do we get here?" );
+  DoutFatal(dc::core, "When do we get here?");
   //FIXME idevice->del();
 }
 
-void dbstreambuf_ct::odevice_del(void)
+void StreamBuf::odevice_del(void)
 {
-  DoutFatal( dc::core, "When do we get here?" );
+  DoutFatal(dc::core, "When do we get here?");
   //FIXME odevice->del();
 }
 
-bool dbstreambuf_ct::release(IOBase* device)
+bool StreamBuf::release(IOBase* device)
 {
 #ifdef CWDEBUG
   if (device_counter == 0)
   {
-    DoutFatal( dc::core,
-	"\n\tCalling `dbstreambuf_ct::release' while `device_counter' equals 0."
-	"\n\tAlways allocate a `dbstreambuf_ct' with `new' and pass it" <<
+    DoutFatal(dc::core,
+	"\n\tCalling `StreamBuf::release' while `device_counter' equals 0."
+	"\n\tAlways allocate a `StreamBuf' with `new' and pass it" <<
 	"\n\tto either a `dbbuf_fd_dtct<INPUT>' or `dbbuf_fd_dtct<OUTPUT>'," <<
 	"\n\tor to both by passing it to iodbbuf_fd_dtct<INPUT, OUTPUT>." <<
-	"\n\t(Where INPUT must be an `InputDevice' and OUTPUT must be an `OutputDevice')." );
+	"\n\t(Where INPUT must be an `InputDevice' and OUTPUT must be an `OutputDevice').");
   }
 #endif
   if (--device_counter == 0)
@@ -489,13 +491,14 @@ bool dbstreambuf_ct::release(IOBase* device)
   else
   {
     // Resetting the devices is necessary because of `sync'.
-    if (device == idevice)
-      idevice = NULL;
-    else if (device == odevice)
-      odevice = NULL;
+    //FIXME uncomment once InputDevice/OutputDevice are declared again.
+//    if (device == idevice)
+//      idevice = NULL;
+//    else if (device == static_cast<IOBase*>(odevice))
+//      odevice = NULL;
 
-    Dout( dc::malloc, "this = " << (void*)this << "; Calling dbstreambuf_ct::release " <<
-	device_counter << " device left (" << idevice << ", " << odevice << ')' );
+    Dout(dc::malloc, "this = " << (void*)this << "; Calling StreamBuf::release " <<
+	device_counter << " device left (" << idevice << ", " << odevice << ')');
 
     return false;
   }
