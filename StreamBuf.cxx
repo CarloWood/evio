@@ -392,7 +392,7 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
   return n;
 }
 
-StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_full_watermark) :
     max_used_size(buffer_full_watermark), output_buffer(max_alloc), idevice(NULL), odevice(NULL), device_counter(0)
 {
   Dout(dc::io, "this = " << (void*)this << "; StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ')');

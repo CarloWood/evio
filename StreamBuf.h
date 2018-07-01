@@ -358,13 +358,15 @@ class StreamBuf : public std::streambuf
   // Construct a `StreamBuf' object. The minimum number of allocated
   // bytes for one block of the output buffer is `minimum_blocksize'.
   // The maximum possible number of total allocated bytes of all blocks
-  // together is `max_alloc_'. When this value is reached, `overflow' will
+  // together is `max_alloc'. When this value is reached, `overflow' will
   // return EOF.
   // The method `buffer_full' returns true when the number of buffered
   // bytes in the output buffer exceed `buffer_full_watermark'.
   // After using this constructor, the input buffer is the same as the
   // output buffer. Use `set_input_buffer' to change this.
-  StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc_);
+  StreamBuf(size_t minimum_blocksize,
+            size_t max_alloc = std::numeric_limits<size_t>::max(),              // The default causes push_back and push_front to only fail when we actually run out of memory.
+            size_t buffer_full_watermark = std::numeric_limits<size_t>::max()); // The default causes buffer_full() to never return true.
 
  public:
   //---------------------------------------------------------------------------
@@ -673,65 +675,12 @@ class StreamBuf : public std::streambuf
 // Interface classes
 //
 
-// Program reading from a device:
-
-class InputBuffer : public StreamBuf
-{
- public:
-  InputBuffer(size_t minimum_blocksize,
-              size_t buffer_full_watermark = std::numeric_limits<size_t>::max(),        // The default causes buffer_full() to never return true.
-              size_t max_alloc = std::numeric_limits<size_t>::max()) :                  // The default causes push_back and push_front to only fail when we actually run out of memory.
-      StreamBuf(minimum_blocksize, buffer_full_watermark, max_alloc) { }
-
-  // Raw binary access (instead of using istream):
-  char* raw_gptr() const { return igptr(); }                    // Get pointer to get area.
-  void raw_gbump(int n) { igbump(n); }                          // Bump pointer `n' bytes.
-  size_t raw_sgetn(char* s, size_t n) { return ixsgetn(s, n); } // Read `n' bytes and copy them to `s'.
-
-  // Writing by the device:
-  size_t dev2buf_contiguous() const                             // Return the number of bytes that can be written directly
-      { return available_contiguous_number_of_bytes(); }        //  into memory at position dev2buf_ptr() at this moment.
-  size_t dev2buf_contiguous_forced()                            // Same as above, but doesn't return 0 unless
-      { return force_available_contiguous_number_of_bytes(); }  //  out of memory or buffer full.
-  char* dev2buf_ptr() const { return pptr(); }                  // Get pointer to put area.
-  void dev2buf_bump(int n) { pbump(n); }                        // Bump pointer `n' bytes.
-
-  // Administration:
-  void reduce_buf_if_empty() { reduce_buffer_if_empty(); }  // Should be called to make sure that the buffer also decreases.
-};
-
-// Program writing to a device:
-
-class OutputBuffer : public StreamBuf
-{
- public:
-  OutputBuffer(size_t minimum_blocksize,
-               size_t buffer_full_watermark = std::numeric_limits<size_t>::max(),       // The default causes buffer_full() to never return true.
-               size_t max_alloc = std::numeric_limits<size_t>::max()) :                 // The default causes push_back and push_front to only fail when we actually run out of memory.
-      StreamBuf(minimum_blocksize, buffer_full_watermark, max_alloc) { }
-
-  // Raw binary access (instead of using ostream):
-  char* raw_pptr() const { return pptr(); }                     // Get pointer to put area.
-  void raw_pbump(int n) { pbump(n); }                           // Bump pointer `n' bytes.
-  size_t raw_sputn(char const* s, size_t n) { return xsputn(s, n); }    // Copy `n' bytes from `s' to the buffer.
-
-  // Reading by the device:
-  size_t buf2dev_contiguous()                                   // Returns the number of bytes that can be read directly
-      { return next_contiguous_number_of_bytes(); }             // from memory from position buf2dev_ptr().
-  size_t buf2dev_contiguous_forced()                            // Returns the number of bytes that can be read directly
-      { return force_next_contiguous_number_of_bytes(); }       // from memory from position buf2dev_ptr().
-                                                                // Does not return 0 unless the buffer is empty.
-  char* buf2dev_ptr() const { return igptr(); }                 // Get pointer to get area.
-  void buf2dev_bump(int n) { igbump(n); }                       // Bump pointer `n' bytes.
-};
-
 // Linking two devices together:
 
-class LinkBuffer : public StreamBuf
+class Dev2Buf : public StreamBuf
 {
  public:
-  LinkBuffer(size_t minimum_blocksize, size_t buffer_full_watermark = (size_t)-1, size_t max_alloc = (size_t)-1) :
-      StreamBuf(minimum_blocksize, buffer_full_watermark, max_alloc) { }
+  using StreamBuf::StreamBuf;
 
   // Writing by the device:
   size_t dev2buf_contiguous() const                             // Return the number of bytes that can be written directly
@@ -743,6 +692,12 @@ class LinkBuffer : public StreamBuf
 
   // Administration:
   void reduce_buf_if_empty() { reduce_buffer_if_empty(); }      // Should be called to make sure that the buffer also decreases.
+};
+
+class Buf2Dev : public StreamBuf
+{
+ public:
+  using StreamBuf::StreamBuf;
 
   // Reading by the device:
   size_t buf2dev_contiguous()                                   // Returns the number of bytes that can be read directly
@@ -752,6 +707,50 @@ class LinkBuffer : public StreamBuf
                                                                 // Does not return 0 unless the buffer is empty.
   char* buf2dev_ptr() const { return igptr(); }                 // Get pointer to get area.
   void buf2dev_bump(int n) { igbump(n); }                       // Bump pointer `n' bytes.
+};
+
+class LinkBuffer : public Dev2Buf
+{
+ public:
+  using Dev2Buf::Dev2Buf;
+
+  //-----------------------------------------------------------
+  // DUPLICATE METHODS OF Buf2Dev.
+  size_t buf2dev_contiguous() { return next_contiguous_number_of_bytes(); }
+  size_t buf2dev_contiguous_forced() { return force_next_contiguous_number_of_bytes(); }
+  char* buf2dev_ptr() const { return igptr(); }
+  void buf2dev_bump(int n) { igbump(n); }
+  //-----------------------------------------------------------
+
+  // Because this class has the same interface as Buf2Dev, it is safe to provide these casting operators:
+  operator Buf2Dev&() { return *static_cast<Buf2Dev*>(static_cast<StreamBuf*>(this)); }
+  operator Buf2Dev const&() const { return *static_cast<Buf2Dev const*>(static_cast<StreamBuf const*>(this)); }
+};
+
+// Program reading from a device:
+
+class InputBuffer : public Dev2Buf
+{
+ public:
+  using Dev2Buf::Dev2Buf;
+
+  // Raw binary access (instead of using istream):
+  char* raw_gptr() const { return igptr(); }                    // Get pointer to get area.
+  void raw_gbump(int n) { igbump(n); }                          // Bump pointer `n' bytes.
+  size_t raw_sgetn(char* s, size_t n) { return ixsgetn(s, n); } // Read `n' bytes and copy them to `s'.
+};
+
+// Program writing to a device:
+
+class OutputBuffer : public Buf2Dev
+{
+ public:
+  using Buf2Dev::Buf2Dev;
+
+  // Raw binary access (instead of using ostream):
+  char* raw_pptr() const { return pptr(); }                     // Get pointer to put area.
+  void raw_pbump(int n) { pbump(n); }                           // Bump pointer `n' bytes.
+  size_t raw_sputn(char const* s, size_t n) { return xsputn(s, n); }    // Copy `n' bytes from `s' to the buffer.
 };
 
 // Initialize the input buffer pointer.
