@@ -170,8 +170,10 @@ void EventLoopThread::handle_invoke_pending()
   Dout(dc::notice|flush_cf, "Leaving EventLoopThread::handle_invoke_pending()");
 }
 
-EventLoopThread::EventLoopThread(AIQueueHandle handler) : m_handler(handler), m_inside_invoke_pending(false)
+void EventLoopThread::init(AIQueueHandle handler)
 {
+  m_handler = handler;
+
 #if EV_MULTIPLICITY
   loop =
 #endif
@@ -193,23 +195,41 @@ EventLoopThread::EventLoopThread(AIQueueHandle handler) : m_handler(handler), m_
     ;
 }
 
+void EventLoopThread::join()
+{
+  if (m_event_thread.joinable())
+  {
+    Dout(dc::notice|continued_cf, "Joining m_event_thread... ");
+    m_event_thread.join();
+    Dout(dc::finish, "joined");
+  }
+}
+
 EventLoopThread::~EventLoopThread()
 {
   DoutEntering(dc::notice, "EventLoopThread::~EventLoopThread()");
-  Dout(dc::notice, "Joining m_event_thread.");
-  m_event_thread.join();
+  // Call EventLoopThread::instance().join() before leaving main().
+  ASSERT(!m_event_thread.joinable());
 }
 
+//static
 void EventLoopThread::start(ev_timer& timeout_watcher)
 {
-  std::lock_guard<std::mutex> lock(m_loop_mutex);
+  EventLoopThread& self(instance());
+  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
   ev_timer_start(EV_A_ &timeout_watcher);
-  ev_async_send(EV_A_ &m_async_w);
+  ev_async_send(EV_A_ &self.m_async_w);
 }
 
+//static
 void EventLoopThread::start(ev_io& io_watcher)
 {
-  std::lock_guard<std::mutex> lock(m_loop_mutex);
+  EventLoopThread& self(instance());
+  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
   ev_io_start(EV_A_ &io_watcher);
-  ev_async_send(EV_A_ &m_async_w);
+  ev_async_send(EV_A_ &self.m_async_w);
 }
+
+namespace {
+SingletonInstance<EventLoopThread> dummy __attribute__ ((__unused__));
+} // namespace

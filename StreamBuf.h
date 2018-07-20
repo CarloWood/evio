@@ -725,6 +725,10 @@ class LinkBuffer : public Dev2Buf
   // Because this class has the same interface as Buf2Dev, it is safe to provide these casting operators:
   operator Buf2Dev&() { return *static_cast<Buf2Dev*>(static_cast<StreamBuf*>(this)); }
   operator Buf2Dev const&() const { return *static_cast<Buf2Dev const*>(static_cast<StreamBuf const*>(this)); }
+
+  // Also allow converting a pointer.
+  Buf2Dev* as_Buf2Dev() { return static_cast<Buf2Dev*>(static_cast<StreamBuf*>(this)); }
+  Buf2Dev const* as_Buf2Dev() const { return static_cast<Buf2Dev const*>(static_cast<StreamBuf const*>(this)); }
 };
 
 // Program reading from a device:

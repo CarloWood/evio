@@ -26,13 +26,21 @@
 #include "evio.h"
 #include "FileDescriptor.h"
 #include "statefultask/AIThreadPool.h"
+#include "utils/Singleton.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
 
-class EventLoopThread
+class EventLoopThread : public Singleton<EventLoopThread>
 {
+  // This is a singleton.
+  // However, you must call EventLoopThread::instance().init(handler) to initialize it before use.
+  friend_Instance;
+  EventLoopThread() : m_inside_invoke_pending(false) { }
+  ~EventLoopThread();
+  EventLoopThread(EventLoopThread const&) = delete;
+
  private:
   std::thread m_event_thread;
   AIQueueHandle m_handler;
@@ -58,11 +66,11 @@ class EventLoopThread
   void handle_invoke_pending();
 
  public:
-  EventLoopThread(AIQueueHandle handler);
-  ~EventLoopThread();
+  void init(AIQueueHandle handler);
+  void join();
 
-  void start(ev_timer& timeout_watcher);
-  void start(ev_io& io_watcher);
+  static void start(ev_timer& timeout_watcher);
+  static void start(ev_io& io_watcher);
 
   void invoke_pending();
 };

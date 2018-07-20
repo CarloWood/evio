@@ -4,6 +4,9 @@ m4_include([evio/libev-4.24/libev.m4])
 # Determine the malloc overhead.
 CW_SYS_MALLOC_OVERHEAD
 
+# Determine the kind of nonblocking sockets that we have.
+CW_SYS_NONBLOCK
+
 # evio depends on statefultask (it uses AIThreadPool).
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [statefultask threadsafe], [ ])])
 

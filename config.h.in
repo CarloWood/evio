@@ -7,3 +7,13 @@
 
 //
 //
+
+// CW_CONFIG_NONBLOCK_(POSIX|BSD|SYSV|WIN32)
+//
+// Depending on whether socket non-blocking stuff is posix,
+// bsd, sysv or win32 style respectively.
+
+#define CW_CONFIG_NONBLOCK_@CW_CONFIG_NONBLOCK@
+
+//
+//

@@ -25,6 +25,14 @@
 #include "FileDescriptor.h"
 #include "EventLoopThread.h"
 #include "libcwd/buf2str.h"
+#ifdef CW_CONFIG_NONBLOCK_SYSV
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#else
+#include <unistd.h>     // Needed for fcntl.
+#include <fcntl.h>
+#endif
 
 namespace evio {
 
@@ -44,28 +52,72 @@ void OutputDevice::init_output_device(int fd)
   m_output_watcher.data = this;
 }
 
-void InputDevice::start_input_device(EventLoopThread& evio_loop)
+void set_nonblocking(int fd)
+{
+#ifdef CW_CONFIG_NONBLOCK_POSIX
+  int nonb = O_NONBLOCK;
+#elif defined(CW_CONFIG_NONBLOCK_BSD)
+  int nonb = O_NDELAY;
+#endif
+#ifdef CW_CONFIG_NONBLOCK_SYSV
+  // This portion of code might also apply to NeXT.
+  // According to IBMs manual page, this might only work for sockets :/
+  #warning "This is not really supported, as I've never been able to test it."
+  int res = 1;
+  if (ioctl(fd, FIONBIO, &res) < 0)
+    perror("ioctl(fd, FIONBIO)");
+#else
+  int res;
+  if ((res = fcntl(fd, F_GETFL, 0)) == -1)
+    perror("fcntl(fd, F_GETFL)");
+  else if (fcntl(fd, F_SETFL, res | nonb) == -1)
+    perror("fcntl(fd, F_SETL, nonb)");
+#endif
+  return;
+}
+
+void InputDevice::start_input_device()
 {
   // Call InputDevice::init before calling InputDevice::start.
   ASSERT(m_input_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  evio_loop.start(m_input_watcher);
+  // Increment ref count with once, clearing FDS_REMOVE, to stop
+  // this object from being removed until del() is called.
+  if ((m_flags & FDS_REMOVE))
+  {
+    m_flags &= ~FDS_REMOVE;
+    intrusive_ptr_add_ref(this);
+  }
+  // Increment it once more to stop this object from being deleted while being active.
   intrusive_ptr_add_ref(this);
+  EventLoopThread::start(m_input_watcher);
 }
 
-void OutputDevice::start_output_device(EventLoopThread& evio_loop)
+void OutputDevice::start_output_device()
 {
   // Call OutputDevice::init before calling OutputDevice::start.
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  evio_loop.start(m_output_watcher);
+  // Increment ref count with once, clearing FDS_REMOVE, to stop
+  // this object from being removed until del() is called.
+  if ((m_flags & FDS_REMOVE))
+  {
+    m_flags &= ~FDS_REMOVE;
+    intrusive_ptr_add_ref(this);
+  }
+  // Increment it once more to stop this object from being deleted while being active.
   intrusive_ptr_add_ref(this);
+  EventLoopThread::start(m_output_watcher);
 }
 
 void InputDevice::stop_input_device()
 {
+  // We assume that stop_input_device can be called from another thread (than start_output_device)
+  // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
+  // the destruction of the lock object in that function) at which point is_active() will return
+  // true.
   if (is_active())
   {
     ev_io_stop(EV_A_ &m_input_watcher);
@@ -82,4 +134,199 @@ void OutputDevice::stop_output_device()
   }
 }
 
+// Write `m_obuffer' to fd.
+void OutputDevice::write_to_fd(int fd)
+{
+  for (;;) // This runs over all allocated blocks, when we are done we 'return'.
+  {
+    size_t len; // Available number of characters in current block.
+    if (!(len = m_obuffer->buf2dev_contiguous())
+        && !(len = m_obuffer->buf2dev_contiguous_forced()))
+    {
+      Dout(dc::evio, "(Buffer now empty)");
+      // Note: A call to `m_obuffer->reduce_buffer_if_empty' is not necessary because
+      // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
+      // which calls `ishowmanyc' which calls `iunderflow' which reduces the buffer
+      // if necessary.
+      stop_output_device();	// Buffer is empty: reset fd bit for select(2) call
+      return;
+    }
+#if EWOULDBLOCK != EAGAIN
+    register int nr_eagain_errors = 1;
+try_again_write1:
+#endif
+    size_t wlen = ::write(fd, m_obuffer->buf2dev_ptr(), len);
+    if (wlen == (size_t)-1)
+    {
+#ifdef CWDEBUG
+      if (!is_debug_channel())
+      {
+        int err = errno;
+        Dout(dc::warning|error_cf,
+            "write(" << fd << ", " << buf2str(m_obuffer->buf2dev_ptr(), m_obuffer->buf2dev_contiguous()) << ", " << len << ')');
+        errno = err;
+      }
+      else
+        std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(errno) << std::endl;
+#endif
+      ASSERT(errno != EINTR); // FIXME, check for SIGPIPE
+      //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
+      //  continue;
+      if (errno == EWOULDBLOCK)
+        return;
+#if EWOULDBLOCK != EAGAIN
+      if (errno == EAGAIN)
+      {
+        if (nr_eagain_errors--)
+          goto try_again_write1;
+        return;
+      }
+#endif
+      write_error(errno);
+      return;
+    }
+    Dout(dc::system, "write(" << fd << ", \"" << buf2str(m_obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
+    m_obuffer->buf2dev_bump(wlen);
+    Dout(dc::evio, "Wrote " << wlen << " bytes to fd " << fd << '.' );
+    if (wlen < len)
+    {
+      Dout(dc::evio, "(Tried to write " << len << " bytes).");
+      return;			// We wrote as much as currently possible.
+    }
+  }
+}
+
+void InputDevice::read_from_fd(int fd)
+{
+  size_t space = m_ibuffer->dev2buf_contiguous();
+  for (;;)
+  {
+    // Allocate more space in the buffer if needed.
+    if (space == 0 &&
+        (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
+    {
+      // The buffer is full!
+      stop_input_device();              // Stop reading the filedescriptor.
+      return;                           // Next time better.
+    }
+
+    ssize_t rlen;
+    char* new_data = m_ibuffer->dev2buf_ptr();
+try_again_read1:
+    rlen = ::read(fd, new_data, space);
+
+    if (rlen == 0)                      // EOF reached ?
+    {
+      Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
+      stop_input_device();              // Stop reading the filedescriptor.
+      read_returned_zero();
+      return;                           // Next time better.
+    }
+
+    if (rlen == -1)                     // A read error occured ?
+    {
+      Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
+      ASSERT(errno != EINTR); // FIXME, check for SIGPIPE
+      //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
+      //  goto try_again_read1;
+      if (errno != EAGAIN && errno != EWOULDBLOCK)
+        read_error(errno);
+      return;                           // Next time better.
+    }
+
+    m_ibuffer->dev2buf_bump(rlen);
+
+    Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
+
+    data_received(new_data, rlen);
+
+    if (m_ibuffer->buffer_full())
+    {
+      Dout(dc::evio, "fd " << fd << ": Buffer full!");
+      stop_input_device();
+      // FIXME: This hangs !?
+      return;
+    }
+
+    // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
+    // read so far), and when using edge triggered epoll we must continue to call read until it returns EAGAIN.
+    if (rlen < space)   // Did we read everything, or process at least
+      return;           //  one message ?
+
+    space = 0;
+  }
+}
+
+void read_input_ct::data_received(char const* new_data, size_t rlen)
+{
+  size_t len;
+  while ((len = end_of_msg_finder(new_data, rlen)) > 0)
+  {
+    // We seem to have a complete new message and need to call `decode'
+    if (m_ibuffer->has_multiple_blocks())
+    {
+      // The new message must start at the beginning of the buffer,
+      // so the total length of the new message is total size of
+      // the buffer minus what was read on top of it.
+      size_t msg_len = m_ibuffer->used_size() - (rlen - len);
+
+      if (m_ibuffer->is_contiguous(msg_len))
+      {
+        MsgBlock msg_block(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node());
+        decode(msg_block);
+        m_ibuffer->raw_gbump(msg_len);
+      }
+      else
+      {
+        MemoryBlock* memory_block = MemoryBlock::create(msg_len);
+        AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
+        m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
+        MsgBlock msg_block(memory_block->block_start(), msg_len, memory_block);
+        decode(msg_block);
+        memory_block->release();
+      }
+
+      ASSERT(m_ibuffer->used_size() == rlen - len);
+
+      m_ibuffer->reduce_buf_if_empty();
+      if (is_disabled())
+        return;
+      rlen -= len;
+      if (rlen == 0)
+        break; // Buffer is precisely empty anyway.
+      new_data += len;
+      if ((len = end_of_msg_finder(new_data, rlen)) == 0)
+        break; // The rest is not a complete message.
+      // See if what is left in the buffer is a message too:
+    }
+    // At this point we have only one block left.
+    // The next loop eats up all complete messages in this last block.
+    do
+    {
+      char* start = m_ibuffer->raw_gptr();
+      size_t msg_len = (size_t)(new_data - start) + len;
+      MsgBlock msg_block(start, msg_len, m_ibuffer->get_get_area_block_node());
+      decode(msg_block);
+      m_ibuffer->raw_gbump(msg_len);
+
+      ASSERT(m_ibuffer->used_size() == rlen - len);
+
+      m_ibuffer->reduce_buf_if_empty();
+      if (is_disabled())
+        return;
+      rlen -= len;
+      if (rlen == 0)
+        break; // Buffer is precisely empty anyway.
+      new_data += len;
+    } while ((len = end_of_msg_finder(new_data, rlen)) > 0);
+    break;
+  }
+}
+
 } // namespace evio
+
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+channel_ct evio("EVIO");
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
