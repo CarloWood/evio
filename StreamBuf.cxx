@@ -27,7 +27,6 @@
 #include "sys.h"
 #include "debug.h"
 #include "StreamBuf.h"
-//#include "FileDescriptor.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #else

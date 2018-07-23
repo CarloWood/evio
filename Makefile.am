@@ -8,8 +8,10 @@ SOURCES = StreamBuf.cxx \
 	  StreamBuf.h \
 	  EventLoopThread.cxx \
 	  EventLoopThread.h \
-	  FileDescriptor.cxx \
-	  FileDescriptor.h
+	  Device.cxx \
+	  Device.h \
+	  File.cxx \
+	  File.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@ -pthread

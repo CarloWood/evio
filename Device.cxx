@@ -22,7 +22,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "sys.h"
-#include "FileDescriptor.h"
+#include "Device.h"
 #include "EventLoopThread.h"
 #include "libcwd/buf2str.h"
 #ifdef CW_CONFIG_NONBLOCK_SYSV
@@ -42,6 +42,11 @@ void InputDevice::init_input_device(int fd)
   ASSERT(!is_active());
   ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, fd, EV_READ);
   m_input_watcher.data = this;
+  // init() should be called immediately after opening a file descriptor.
+  // In fact, init must be called with a valid, open file descriptor.
+  // Here we mark that the file descriptor that corresponds to reading from
+  // this device is open.
+  m_flags |= FDS_R_OPEN;
 }
 
 void OutputDevice::init_output_device(int fd)
@@ -50,6 +55,9 @@ void OutputDevice::init_output_device(int fd)
   ASSERT(!is_active());
   ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, fd, EV_WRITE);
   m_output_watcher.data = this;
+  // Here we mark that the file descriptor that corresponds to writing to
+  // this device is open.
+  m_flags |= FDS_W_OPEN;
 }
 
 void set_nonblocking(int fd)
@@ -68,12 +76,23 @@ void set_nonblocking(int fd)
     perror("ioctl(fd, FIONBIO)");
 #else
   int res;
-  if ((res = fcntl(fd, F_GETFL, 0)) == -1)
+  if ((res = fcntl(fd, F_GETFL)) == -1)
     perror("fcntl(fd, F_GETFL)");
   else if (fcntl(fd, F_SETFL, res | nonb) == -1)
     perror("fcntl(fd, F_SETL, nonb)");
 #endif
   return;
+}
+
+bool is_valid(int fd)
+{
+#ifdef _WIN32
+  return EV_FD_TO_WIN32_HANDLE (fd) != -1;
+#elif defined(CW_CONFIG_NONBLOCK_SYSV)
+#error "Not implemented."
+#else
+  return fcntl(fd, F_GETFL) != -1;
+#endif
 }
 
 void InputDevice::start_input_device()
@@ -100,7 +119,7 @@ void OutputDevice::start_output_device()
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  // Increment ref count with once, clearing FDS_REMOVE, to stop
+  // Increment ref count with one, clearing FDS_REMOVE, to stop
   // this object from being removed until del() is called.
   if ((m_flags & FDS_REMOVE))
   {
@@ -123,6 +142,16 @@ void InputDevice::stop_input_device()
     ev_io_stop(EV_A_ &m_input_watcher);
     intrusive_ptr_release(this);
   }
+  // The filedescriptor, when open, is still considered to be open:
+  // A subsequent call to start_input_device() will resume handling it.
+  // Obviously this means that FDS_REMOVE may not be set if the fd is still open.
+  ASSERT(!is_open_r() || !(m_flags & FDS_REMOVE));
+}
+
+int InputDevice::get_input_fd()
+{
+  // Return the raw fd as passed to init_input_device.
+  return m_input_watcher.fd;
 }
 
 void OutputDevice::stop_output_device()
@@ -132,6 +161,16 @@ void OutputDevice::stop_output_device()
     ev_io_stop(EV_A_ &m_output_watcher);
     intrusive_ptr_release(this);
   }
+  // The filedescriptor, when open, is still considered to be open:
+  // A subsequent call to start_output_device() will resume handling it.
+  // Obviously this means that FDS_REMOVE may not be set if the fd is still open.
+  ASSERT(!is_open_w() || !(m_flags & FDS_REMOVE));
+}
+
+int OutputDevice::get_output_fd()
+{
+  // Return the raw fd as passed to init_output_device.
+  return m_output_watcher.fd;
 }
 
 // Write `m_obuffer' to fd.
@@ -257,7 +296,7 @@ try_again_read1:
   }
 }
 
-void read_input_ct::data_received(char const* new_data, size_t rlen)
+void ReadInputDevice::data_received(char const* new_data, size_t rlen)
 {
   size_t len;
   while ((len = end_of_msg_finder(new_data, rlen)) > 0)

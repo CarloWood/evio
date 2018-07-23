@@ -1,7 +1,7 @@
 // evio -- Event Driven I/O support.
 //
 //! @file
-//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, no_input_ct and no_output_ct.
+//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, InputDeviceStream, OutputDeviceStream, ReadInputDevice, ReadInputDeviceStream, WriteOutputDevice, WriteOutputDeviceStream, LinkBase, LinkInputDevice and LinkOutputDevice.
 //
 // Copyright (C) 2018 Carlo Wood.
 //
@@ -31,24 +31,21 @@ class EventLoopThread;
 
 namespace evio {
 
-class no_input_ct;	// Classes used for dummy linkage to an input/output device.
-class no_output_ct;
-
-class input_link_ct;	// Base classes for use with objects that read
-class output_link_ct;	// from output buffers, or write to input buffers
+class LinkInputDevice;	// Base classes for use with objects that read
+class LinkOutputDevice;	// from output buffers, or write to input buffers
                         // of other objects.
 
 class InputDevice;	// Base classes for general linkage to an input/output device.
 class OutputDevice;
 
-class read_input_ct;	// Base classes with a default read(2), write(2)
-class write_output_ct;  // implementation.
+class ReadInputDevice;	// Base classes with a default read(2), write(2)
+class WriteOutputDevice;  // implementation.
 
-class istream_ct;	// Same as InputDevice with istream interface.
-class ostream_ct;	// Same as OutputDevice with ostream interface.
+class InputDeviceStream;	// Same as InputDevice with istream interface.
+class OutputDeviceStream;	// Same as OutputDevice with ostream interface.
 
-class read_istream_ct;	// Same as read_input_ct with istream interface.
-class write_ostream_ct; // Same as write_output_ct with ostream interface.
+class ReadInputDeviceStream;	// Same as ReadInputDevice with istream interface.
+class WriteOutputDeviceStream; // Same as WriteOutputDevice with ostream interface.
 
 /******************************************************************************
 
@@ -83,8 +80,6 @@ virtual functions of InputDevice
     // buffer reduces size.
     // Access to the buffer should be implemented by means of calling
     // methods of Dev2Buf.
-    //
-    // This method is overridden by no_input_ct.
 
   virtual void read_returned_zero();
     // read(2) returned the value 0.
@@ -102,7 +97,7 @@ virtual functions of InputDevice
     // New data was read from the fd.
     // The default behavior is to do nothing.
     //
-    // This method is overridden by read_input_ct.
+    // This method is overridden by ReadInputDevice.
 
 virtual functions of OutputDevice
 ---------------------------------
@@ -115,13 +110,11 @@ virtual functions of OutputDevice
     // empty).
     // Access to the buffer should be implemented by means of calling
     // methods of `streambuf'.
-    //
-    // This method is overridden by no_output_ct.
 
   virtual void write_error(int err);
     // write(2) returned a (fatal) error. Take action according to `err'.
 
-virtual functions of read_input_ct
+virtual functions of ReadInputDevice
 ----------------------------------
 
   void data_received(char const* new_data, size_t rlen) override;
@@ -129,14 +122,14 @@ virtual functions of read_input_ct
     // functions below.
 
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) const = 0;
-    // Called by the default read_input_ct::data_received.
+    // Called by the default ReadInputDevice::data_received.
     //
     // This method should be implemented by a user class and return a value
     // larger than zero, the length of the next message, when a complete message
     // is available. Zero otherwise.
 
   virtual void decode(MsgBlock msg) = 0;
-    // Called by the default read_input_ct::data_received when end_of_msg_finder
+    // Called by the default ReadInputDevice::data_received when end_of_msg_finder
     // found a new message. Msg is the new, contiguous, message.
     //
     // This method should be implemented by a user class.
@@ -145,6 +138,8 @@ virtual functions of read_input_ct
 
 // Set filedescriptor fd to non-blocking.
 void set_nonblocking(int fd);
+// Return true if fd is a valid open filedescriptor.
+bool is_valid(int fd);
 
 //=============================================================================
 //
@@ -156,22 +151,25 @@ void set_nonblocking(int fd);
 
 class IOBase : public AIRefCount
 {
-  using flags_t = uint32_t;
  protected:
-  static flags_t constexpr FDS_RW        = 0x60000000;
-  static flags_t constexpr FDS_W         = 0x40000000;
-  static flags_t constexpr FDS_R         = 0x20000000;
-  static flags_t constexpr FDS_CHK_EMPTY = 0x10000000;
-  static flags_t constexpr FDS_ALIVE     = 0x70000000;
-  static flags_t constexpr FDS_REMOVE    = 0x08000000;
-  static flags_t constexpr FDS_DEAD      = 0x04000000;
-  static flags_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x02000000;
-  static flags_t constexpr FDS_DONT_CLOSE_ON_DEL   = 0x01000000;
-  static flags_t constexpr FDS_LINKED    = 0x00800000;
-  static flags_t constexpr FDS_DISABLED  = 0x00400000;
-  static flags_t constexpr FDS_BLOCKING  = 0x00200000;
+  using flags_t = uint32_t;
+  static int constexpr disabled_shft = 2;
+  static int constexpr open_shft = 4;
+  static flags_t constexpr FDS_W                   = 0x80000000;
+  static flags_t constexpr FDS_R                   = 0x40000000;
+  static flags_t constexpr FDS_RW                  = FDS_R | FDS_W;
+  static flags_t constexpr FDS_W_DISABLED          = 0x20000000;        // Must be FDS_W >> disabled_shft.
+  static flags_t constexpr FDS_R_DISABLED          = 0x10000000;        // Must be FDS_R >> disabled_shft.
+  static flags_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
+  static flags_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
+  static flags_t constexpr FDS_CHK_EMPTY           = 0x02000000;
+  static flags_t constexpr FDS_REMOVE              = 0x01000000;
+  static flags_t constexpr FDS_DEAD                = 0x00800000;
+  static flags_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
+  static flags_t constexpr FDS_DONT_CLOSE_ON_DEL   = 0x00200000;
+  static flags_t constexpr FDS_LINKED              = 0x00100000;
 #ifdef CWDEBUG
-  static flags_t constexpr FDS_DEBUG     = 0x00100000;
+  static flags_t constexpr FDS_DEBUG               = 0x00080000;
 #endif
 
   flags_t m_flags;
@@ -189,6 +187,8 @@ class IOBase : public AIRefCount
   virtual void disable_output_device() { }
   virtual void enable_input_device() { }
   virtual void enable_output_device() { }
+  virtual int get_input_fd() { return -1; }
+  virtual int get_output_fd() { return -1; }
 
  protected:
   IOBase() : m_flags(0) { }
@@ -201,56 +201,74 @@ class IOBase : public AIRefCount
   //
 
   // Return true if this object is a base class of OutputDevice.
-  bool writable_type(void) const { return m_flags & FDS_W; }
+  bool writable_type() const { return m_flags & FDS_W; }
 
   // Return true if this object is a base class of InputDevice.
-  bool readable_type(void) const { return m_flags & FDS_R; }
+  bool readable_type() const { return m_flags & FDS_R; }
 
   // Returns true if this object is a writable device.
-  bool is_writable(void) const { return (m_flags & (FDS_W|FDS_DISABLED|FDS_DEAD)) == FDS_W; }
+  bool is_writable() const { return (m_flags & (FDS_W|FDS_W_DISABLED|FDS_DEAD)) == FDS_W; }
 
   // Returns true if this object is a readable device.
   // Note: Objects that should be removed must not be read.
-  bool is_readable(void) const { return (m_flags & (FDS_R|FDS_DISABLED|FDS_REMOVE|FDS_DEAD)) == FDS_R; }
+  bool is_readable() const { return (m_flags & (FDS_R|FDS_R_DISABLED|FDS_REMOVE|FDS_DEAD)) == FDS_R; }
 
   // Returns true if this object is not associated with a working fd.
-  // Note: Isn't this always the same as !is_open() ?
-  bool is_dead(void) const { return m_flags & FDS_DEAD; }
+  bool is_dead() const { return m_flags & FDS_DEAD; }
 
   // Returns true if this object is disabled at this moment.
-  bool is_disabled(void) const { return m_flags & FDS_DISABLED; }
+  bool is_disabled() const { return m_flags & ((m_flags & FDS_RW) >> 8); }
 
-  // Returns true if the underlaying file descriptor wasn't set to non-blocking yet.
-  bool is_blocking(void) const { return m_flags & FDS_BLOCKING; }
+  // Returns true if this object is write disabled at this moment (aka, is a writable device and writing is disabled).
+  bool is_write_disabled() const { return m_flags & ((m_flags & FDS_W) >> 8); }
+
+  // Returns true if this object is read disabled at this moment (aka, is a readable device and reading is disabled).
+  bool is_read_disabled() const { return m_flags & ((m_flags & FDS_R) >> 8); }
 
   // Returns true if this object is scheduled for removal.
-  bool must_be_removed(void) const { return m_flags & FDS_REMOVE; }
+  bool must_be_removed() const { return m_flags & FDS_REMOVE; }
 
   // Returns true if this object/node is linked into libev.
-  bool is_linked(void) const { return m_flags & FDS_LINKED; }
+  bool is_linked() const { return m_flags & FDS_LINKED; }
 
   // Accessor that returns true if the write buffer is possibly empty.
   // We assume that the buffer is possibly empty when the last call
   // to select(2) we didn't monitor this object for writability.
-  bool writebuf_is_maybe_empty(void) const { return m_flags & FDS_CHK_EMPTY; }
+  bool writebuf_is_maybe_empty() const { return m_flags & FDS_CHK_EMPTY; }
 
   // Return true if this object is marked that it should not close its fd.
-  bool dont_close(void) { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
+  bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
 
   // Return true if this object is marked that it should not close
   // its fd when del() is called.
-  bool dont_close_on_del(void) { return m_flags & FDS_DONT_CLOSE_ON_DEL; }
+  bool dont_close_on_del() const { return m_flags & FDS_DONT_CLOSE_ON_DEL; }
+
+  // Return true if this object has at least one open filedescriptor.
+  bool is_open() const { return m_flags & (m_flags & FDS_RW) >> open_shft; }
+
+  // Return true if this object is marked as having an open fd for writing.
+  bool is_open_w() const { return m_flags & FDS_W_OPEN; }
+
+  // Return true if this object is marked as having an open fd for reading.
+  bool is_open_r() const { return m_flags & FDS_R_OPEN; }
 
 #ifdef CWDEBUG
   // Returns true if this object is used for debug output.
   // If it is, then no new debug output will be produced by the kernel while handling it.
-  bool is_debug_channel(void) const { return m_flags & FDS_DEBUG; }
+  bool is_debug_channel() const { return m_flags & FDS_DEBUG; }
 #endif
 
  public:
-  // (Re)Initialize the FileDescriptor.
+  // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd)
   {
+    // Only call init() with a valid, open filedescriptor.
+    ASSERT(is_valid(fd));
+
+    // All filedescriptors must be non-blocking because we work with edge-triggered epoll.
+    set_nonblocking(fd);
+    // Reset all flags except FDS_RW.
+    m_flags &= ~FDS_RW;
     init_input_device(fd);
     init_output_device(fd);
     // Make file descriptor non-blocking by default.
@@ -271,13 +289,13 @@ class IOBase : public AIRefCount
     stop_output_device();
   }
 
-  void disable(void)
+  void disable()
   {
     disable_input_device();
     disable_output_device();
   }
 
-  void enable(void)
+  void enable()
   {
     enable_input_device();
     enable_output_device();
@@ -290,6 +308,36 @@ class IOBase : public AIRefCount
       m_flags |= FDS_REMOVE;
       stop_input_device();
       intrusive_ptr_release(this);
+    }
+  }
+
+  void ansi_close()
+  {
+    int input_fd = get_input_fd();
+    int output_fd = get_output_fd();
+    if (!(input_fd == -1 || is_valid(input_fd)))
+    {
+      Dout(dc::warning, "Calling IOBase::ansi_close on object with input fd = " << input_fd << " that isn't open.");
+      return;
+    }
+    else if (!(output_fd == -1 || is_valid(output_fd)))
+    {
+      Dout(dc::warning, "Calling IOBase::ansi_close on object with output fd = " << output_fd << " that isn't open.");
+      return;
+    }
+    stop_input_device();
+    stop_output_device();
+    if (input_fd != -1)
+    {
+      DEBUG_ONLY(int err = )
+      ::close(input_fd);
+      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
+    }
+    if (output_fd != -1 && output_fd != input_fd)
+    {
+      DEBUG_ONLY(int err = )
+      ::close(output_fd);
+      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
     }
   }
 };
@@ -305,15 +353,19 @@ class IOBase : public AIRefCount
 class InputDevice : public virtual IOBase
 {
  public:
-  // The default blocksize for your `dbstreambuf_ct' input buffers, used
+  // The default blocksize for your `StreamBuf' input buffers, used
   // when you don't pass that size to the constructors.
   static size_t constexpr default_blocksize_c = 512;
+
+  // Used default posix mode for opening files, when you don't pass it to the constructor.
+  static int const mode = std::ios_base::in;
 
  protected:
   //---------------------------------------------------------------------------
   // The input buffer
   //
 
+  using buffer_type = InputBuffer;
   InputBuffer* m_ibuffer;       // A pointer to the input buffer.
 
  private:
@@ -329,6 +381,7 @@ class InputDevice : public virtual IOBase
  protected:
   void start_input_device() override;
   void stop_input_device() override;
+  int get_input_fd() override;
 
  protected:
   //---------------------------------------------------------------------------
@@ -366,7 +419,7 @@ class InputDevice : public virtual IOBase
   //
 
   // Supposed to be used for passing it to other device constructors.
-  Dev2Buf* rddbbuf(void) const { return m_ibuffer; }
+  Dev2Buf* rddbbuf() const { return m_ibuffer; }
 
   // Returns true if our watcher is linked in with libev.
   bool is_active() const { return ev_is_active(&m_input_watcher); }
@@ -378,13 +431,13 @@ class InputDevice : public virtual IOBase
 
   void disable_input_device() override
   {
-    m_flags |= FDS_DISABLED;
+    m_flags |= FDS_R_DISABLED;
     stop_input_device();
   }
 
   void enable_input_device() override
   {
-    m_flags &= ~FDS_DISABLED;
+    m_flags &= ~FDS_R_DISABLED;
     if (is_readable())
       start_input_device();
   }
@@ -404,13 +457,13 @@ class InputDevice : public virtual IOBase
   virtual void read_from_fd(int fd);
 
   // The default behaviour is to del() the object.
-  virtual void read_returned_zero(void) { del(); }
+  virtual void read_returned_zero() { del(); }
 
   // The default behaviour is to del() this object.
   virtual void read_error(int UNUSED_ARG(err)) { del(); }
 
   // The default behavior is to do nothing.
-  virtual void data_received(char const* new_data, size_t rlen);
+  virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
 };
 
 
@@ -424,15 +477,19 @@ class InputDevice : public virtual IOBase
 class OutputDevice : public virtual IOBase
 {
  public:
-  // The default blocksize for your `dbstreambuf_ct' output buffers, used
+  // The default blocksize for your `StreamBuf' output buffers, used
   // when you don't pass that size to the constructors.
   static size_t constexpr default_blocksize_c = 2048;
+
+  // Used default posix mode for opening files, when you don't pass it to the constructor.
+  static int const mode = std::ios_base::out;
 
  protected:
   //---------------------------------------------------------------------------
   // The output buffer
   //
 
+  using buffer_type = OutputBuffer;
   OutputBuffer* m_obuffer;      // A pointer to the output buffer.
 
  private:
@@ -448,6 +505,7 @@ class OutputDevice : public virtual IOBase
  protected:
   void start_output_device() override;
   void stop_output_device() override;
+  int get_output_fd() override;
 
  protected:
   //---------------------------------------------------------------------------
@@ -491,9 +549,6 @@ class OutputDevice : public virtual IOBase
   // This default implementation `close's the object (which removes it).
   virtual void write_error(int UNUSED_ARG(err)) { close(); }
 
-  // Returns true if the output buffer is empty.
-  virtual bool writebuf_is_really_empty(void) const = 0;
-
  private:
   // The call back used by libev.
   static void s_evio_cb(EV_P_ ev_io* w, int) { static_cast<OutputDevice*>(w->data)->write_to_fd(w->fd); }
@@ -504,7 +559,7 @@ class OutputDevice : public virtual IOBase
   //
 
   // Supposed to be used for passing it to other device constructors.
-  Buf2Dev* rddbbuf(void) const { return m_obuffer; }
+  Buf2Dev* rddbbuf() const { return m_obuffer; }
 
   // Returns true if our watcher is linked in with libev.
   bool is_active() const { return ev_is_active(&m_output_watcher); }
@@ -516,13 +571,13 @@ class OutputDevice : public virtual IOBase
 
   void disable_output_device() override
   {
-    m_flags |= FDS_DISABLED;
+    m_flags |= FDS_W_DISABLED;
     stop_output_device();
   }
 
   void enable_output_device() override
   {
-    m_flags &= ~FDS_DISABLED;
+    m_flags &= ~FDS_W_DISABLED;
     if (is_writable())
       start_output_device();
   }
@@ -533,32 +588,21 @@ class OutputDevice : public virtual IOBase
   }
 };
 
-//=============================================================================
-//
-// class no_input_ct
-//
-
-class no_input_ct : public InputDevice
-{
- protected:
-  no_input_ct(InputBuffer* ibuf) : InputDevice(ibuf) { }
-  void read_from_fd(int) override { stop_input_device(); }
-};
-
 
 //=============================================================================
 //
-// class istream_ct
+// class InputDeviceStream
 //
 
-class istream_ct : public InputDevice, public std::istream
+class InputDeviceStream : public InputDevice, public std::istream
 {
-  using iostreamT = std::istream;
  protected:
-  istream_ct(InputBuffer* ibuf) : InputDevice(ibuf), std::istream(ibuf) { }
+  using iostream_type = std::istream;
+  InputDeviceStream(InputBuffer* ibuf) : InputDevice(ibuf), std::istream(ibuf) { }
 };
 
 
+#if 0
 //=============================================================================
 //
 // class no_output_ct
@@ -572,33 +616,31 @@ class no_output_ct : public OutputDevice
   {
     DoutFatal(dc::core, "Don't write data to \"no_output_ct\"");
   }
-
-  // We never have anything to write.
-  bool writebuf_is_really_empty() const override { return true; }
 };
+#endif
 
 
 //=============================================================================
 //
-// class ostream_ct
+// class OutputDeviceStream
 //
 
-class ostream_ct : public OutputDevice, public std::ostream
+class OutputDeviceStream : public OutputDevice, public std::ostream
 {
-  using iostreamT = std::ostream;
  protected:
-  ostream_ct(OutputBuffer* obuf) :OutputDevice(obuf), std::ostream(obuf) { }
+  using iostream_type = std::ostream;
+  OutputDeviceStream(OutputBuffer* obuf) :OutputDevice(obuf), std::ostream(obuf) { }
 };
 
 
 //=============================================================================
 //
-// class read_input_ct
+// class ReadInputDevice
 //
 // Base class for reading from a device, using a general read(2) implementation.
 //
 
-class read_input_ct : public InputDevice
+class ReadInputDevice : public InputDevice
 {
  protected:
   // The pure virtual function end_of_msg_finder(char const*, size_t) const
@@ -620,34 +662,34 @@ class read_input_ct : public InputDevice
   // Constructor:
   //
 
-  read_input_ct(InputBuffer* ibuf) : InputDevice(ibuf) { }
+  ReadInputDevice(InputBuffer* ibuf) : InputDevice(ibuf) { }
 };
 
 //=============================================================================
 //
-// class read_istream_ct
+// class ReadInputDeviceStream
 //
 
-class read_istream_ct : public read_input_ct, public std::istream
+class ReadInputDeviceStream : public ReadInputDevice, public std::istream
 {
-  using iostreamT = std::istream;
  protected:
-  read_istream_ct(InputBuffer* ibuf) : read_input_ct(ibuf), std::istream(ibuf) { }
+  using iostream_type = std::istream;
+  ReadInputDeviceStream(InputBuffer* ibuf) : ReadInputDevice(ibuf), std::istream(ibuf) { }
 };
 
 //=============================================================================
-// class link_ct
+// class LinkBase
 //
-// The common part of input_link_ct and output_link_ct
+// The common part of LinkInputDevice and LinkOutputDevice
 //
 
-class link_ct
+class LinkBase
 {
- public:
-  using buffer_ct = LinkBuffer;     // The type of the "link buffer".
+ protected:
+  using buffer_type = LinkBuffer;       // The type of the "link buffer".
 
  public:
-  // The default blocksize for your `dbstreambuf_ct' link buffers, used
+  // The default blocksize for your `StreamBuf' link buffers, used
   // when you don't pass that size to the constructors.
   static size_t constexpr default_blocksize_c = 2048;
 
@@ -656,24 +698,24 @@ class link_ct
   // Constructor:
   //
 
-  link_ct(void) { }
+  LinkBase() { }
 
   // Disallow copy constructing.
-  link_ct(link_ct const&) = delete;
+  LinkBase(LinkBase const&) = delete;
 };
 
 
 //=============================================================================
 //
-// class input_link_ct
+// class LinkInputDevice
 //
 // Base class which only reads data from its fd and writes it into the buffer.
 //
 
-class input_link_ct : public InputDevice, public link_ct
+class LinkInputDevice : public LinkBase, public InputDevice
 {
  public:
-  using buflinkT = output_link_ct;
+  using buflink_type = LinkOutputDevice;
 
  public:
   // Used default posix mode for opening files, when you don't pass it to
@@ -686,7 +728,7 @@ class input_link_ct : public InputDevice, public link_ct
   //
 
   // Supposed to be used for passing it to other device constructors.
-  Dev2Buf* rddbbuf(void) const { return m_ibuffer; }
+  Dev2Buf* rddbbuf() const { return m_ibuffer; }
 
  protected:
   //---------------------------------------------------------------------------
@@ -695,60 +737,57 @@ class input_link_ct : public InputDevice, public link_ct
   // Protected: May only be constructed by dbbuf_fd_dtct
   //
 
-  input_link_ct(LinkBuffer* lbuf) : InputDevice(lbuf) { }
+  LinkInputDevice(LinkBuffer* lbuf) : InputDevice(lbuf) { }
 };
 
 
 //=============================================================================
 //
-// class write_output_ct
+// class WriteOutputDevice
 //
 // Base class to write to a device, using a default write(2) implementation.
 //
 
-class write_output_ct : public OutputDevice
+class WriteOutputDevice : public OutputDevice
 {
  public:
   //---------------------------------------------------------------------------
   // Accessors
   //
 
-  // Returns true if the output buffer is empty.
-  bool writebuf_is_really_empty(void) const override;
-
  protected:
   //---------------------------------------------------------------------------
   // Constructor:
   //
 
-  write_output_ct(OutputBuffer* obuf) : OutputDevice(obuf) { }
+  WriteOutputDevice(OutputBuffer* obuf) : OutputDevice(obuf) { }
 };
 
 
 //=============================================================================
 //
-// class write_ostream_ct
+// class WriteOutputDeviceStream
 //
 
-class write_ostream_ct : public write_output_ct, public std::ostream
+class WriteOutputDeviceStream : public WriteOutputDevice, public std::ostream
 {
-  using iostreamT = std::ostream;
  protected:
-  write_ostream_ct(OutputBuffer* obuf) : write_output_ct(obuf), std::ostream(obuf) { }
+  using iostream_type = std::ostream;
+  WriteOutputDeviceStream(OutputBuffer* obuf) : WriteOutputDevice(obuf), std::ostream(obuf) { }
 };
 
 
 //=============================================================================
 //
-// class output_link_ct
+// class LinkOutputDevice
 //
 // Base class which only reads data from its buffer and writes it to the fd.
 //
 
-class output_link_ct : public OutputDevice, public link_ct
+class LinkOutputDevice : public LinkBase, public OutputDevice
 {
  public:
-  using buflinkT = input_link_ct;
+  using buflink_type = LinkInputDevice;
 
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int constexpr mode = std::ios_base::out;
@@ -760,15 +799,7 @@ class output_link_ct : public OutputDevice, public link_ct
   // Protected: May only be constructed by dbbuf_fd_dtct
   //
 
-  output_link_ct(LinkBuffer* lbuf) : OutputDevice(lbuf->as_Buf2Dev()) { }
-
- public:
-  //---------------------------------------------------------------------------
-  // Accessors
-  //
-
-  // Returns true if the output buffer is empty.
-  bool writebuf_is_really_empty(void) const override;
+  LinkOutputDevice(LinkBuffer* lbuf) : OutputDevice(lbuf->as_Buf2Dev()) { }
 };
 
 } // namespace evio
