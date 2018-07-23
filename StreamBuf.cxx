@@ -140,10 +140,10 @@ StreamBuf::int_type StreamBuf::overflow(int_type c)
   return 0;
 }
 
-int StreamBuf::iunderflow(void)
+int StreamBuf::iunderflow()
 {
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "iunderflow(void):" << endl;
+  cerr << "iunderflow():" << endl;
   printOn(cerr);
 #endif
   if (get_area_block_node == put_area_block_node)
@@ -235,7 +235,7 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
   return 0;
 }
 
-std::streamsize StreamBuf::ishowmanyc(void)
+std::streamsize StreamBuf::ishowmanyc()
 {
   if (get_area_block_node == put_area_block_node)
     isetg(ieback(), igptr(), pptr());
@@ -336,7 +336,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
 streamsize StreamBuf::xsputn(char const* s, streamsize n)
 {
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "StreamBuf::xsputn(" << buf2str(s, n) << ", " << n << ")" << endl;
+  cerr << "StreamBuf::xsputn(\"" << buf2str(s, n) << "\", " << n << ")" << endl;
   printOn(cerr);
 #endif
   register char const* sp = s;
@@ -415,7 +415,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
   isetg(start, start, start);
 }
 
-size_t StreamBuf::new_block_size(void) const
+size_t StreamBuf::new_block_size() const
 {
   register size_t nl = used_size();
   register size_t l2 = get_log2_min_buf_size();
@@ -429,7 +429,7 @@ size_t StreamBuf::new_block_size(void) const
   return nl - malloc_overhead_c - sizeof(MemoryBlock);
 }
 
-void StreamBuf::reduce_buffer(void)
+void StreamBuf::reduce_buffer()
 {
   size_t new_block_size = minimum_block_size();
   if (get_area_block_node->used() == 1)		// Only used by buffer
@@ -451,19 +451,19 @@ void StreamBuf::reduce_buffer(void)
   setp(start, start + new_block_size);		// note: get_area_block_node == put_area_block_node (the buffer is empty)
 }
 
-int StreamBuf::sync(void)
+int StreamBuf::sync()
 {
   //FIXME return ((odevice && odevice->sync(this)) || (idevice && idevice->sync(NULL)));
   return 0;
 }
 
-void StreamBuf::idevice_del(void)
+void StreamBuf::idevice_del()
 {
   DoutFatal(dc::core, "When do we get here?");
   //FIXME idevice->del();
 }
 
-void StreamBuf::odevice_del(void)
+void StreamBuf::odevice_del()
 {
   DoutFatal(dc::core, "When do we get here?");
   //FIXME odevice->del();

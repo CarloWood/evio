@@ -137,10 +137,6 @@ struct MemoryBlock
   }
 };
 
-#ifdef CWDEBUG
-std::ostream& operator<<(std::ostream& os, MsgBlock const& msg);
-#endif
-
 //=============================================================================
 //
 // class MemoryBlocksBuffer
@@ -309,11 +305,6 @@ class MsgBlock
   char const* get_start() const { return start; }
   size_t get_size() const { return size; }
 };
-
-inline std::ostream& operator<<(std::ostream& os, MsgBlock const& msg_block)
-{
-  os.write(msg_block.get_start(), msg_block.get_size()); return os;
-}
 
 //=============================================================================
 //
@@ -777,14 +768,6 @@ inline bool StreamBuf::is_contiguous(size_t len) const
   return (igptr() + len <= get_area_block_node->block_start() + get_area_block_node->get_size());
 }
 
-#ifdef CWDEBUG
-inline std::ostream& operator<<(std::ostream& os, StreamBuf const& db)
-{
-  db.printOn(os);
-  return os;
-}
-#endif
-
 inline void StreamBuf::set_input_device(InputDevice* device)
 {
   ++device_counter;
@@ -808,3 +791,16 @@ inline void StreamBuf::reduce_buffer_if_empty()
 }
 
 } // namespace evio
+
+#ifdef CWDEBUG
+inline std::ostream& operator<<(std::ostream& os, evio::MsgBlock const& msg_block)
+{
+  os.write(msg_block.get_start(), msg_block.get_size()); return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, evio::StreamBuf const& db)
+{
+  db.printOn(os);
+  return os;
+}
+#endif
