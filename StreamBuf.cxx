@@ -27,6 +27,7 @@
 #include "sys.h"
 #include "debug.h"
 #include "StreamBuf.h"
+#include "Device.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #else
@@ -122,8 +123,8 @@ void StreamBuf::printOn(ostream& os) const
 
 StreamBuf::int_type StreamBuf::overflow(int_type c)
 {
+  DoutEntering(dc::evio, "StreamBuf::overflow(" << (char)c << ") [" << (void*)this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "overflow(" << (char)c << "):" << endl;
   printOn(cerr);
 #endif
   if (c == static_cast<int_type>(EOF))
@@ -142,8 +143,8 @@ StreamBuf::int_type StreamBuf::overflow(int_type c)
 
 int StreamBuf::iunderflow()
 {
+  DoutEntering(dc::evio, "iunderflow() [" << (void*)this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "iunderflow():" << endl;
   printOn(cerr);
 #endif
   if (get_area_block_node == put_area_block_node)
@@ -153,9 +154,9 @@ int StreamBuf::iunderflow()
       // The buffer is empty
       reduce_buffer();
 #ifdef DEBUGDBSTREAMBUF
-      cerr << "Returning EOF" << endl;
       printOn(cerr);
 #endif
+      Dout(dc::evio, "Returning EOF");
       return EOF;
     }
     isetg(ieback(), igptr(), pptr());
@@ -175,9 +176,9 @@ int StreamBuf::iunderflow()
 	  setp(pbase(), epptr());		// Buffer empty, set pointers
 	  isetg(start, start, start);		// at beginning of single block
 #ifdef DEBUGDBSTREAMBUF
-	  cerr << "Returning EOF" << endl;
 	  printOn(cerr);
 #endif
+          Dout(dc::evio, "Returning EOF");
 	  return EOF;
 	}
 	isetg(start, start, pptr());
@@ -196,16 +197,16 @@ int StreamBuf::iunderflow()
 
 StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 {
+  DoutEntering(dc::evio|continued_cf, "ipbackfail(" << c << ") [" << (void*)this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "ipbackfail(" << c << ")" << endl;
   printOn(cerr);
 #endif
   if (c == static_cast<int_type>(EOF))
   {
 #ifdef DEBUGDBSTREAMBUF
-    cerr << "Returning 0" << endl;
     printOn(cerr);
 #endif
+    Dout(dc::finish, "Returning 0");
     return 0;
   }
   if (igptr() > get_area_block_node->block_start())
@@ -215,14 +216,15 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 #ifdef DEBUGDBSTREAMBUF
     printOn(cerr);
 #endif
+    Dout(dc::finish, "Returning 0");
     return 0;
   }
   if (!output_buffer.push_front(new_block_size()))
   {
 #ifdef DEBUGDBSTREAMBUF
-    cerr << "Out of memory, returning EOF" << endl;
     printOn(cerr);
 #endif
+    Dout(dc::finish, "Out of memory, returning EOF");
     return static_cast<int_type>(EOF);
   }
   get_area_block_node = output_buffer.front();
@@ -232,6 +234,7 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
+  Dout(dc::finish, "Returning 0");
   return 0;
 }
 
@@ -246,8 +249,8 @@ std::streamsize StreamBuf::ishowmanyc()
 
 streamsize StreamBuf::ixsgetn(char* s, streamsize n)
 {
+  DoutEntering(dc::evio|continued_cf, "StreamBuf::ixsgetn(s, " << n << ") [" << (void*)this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "StreamBuf::ixsgetn(s, " << n << ")" << endl;
   printOn(cerr);
 #endif
 
@@ -262,8 +265,8 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
       isetg(ieback(), _igptr + n, _pptr);
 #ifdef DEBUGDBSTREAMBUF
       printOn(cerr);
-      cerr << "Returning " << n << endl;
 #endif
+      Dout(dc::finish, "Returning " << n);
       return n;
     }
     memcpy(s, _igptr, len);
@@ -271,8 +274,8 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
     setp(pbase(), epptr());		//
 #ifdef DEBUGDBSTREAMBUF
     printOn(cerr);
-    cerr << "Returning " << len << endl;
 #endif
+    Dout(dc::finish, "Returning " << len);
     return len;
   }
   register streamsize len = ieback() + get_area_block_node->get_size() - igptr();
@@ -282,8 +285,8 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
     isetg(ieback(), igptr() + n, ieback() + get_area_block_node->get_size());
 #ifdef DEBUGDBSTREAMBUF
     printOn(cerr);
-    cerr << "Returning " << n << endl;
 #endif
+    Dout(dc::finish, "Returning " << n);
     return n;
   }
   memcpy(s, igptr(), len);
@@ -300,8 +303,8 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
       isetg(start, start + n, start + get_area_block_node->get_size());
 #ifdef DEBUGDBSTREAMBUF
       printOn(cerr);
-      cerr << "Returning " << len + n << endl;
 #endif
+      Dout(dc::finish, "Returning " << (len + n));
       return len + n;
     }
     register size_t block_size = get_area_block_node->get_size();
@@ -319,8 +322,8 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
     isetg(pbase(), pbase() + n, pptr());
 #ifdef DEBUGDBSTREAMBUF
     printOn(cerr);
-    cerr << "Returning " << len + n << endl;
 #endif
+    Dout(dc::finish, "Returning " << (len + n));
     return len + n;
   }
   memcpy(s, pbase(), left);
@@ -328,15 +331,15 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
   pbump(-left);				//
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
-  cerr << "Returning " << len + left << endl;
 #endif
+  Dout(dc::finish, "Returning " << (len + left));
   return len + left;
 }
 
 streamsize StreamBuf::xsputn(char const* s, streamsize n)
 {
+  DoutEntering(dc::evio, "StreamBuf::xsputn(\"" << buf2str(s, n) << "\", " << n << ") [" << (void*)this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "StreamBuf::xsputn(\"" << buf2str(s, n) << "\", " << n << ")" << endl;
   printOn(cerr);
 #endif
   register char const* sp = s;
@@ -356,10 +359,10 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
     if (!output_buffer.push_back(block_size))
     {
 #ifdef DEBUGDBSTREAMBUF
-      cerr << "Buffer full, returning " << left << endl;
       printOn(cerr);
 #endif
       pbump(left);
+      Dout(dc::warning, "Buffer full, returning " << left);
       return left;
     }
     put_area_block_node = output_buffer.back();
@@ -371,10 +374,10 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
       if (!output_buffer.push_back(new_block_size()))
       {
 #ifdef DEBUGDBSTREAMBUF
-	cerr << "Buffer full, returning" << (s - sp) << endl;
 	printOn(cerr);
 #endif
 	pbump(block_size);
+	Dout(dc::warning, "Buffer full, returning" << (s - sp));
 	return s - sp;
       }
       put_area_block_node = output_buffer.back();
@@ -385,16 +388,16 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
     pbump(m);
   }
 #ifdef DEBUGDBSTREAMBUF
-  cerr << "Returning " << n << endl;
   printOn(cerr);
 #endif
+  Dout(dc::evio, "Returning " << n);
   return n;
 }
 
 StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_full_watermark) :
-    max_used_size(buffer_full_watermark), output_buffer(max_alloc), idevice(NULL), odevice(NULL), device_counter(0)
+    max_used_size(buffer_full_watermark), output_buffer(max_alloc), m_device_counter(0)
 {
-  Dout(dc::io, "this = " << (void*)this << "; StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ')');
+  DoutEntering(dc::io, "StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << (void*)this << ']');
 #ifdef CWDEBUG
   if (minimum_blocksize < 64)
     Dout(dc::warning, "StreamBuf with a minimum_blocksize smaller then 64 !");
@@ -409,10 +412,11 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
   }
   output_buffer.push_front((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
   get_area_block_node = put_area_block_node = output_buffer.front();
-  input_dbstreambuf = this;
+  input_streambuf = this;
   register char* start = get_area_block_node->block_start();
   setp(start, start + put_area_block_node->get_size());
   isetg(start, start, start);
+  m_idevice = nullptr;  // This is a union so this initializes m_odevice too.
 }
 
 size_t StreamBuf::new_block_size() const
@@ -451,38 +455,31 @@ void StreamBuf::reduce_buffer()
   setp(start, start + new_block_size);		// note: get_area_block_node == put_area_block_node (the buffer is empty)
 }
 
-int StreamBuf::sync()
+int Dev2Buf::sync()
 {
-  //FIXME return ((odevice && odevice->sync(this)) || (idevice && idevice->sync(NULL)));
-  return 0;
+  // m_idevice points to the device whose constructor this buffer was passed to.
+  return m_idevice->sync();
 }
 
-void StreamBuf::idevice_del()
+int Buf2Dev::sync()
 {
-  DoutFatal(dc::core, "When do we get here?");
-  //FIXME idevice->del();
-}
-
-void StreamBuf::odevice_del()
-{
-  DoutFatal(dc::core, "When do we get here?");
-  //FIXME odevice->del();
+  // m_odevice points to the device whose constructor this buffer was passed to.
+  return m_odevice->sync();
 }
 
 bool StreamBuf::release(IOBase* device)
 {
 #ifdef CWDEBUG
-  if (device_counter == 0)
+  if (m_device_counter == 0)
   {
     DoutFatal(dc::core,
-	"\n\tCalling `StreamBuf::release' while `device_counter' equals 0."
+	"\n\tCalling `StreamBuf::release' while `m_device_counter' equals 0."
 	"\n\tAlways allocate a `StreamBuf' with `new' and pass it" <<
-	"\n\tto either a `dbbuf_fd_dtct<INPUT>' or `dbbuf_fd_dtct<OUTPUT>'," <<
-	"\n\tor to both by passing it to iodbbuf_fd_dtct<INPUT, OUTPUT>." <<
-	"\n\t(Where INPUT must be an `InputDevice' and OUTPUT must be an `OutputDevice').");
+	"\n\tto either a `DEVICE<INPUT>', `DEVICE<OUTPUT>' or `DEVICE<INPUT, OUTPUT>'." <<
+	"\n\t(Where INPUT must be an `InputDevice' or `LinkDevice' and OUTPUT must be an `OutputDevice' or `LinkDevice').");
   }
 #endif
-  if (--device_counter == 0)
+  if (--m_device_counter == 0)
   {
     delete this;
     return true;
@@ -491,13 +488,14 @@ bool StreamBuf::release(IOBase* device)
   {
     // Resetting the devices is necessary because of `sync'.
     //FIXME uncomment once InputDevice/OutputDevice are declared again.
-//    if (device == idevice)
-//      idevice = NULL;
-//    else if (device == static_cast<IOBase*>(odevice))
-//      odevice = NULL;
+//    if (device == m_idevice)
+//      m_idevice = nullptr;
+//    else if (device == static_cast<IOBase*>(m_odevice))
+//      m_odevice = nullptr;
+    m_idevice = nullptr;        // It's a union, so this resets m_odevice too if that is what it was.
 
     Dout(dc::malloc, "this = " << (void*)this << "; Calling StreamBuf::release " <<
-	device_counter << " device left (" << idevice << ", " << odevice << ')');
+	m_device_counter << " device left (" << m_idevice << ", " << m_odevice << ')');
 
     return false;
   }

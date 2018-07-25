@@ -29,6 +29,12 @@
 
 class EventLoopThread;
 
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+extern channel_ct evio;
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 namespace evio {
 
 class LinkInputDevice;	// Base classes for use with objects that read
@@ -193,7 +199,7 @@ class IOBase : public AIRefCount
  protected:
   IOBase() : m_flags(0) { }
 #ifdef CWDEBUG
-  ~IOBase() { Dout(dc::notice, "Destructing IOBase [" << (void*)this << "]"); }
+  ~IOBase() { Dout(dc::evio, "Destructing IOBase [" << (void*)this << "]"); }
 #endif
 
   //---------------------------------------------------------------------------
@@ -262,17 +268,19 @@ class IOBase : public AIRefCount
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd)
   {
+    DoutEntering(dc::io, "IOBase::init(" << fd << ") [" << (void*)this << ']');
     // Only call init() with a valid, open filedescriptor.
     ASSERT(is_valid(fd));
 
     // All filedescriptors must be non-blocking because we work with edge-triggered epoll.
     set_nonblocking(fd);
     // Reset all flags except FDS_RW.
-    m_flags &= ~FDS_RW;
+    m_flags &= FDS_RW;
     init_input_device(fd);
     init_output_device(fd);
     // Make file descriptor non-blocking by default.
     set_nonblocking(fd);
+    Dout(dc::evio, "Setting FDS_REMOVE on " << (void*)this);
     // Set FDS_REMOVE so that either start_input_device() or start_output_device() will increment the ref count.
     m_flags |= FDS_REMOVE;
   }
@@ -303,8 +311,10 @@ class IOBase : public AIRefCount
 
   void del()
   {
+    DoutEntering(dc::io, "IOBase::del() [" << (void*)this << ']');
     if (!must_be_removed())     // Has not already been marked for removal?
     {
+      Dout(dc::evio, "Setting FDS_REMOVE on " << (void*)this);
       m_flags |= FDS_REMOVE;
       stop_input_device();
       intrusive_ptr_release(this);
@@ -391,6 +401,7 @@ class InputDevice : public virtual IOBase
   //
   InputDevice(Dev2Buf* ibuf) : m_ibuffer(static_cast<InputBuffer*>(ibuf))
   {
+    DoutEntering(dc::io, "InputDevice(" << (void*)static_cast<StreamBuf*>(ibuf) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
     // Mark that InputDevice is a derived class.
     m_flags |= FDS_R;
     // Give m_input_watcher known values; cause is_active() to return false.
@@ -402,6 +413,7 @@ class InputDevice : public virtual IOBase
   // Destructor.
   ~InputDevice()
   {
+    DoutEntering(dc::io, "~InputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
     // Delete the input buffer if it is no longer needed.
     m_ibuffer->release(this);
   }
@@ -464,6 +476,10 @@ class InputDevice : public virtual IOBase
 
   // The default behavior is to do nothing.
   virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
+
+  // Called from the streambuf associated with this device when pubsync() is called on it.
+  friend class Dev2Buf;
+  virtual int sync();
 };
 
 
@@ -515,6 +531,7 @@ class OutputDevice : public virtual IOBase
   //
   OutputDevice(Buf2Dev* obuf) : m_obuffer(static_cast<OutputBuffer*>(obuf))
   {
+    DoutEntering(dc::io, "OutputDevice(" << (void*)static_cast<StreamBuf*>(obuf) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
     // Mark that OutputDevice is a derived class.
     m_flags |= FDS_W;
     // Give m_output_watcher known values; cause is_active() to return false.
@@ -526,6 +543,7 @@ class OutputDevice : public virtual IOBase
   // Destructor.
   ~OutputDevice()
   {
+    DoutEntering(dc::io, "~OutputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
     // Delete the output buffer if it is no longer needed.
     m_obuffer->release(this);
   }
@@ -548,6 +566,10 @@ class OutputDevice : public virtual IOBase
 
   // This default implementation `close's the object (which removes it).
   virtual void write_error(int UNUSED_ARG(err)) { close(); }
+
+  // Called from the streambuf associated with this device when pubsync() is called on it.
+  friend class Buf2Dev;
+  virtual int sync();
 
  private:
   // The call back used by libev.
@@ -803,9 +825,3 @@ class LinkOutputDevice : public LinkBase, public OutputDevice
 };
 
 } // namespace evio
-
-#if defined(CWDEBUG) && !defined(DOXYGEN)
-NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct evio;
-NAMESPACE_DEBUG_CHANNELS_END
-#endif

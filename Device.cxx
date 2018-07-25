@@ -97,6 +97,7 @@ bool is_valid(int fd)
 
 void InputDevice::start_input_device()
 {
+  DoutEntering(dc::io, "InputDevice::start_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // Call InputDevice::init before calling InputDevice::start.
   ASSERT(m_input_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
@@ -105,6 +106,7 @@ void InputDevice::start_input_device()
   // this object from being removed until del() is called.
   if ((m_flags & FDS_REMOVE))
   {
+    Dout(dc::io, "Resetting FDS_REMOVE on " << (void*)this);
     m_flags &= ~FDS_REMOVE;
     intrusive_ptr_add_ref(this);
   }
@@ -115,6 +117,7 @@ void InputDevice::start_input_device()
 
 void OutputDevice::start_output_device()
 {
+  DoutEntering(dc::io, "OutputDevice::start_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // Call OutputDevice::init before calling OutputDevice::start.
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
@@ -131,8 +134,33 @@ void OutputDevice::start_output_device()
   EventLoopThread::start(m_output_watcher);
 }
 
+int InputDevice::sync()
+{
+  DoutFatal(dc::core, "input SYNC: You are trying to sync input blocking. Please use another method to do that (which is currently not implemented).");
+  return 0;
+}
+
+int OutputDevice::sync()
+{
+  DoutEntering(dc::io, "OutputDevice::sync() [" << (void*)static_cast<IOBase*>(this) << ']');
+  // Don't flush a stream after having called del() on it. In fact, don't write to it at ALL anymore.
+  // If is_active() is false then that means del() wasn't called: then we got here directly after init().
+  ASSERT(!(is_active() && must_be_removed()));
+  if (AI_UNLIKELY(!is_writable()))
+  {
+    Dout(dc::warning, "The device is not writable!");
+    return -1;
+  }
+  if (!m_obuffer->buffer_empty() && !is_active())
+  {
+    start_output_device();
+  }
+  return 0;
+}
+
 void InputDevice::stop_input_device()
 {
+  DoutEntering(dc::io, "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // We assume that stop_input_device can be called from another thread (than start_output_device)
   // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
   // the destruction of the lock object in that function) at which point is_active() will return
@@ -142,10 +170,8 @@ void InputDevice::stop_input_device()
     ev_io_stop(EV_A_ &m_input_watcher);
     intrusive_ptr_release(this);
   }
-  // The filedescriptor, when open, is still considered to be open:
+  // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
-  // Obviously this means that FDS_REMOVE may not be set if the fd is still open.
-  ASSERT(!is_open_r() || !(m_flags & FDS_REMOVE));
 }
 
 int InputDevice::get_input_fd()
@@ -156,6 +182,7 @@ int InputDevice::get_input_fd()
 
 void OutputDevice::stop_output_device()
 {
+  DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   if (is_active())
   {
     ev_io_stop(EV_A_ &m_output_watcher);
@@ -163,8 +190,6 @@ void OutputDevice::stop_output_device()
   }
   // The filedescriptor, when open, is still considered to be open:
   // A subsequent call to start_output_device() will resume handling it.
-  // Obviously this means that FDS_REMOVE may not be set if the fd is still open.
-  ASSERT(!is_open_w() || !(m_flags & FDS_REMOVE));
 }
 
 int OutputDevice::get_output_fd()
@@ -176,6 +201,7 @@ int OutputDevice::get_output_fd()
 // Write `m_obuffer' to fd.
 void OutputDevice::write_to_fd(int fd)
 {
+  DoutEntering(dc::io, "OutputDevice::write_to_fd(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {
     size_t len; // Available number of characters in current block.
@@ -237,6 +263,7 @@ try_again_write1:
 
 void InputDevice::read_from_fd(int fd)
 {
+  DoutEntering(dc::io, "InputDevice::read_from_fd(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   size_t space = m_ibuffer->dev2buf_contiguous();
   for (;;)
   {
@@ -298,6 +325,7 @@ try_again_read1:
 
 void ReadInputDevice::data_received(char const* new_data, size_t rlen)
 {
+  DoutEntering(dc::io, "ReadInputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   size_t len;
   while ((len = end_of_msg_finder(new_data, rlen)) > 0)
   {

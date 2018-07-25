@@ -31,7 +31,7 @@
 void EventLoopThread::acquire_cb(EV_P)
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
-  Dout(dc::notice|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " returned from epoll_wait()");
+  Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " returned from epoll_wait()");
   event_loop_thread->m_loop_mutex.lock();
 }
 
@@ -40,7 +40,7 @@ void EventLoopThread::release_cb(EV_P)
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
   event_loop_thread->m_loop_mutex.unlock();
-  Dout(dc::notice|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " calls epoll_wait()...");
+  Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " calls epoll_wait()...");
 }
 
 //static
@@ -53,7 +53,7 @@ void EventLoopThread::invoke_pending_cb(EV_P)
 void EventLoopThread::main(EV_P)
 {
   Debug(NAMESPACE_DEBUG::init_thread());
-  Dout(dc::notice, "Event loop thread started.");
+  Dout(dc::evio, "Event loop thread started.");
   static_cast<EventLoopThread*>(ev_userdata(EV_A))->run();
 }
 
@@ -64,8 +64,8 @@ void EventLoopThread::async_cb(
 #endif
     ev_async* UNUSED_ARG(w), int UNUSED_ARG(revents))
 {
-  // Just used for the side effects.
-  Dout(dc::notice, "Calling async_cb()");
+  // Just used to wake up the main loop.
+  Dout(dc::evio, "Calling async_cb()");
 }
 
 void EventLoopThread::run()
@@ -73,15 +73,15 @@ void EventLoopThread::run()
   // Lock m_loop_mutex before calling ev_run.
   std::lock_guard<std::mutex> lock(m_loop_mutex);
   m_running = true;
-  Dout(dc::notice, "Calling ev_run(0)");
+  Dout(dc::evio, "Calling ev_run(0)");
   ev_run(EV_A_ 0);
-  Dout(dc::notice, "Returned from ev_run(0)");
+  Dout(dc::evio, "Returned from ev_run(0)");
   m_running = false;
 }
 
 void EventLoopThread::invoke_pending()
 {
-  DoutEntering(dc::notice|flush_cf, "EventLoopThread::invoke_pending()");
+  DoutEntering(dc::evio|flush_cf, "EventLoopThread::invoke_pending()");
   std::unique_lock<std::mutex> lock(m_loop_mutex);
   ASSERT(ev_pending_count(EV_A));
   ev_invoke_pending(EV_A);
@@ -94,15 +94,15 @@ void EventLoopThread::invoke_pending()
     m_inside_invoke_pending = true;
     // Poll for additional events that might have occurred.
     ev_set_invoke_pending_cb(EV_A_ ev_invoke_pending);                  // Call ev_invoke_pending directly.
-    Dout(dc::notice, "Entering ev_run(EVRUN_NOWAIT).");
+    Dout(dc::evio, "Entering ev_run(EVRUN_NOWAIT).");
     ev_run(EVRUN_NOWAIT);
-    Dout(dc::notice, "Leaving ev_run(EVRUN_NOWAIT).");
+    Dout(dc::evio, "Leaving ev_run(EVRUN_NOWAIT).");
     ev_set_invoke_pending_cb(EV_A_ EventLoopThread::invoke_pending_cb); // Restore normal operation.
     m_inside_invoke_pending = false;
   }
 
   // Notify ev_run thread.
-  Dout(dc::notice, "Setting m_invoke_handled to true and notifying ev_run thread.");
+  Dout(dc::evio, "Setting m_invoke_handled to true and notifying ev_run thread.");
   m_invoke_handled = true;
   m_invoke_handled_cv.notify_one();
 }
@@ -115,7 +115,7 @@ void EventLoopThread::handle_invoke_pending()
   if (!ev_pending_count(EV_A))
     return;
 
-  DoutEntering(dc::notice|flush_cf, "EventLoopThread::handle_invoke_pending()");
+  DoutEntering(dc::evio|flush_cf, "EventLoopThread::handle_invoke_pending()");
   // The lock is already locked when we get here.
   std::unique_lock<std::mutex> lock(m_loop_mutex, std::adopt_lock);
   while (ev_pending_count(EV_A))
@@ -134,7 +134,7 @@ void EventLoopThread::handle_invoke_pending()
           auto queue_access = queue.producer_access();
           if (!(queue_full = queue_access.length() == queue.capacity()))
           {
-            Dout(dc::notice, "Queuing call to invoke_pending() in thread pool queue " << m_handler);
+            Dout(dc::evio, "Queuing call to invoke_pending() in thread pool queue " << m_handler);
             queue_access.move_in([this](){ invoke_pending(); return false; });
           }
         }
@@ -161,13 +161,13 @@ void EventLoopThread::handle_invoke_pending()
 
     // Wait until invoke_pending() was called.
     m_invoke_handled = false;
-    Dout(dc::notice, "Waiting for m_invoke_handled to become true.");
+    Dout(dc::evio, "Waiting for m_invoke_handled to become true.");
     m_invoke_handled_cv.wait(lock, [this](){ return m_invoke_handled; });
-    Dout(dc::notice, "m_invoke_handled is now true.");
+    Dout(dc::evio, "m_invoke_handled is now true.");
   }
   // Leave the mutex locked.
   lock.release();
-  Dout(dc::notice|flush_cf, "Leaving EventLoopThread::handle_invoke_pending()");
+  Dout(dc::evio|flush_cf, "Leaving EventLoopThread::handle_invoke_pending()");
 }
 
 void EventLoopThread::init(AIQueueHandle handler)
@@ -195,11 +195,16 @@ void EventLoopThread::init(AIQueueHandle handler)
     ;
 }
 
+void EventLoopThread::flush()
+{
+  ev_async_stop(EV_A_ &m_async_w);
+}
+
 void EventLoopThread::join()
 {
   if (m_event_thread.joinable())
   {
-    Dout(dc::notice|continued_cf, "Joining m_event_thread... ");
+    Dout(dc::evio|continued_cf, "Joining m_event_thread... ");
     m_event_thread.join();
     Dout(dc::finish, "joined");
   }
@@ -207,7 +212,7 @@ void EventLoopThread::join()
 
 EventLoopThread::~EventLoopThread()
 {
-  DoutEntering(dc::notice, "EventLoopThread::~EventLoopThread()");
+  DoutEntering(dc::evio, "EventLoopThread::~EventLoopThread()");
   // Call EventLoopThread::instance().join() before leaving main().
   ASSERT(!m_event_thread.joinable());
 }

@@ -318,7 +318,7 @@ class MsgBlock
 // Therefore, this list is associated with output (ostream).
 // The get area of the streambuf that this object is associated
 // with will get from 'our input buffer' which is another `StreamBuf'
-// object pointed to by attribute `input_dbstreambuf'.
+// object pointed to by attribute `input_streambuf'.
 //
 // Starting with one empty block in the put area of `streambuf', with a
 // user definable minimum size, and an external get area, new blocks are
@@ -441,23 +441,23 @@ class StreamBuf : public std::streambuf
   // Get and put area of the `other' buffer.
 
   // Start of input buffer
-  char* ieback() const { return input_dbstreambuf->eback(); }
+  char* ieback() const { return input_streambuf->eback(); }
 
   // Next character in input buffer
-  char* igptr() const { return input_dbstreambuf->gptr(); }
+  char* igptr() const { return input_streambuf->gptr(); }
 
   // End of input buffer
-  char* iegptr() const { return input_dbstreambuf->egptr(); }
+  char* iegptr() const { return input_streambuf->egptr(); }
 
   // Return start of put area of our input buffer (called by kernel)
-  char* ipbase() const { return input_dbstreambuf->pbase(); }
+  char* ipbase() const { return input_streambuf->pbase(); }
 
   // Return next write position in put area of our input buffer
   // (called by kernel).
-  char* ipptr() const { return input_dbstreambuf->pptr(); }
+  char* ipptr() const { return input_streambuf->pptr(); }
 
   // Return end of put area of our input buffer (called by kernel)
-  char* iepptr() const { return input_dbstreambuf->epptr(); }
+  char* iepptr() const { return input_streambuf->epptr(); }
 
 //=============================================================================
 
@@ -470,22 +470,17 @@ class StreamBuf : public std::streambuf
   int_type overflow(int_type c = EOF) override;
 
   // Called when a block is empty.
-  int_type underflow() override { return input_dbstreambuf->iunderflow(); }
+  int_type underflow() override { return input_streambuf->iunderflow(); }
 
   // Called when a putback failed.
-  int_type pbackfail(int_type c) override { return input_dbstreambuf->ipbackfail(c); }
+  int_type pbackfail(int_type c) override { return input_streambuf->ipbackfail(c); }
 
   // Though ANSI C++, not implemented in libg++-2.7.1. Used by libcw.
   // This should return the number of contiguous characters at the
   // beginning of the get area.
   // Note: libcw demands that this function does not return '0' unless
   // the buffer is empty (this is not explicitly demanded by ANSI).
-  std::streamsize showmanyc() override { return input_dbstreambuf->ishowmanyc(); }
-
-  // Called when `async_flush' or `close' is called etc.
-  // Classes derived from `dbstreambuf' should override this function
-  // so that it doesn't return until the buffer is emptied.
-  int sync() override;
+  std::streamsize showmanyc() override { return input_streambuf->ishowmanyc(); }
 
  protected:
   //---------------------------------------------------------------------------
@@ -494,10 +489,10 @@ class StreamBuf : public std::streambuf
   //
 
   // Advance get pointer of input buffer `n' positions.
-  void igbump(int n) { input_dbstreambuf->gbump(n); }
+  void igbump(int n) { input_streambuf->gbump(n); }
 
   // (Re-)initialize the get area of the input buffer.
-  void isetg(char* eb, char* g, char* eg) { input_dbstreambuf->setg(eb, g, eg); }
+  void isetg(char* eb, char* g, char* eg) { input_streambuf->setg(eb, g, eg); }
 
   // Called by the object reading from my output buffer, reads `n'
   // number of characters into `s'.
@@ -517,16 +512,16 @@ class StreamBuf : public std::streambuf
 
   // Write one character `c' to my input_buffer, should only be called
   // when the put area of the input buffer is full.
-  int ioverflow(int c = EOF) { return input_dbstreambuf->overflow(c); }
+  int ioverflow(int c = EOF) { return input_streambuf->overflow(c); }
 
   // Write `n' bytes from `s' to my input buffer.
-  std::streamsize ixsputn(char const* s, std::streamsize n) { return input_dbstreambuf->xsputn(s, n); }
+  std::streamsize ixsputn(char const* s, std::streamsize n) { return input_streambuf->xsputn(s, n); }
 
   // Advance the put pointer of the input buffer `n' characters.
-  void ipbump(int n) { input_dbstreambuf->pbump(n); }
+  void ipbump(int n) { input_streambuf->pbump(n); }
 
   // Set the start and end of the put area of my input buffer.
-  void isetp(char* p, char* ep) { input_dbstreambuf->setp(p, ep); }
+  void isetp(char* p, char* ep) { input_streambuf->setp(p, ep); }
 
 #if 0 //def NEED_STREAMBUF_CONST_BUGFIX
  protected:
@@ -570,29 +565,30 @@ class StreamBuf : public std::streambuf
   // associating `output_buffer' with output (ostream).
   MemoryBlocksBuffer output_buffer;
 
+  // Optional pointer to list of allocated blocks for the streambufs
+  // 'get area', associating `input_streambuf' with input (istream).
+  // If only one buffer is used, this should point to `this'.
+  // The union symbolizes that only two objects of type `StreamBuf'
+  // can be linked together, if three or more are used these should
+  // be different pointers.
   union {
-    StreamBuf* input_dbstreambuf;               // Object that we read from
-    StreamBuf* object_getting_from_my_buffer;   // Object reading our buffer
+    StreamBuf* input_streambuf;               // Object that we read from.
+    StreamBuf* object_getting_from_my_buffer;   // Object reading our buffer.
   };
-    // Optional pointer to list of allocated blocks for the streambufs
-    // 'get area', associating `input_dbstreambuf' with input (istream).
-    // If only one buffer is used, this should point to `this'.
-    // The union symbolizes that only two objects of type `StreamBuf'
-    // can be linked together, if three or more are used these should
-    // be different pointers.
 
-  InputDevice* idevice;
+ protected:
+  //---------------------------------------------------------------------------
+  // Protected attributes:
+  //
 
-  // `InputDevice' object that uses this buffer for input.
-  void idevice_del();
-
-  OutputDevice* odevice;
-
-  // `OutputDevice' object that uses this buffer for output.
-  void odevice_del();
+  // The device whose constructor this StreamBuf was passed to.
+  union {
+    InputDevice* m_idevice;
+    OutputDevice* m_odevice;
+  };
 
   // Count of number of devices.
-  int device_counter;
+  int m_device_counter;
 
  protected:
   //---------------------------------------------------------------------------
@@ -600,7 +596,7 @@ class StreamBuf : public std::streambuf
   //
 
   // Should only be called by release()
-  ~StreamBuf() { }
+  ~StreamBuf() { Dout(dc::io, "~StreamBuf() [" << (void*)this << ']'); }
 
  public:
   //---------------------------------------------------------------------------
@@ -656,7 +652,7 @@ class StreamBuf : public std::streambuf
   inline void reduce_buffer_if_empty();
 
   // Called to speed up a read of `n' number of characters.
-  std::streamsize xsgetn(char* s, std::streamsize n) override { return input_dbstreambuf->ixsgetn(s, n); }
+  std::streamsize xsgetn(char* s, std::streamsize n) override { return input_streambuf->ixsgetn(s, n); }
 
   // Called to speed up a write of `n' number of characters.
   std::streamsize xsputn(char const* s, std::streamsize n) override;
@@ -666,7 +662,7 @@ class StreamBuf : public std::streambuf
 // Interface classes
 //
 
-// Linking two devices together:
+// Reading from a device:
 
 class Dev2Buf : public StreamBuf
 {
@@ -683,7 +679,14 @@ class Dev2Buf : public StreamBuf
 
   // Administration:
   void reduce_buf_if_empty() { reduce_buffer_if_empty(); }      // Should be called to make sure that the buffer also decreases.
+
+  // Called when `async_flush' or `close' is called etc.
+  // Classes derived from `StreamBuf' should override this function
+  // so that it doesn't return until the buffer is emptied.
+  int sync() override;
 };
+
+// Writing to a device:
 
 class Buf2Dev : public StreamBuf
 {
@@ -698,7 +701,14 @@ class Buf2Dev : public StreamBuf
                                                                 // Does not return 0 unless the buffer is empty.
   char* buf2dev_ptr() const { return igptr(); }                 // Get pointer to get area.
   void buf2dev_bump(int n) { igbump(n); }                       // Bump pointer `n' bytes.
+
+  // Called when `async_flush' or `close' is called etc.
+  // Classes derived from `StreamBuf' should override this function
+  // so that it doesn't return until the buffer is emptied.
+  int sync() override;
 };
+
+// Linking two devices together:
 
 class LinkBuffer : public Dev2Buf
 {
@@ -751,7 +761,7 @@ class OutputBuffer : public Buf2Dev
 // Initialize the input buffer pointer.
 inline void StreamBuf::set_input_buffer(StreamBuf* b)
 {
-  input_dbstreambuf = b;
+  input_streambuf = b;
   char* start = b->put_area_block_node->block_start();
   setg(start, start, start);
 }
@@ -770,18 +780,20 @@ inline bool StreamBuf::is_contiguous(size_t len) const
 
 inline void StreamBuf::set_input_device(InputDevice* device)
 {
-  ++device_counter;
-  if (idevice)
-    idevice_del();
-  idevice = device;
+  // Don't pass a StreamBuf to more than one device.
+  // Also note set_input_device should only be called from the constructor of an InputDevice, don't call it directly.
+  ASSERT(!m_idevice);
+  ++m_device_counter;
+  m_idevice = device;
 }
 
 inline void StreamBuf::set_output_device(OutputDevice* device)
 {
-  ++device_counter;
-  if (odevice)
-    odevice_del();
-  odevice = device;
+  // Don't pass a StreamBuf to more than one device.
+  // Also note set_output_device should only be called from the constructor of an OutputDevice, don't call it directly.
+  ASSERT(!m_odevice);
+  ++m_device_counter;
+  m_odevice = device;
 }
 
 inline void StreamBuf::reduce_buffer_if_empty()

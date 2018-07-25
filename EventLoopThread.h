@@ -67,6 +67,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
  public:
   void init(AIQueueHandle handler);
+  void flush();
   void join();
 
   static void start(ev_timer& timeout_watcher);
