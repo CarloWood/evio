@@ -42,6 +42,9 @@ void InputDevice::init_input_device(int fd)
   ASSERT(!is_active());
   ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, fd, EV_READ);
   m_input_watcher.data = this;
+  // Increment ref count once to stop this object from being removed until del() is called.
+  if (!is_open())                       // Only do this the first call init().
+    intrusive_ptr_add_ref(this);
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor that corresponds to reading from
@@ -55,8 +58,10 @@ void OutputDevice::init_output_device(int fd)
   ASSERT(!is_active());
   ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, fd, EV_WRITE);
   m_output_watcher.data = this;
-  // Here we mark that the file descriptor that corresponds to writing to
-  // this device is open.
+  // Increment ref count once to stop this object from being removed until del() is called.
+  if (!is_open())
+    intrusive_ptr_add_ref(this);
+  // Here we mark that the file descriptor that corresponds to writing to this device is open.
   m_flags |= FDS_W_OPEN;
 }
 
@@ -78,7 +83,7 @@ void set_nonblocking(int fd)
   int res;
   if ((res = fcntl(fd, F_GETFL)) == -1)
     perror("fcntl(fd, F_GETFL)");
-  else if (fcntl(fd, F_SETFL, res | nonb) == -1)
+  else if (!(res & nonb) && fcntl(fd, F_SETFL, res | nonb) == -1)
     perror("fcntl(fd, F_SETL, nonb)");
 #endif
   return;
@@ -102,15 +107,13 @@ void InputDevice::start_input_device()
   ASSERT(m_input_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  // Increment ref count with once, clearing FDS_REMOVE, to stop
-  // this object from being removed until del() is called.
-  if ((m_flags & FDS_REMOVE))
-  {
-    Dout(dc::io, "Resetting FDS_REMOVE on " << (void*)this);
-    m_flags &= ~FDS_REMOVE;
-    intrusive_ptr_add_ref(this);
-  }
+  // Don't start a device after calling del() on it.
+  ASSERT(!must_be_removed());
   // Increment it once more to stop this object from being deleted while being active.
+  // This is not really necessary I think, because the reference count is already incremented
+  // the first time that init_input_device is caleld; which is only decremented when calling
+  // del() always causing an immediately delete there. The corresponding intrusive_ptr_release
+  // in stop_input_device can also be removed then.
   intrusive_ptr_add_ref(this);
   EventLoopThread::start(m_input_watcher);
 }
@@ -122,22 +125,9 @@ void OutputDevice::start_output_device()
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  // Increment ref count with one, clearing FDS_REMOVE, to stop
-  // this object from being removed until del() is called.
-  if ((m_flags & FDS_REMOVE))
-  {
-    m_flags &= ~FDS_REMOVE;
-    intrusive_ptr_add_ref(this);
-  }
   // Increment it once more to stop this object from being deleted while being active.
   intrusive_ptr_add_ref(this);
   EventLoopThread::start(m_output_watcher);
-}
-
-int InputDevice::sync()
-{
-  DoutFatal(dc::core, "input SYNC: You are trying to sync input blocking. Please use another method to do that (which is currently not implemented).");
-  return 0;
 }
 
 int OutputDevice::sync()
@@ -168,7 +158,7 @@ void InputDevice::stop_input_device()
   if (is_active())
   {
     ev_io_stop(EV_A_ &m_input_watcher);
-    intrusive_ptr_release(this);
+    intrusive_ptr_release(this);        // Note: this never brings the reference count to zero, that happens in del().
   }
   // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
@@ -223,31 +213,30 @@ try_again_write1:
     size_t wlen = ::write(fd, m_obuffer->buf2dev_ptr(), len);
     if (wlen == (size_t)-1)
     {
+      int err = errno;
 #ifdef CWDEBUG
       if (!is_debug_channel())
       {
-        int err = errno;
         Dout(dc::warning|error_cf,
             "write(" << fd << ", " << buf2str(m_obuffer->buf2dev_ptr(), m_obuffer->buf2dev_contiguous()) << ", " << len << ')');
-        errno = err;
       }
       else
-        std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(errno) << std::endl;
+        std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(err) << std::endl;
 #endif
-      ASSERT(errno != EINTR); // FIXME, check for SIGPIPE
+      ASSERT(err != EINTR); // FIXME, check for SIGPIPE
       //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
       //  continue;
-      if (errno == EWOULDBLOCK)
+      if (err == EWOULDBLOCK)
         return;
 #if EWOULDBLOCK != EAGAIN
-      if (errno == EAGAIN)
+      if (err == EAGAIN)
       {
         if (nr_eagain_errors--)
           goto try_again_write1;
         return;
       }
 #endif
-      write_error(errno);
+      write_error(err);
       return;
     }
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(m_obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
@@ -284,19 +273,19 @@ try_again_read1:
     if (rlen == 0)                      // EOF reached ?
     {
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
-      stop_input_device();              // Stop reading the filedescriptor.
       read_returned_zero();
       return;                           // Next time better.
     }
 
     if (rlen == -1)                     // A read error occured ?
     {
+      int err = errno;
       Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
-      ASSERT(errno != EINTR); // FIXME, check for SIGPIPE
-      //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
+      ASSERT(err != EINTR); // FIXME, check for SIGPIPE
+      //if (err == EINTR && !SignalServer::caught(SIGPIPE))
       //  goto try_again_read1;
-      if (errno != EAGAIN && errno != EWOULDBLOCK)
-        read_error(errno);
+      if (err != EAGAIN && err != EWOULDBLOCK)
+        read_error(err);
       return;                           // Next time better.
     }
 

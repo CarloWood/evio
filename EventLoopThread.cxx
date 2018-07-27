@@ -172,6 +172,7 @@ void EventLoopThread::handle_invoke_pending()
 
 void EventLoopThread::init(AIQueueHandle handler)
 {
+  DoutEntering(dc::evio, "EventLoopThread::init(" << handler << ')');
   m_handler = handler;
 
 #if EV_MULTIPLICITY
@@ -195,17 +196,21 @@ void EventLoopThread::init(AIQueueHandle handler)
     ;
 }
 
-void EventLoopThread::flush()
+//static
+void EventLoopThread::terminate()
 {
-  ev_async_stop(EV_A_ &m_async_w);
-}
-
-void EventLoopThread::join()
-{
-  if (m_event_thread.joinable())
+  DoutEntering(dc::evio, "EventLoopThread::terminate()");
+  EventLoopThread& self(instance());
+  {
+    std::lock_guard<std::mutex> lock(self.m_loop_mutex);
+    self.m_terminate = true;
+    ev_unref(EV_A);             // Cause ev_run to exit when only m_async_w is left.
+    ev_async_send(EV_A_ &self.m_async_w);
+  }
+  if (self.m_event_thread.joinable())
   {
     Dout(dc::evio|continued_cf, "Joining m_event_thread... ");
-    m_event_thread.join();
+    self.m_event_thread.join();
     Dout(dc::finish, "joined");
   }
 }
@@ -215,6 +220,13 @@ EventLoopThread::~EventLoopThread()
   DoutEntering(dc::evio, "EventLoopThread::~EventLoopThread()");
   // Call EventLoopThread::instance().join() before leaving main().
   ASSERT(!m_event_thread.joinable());
+
+  if (ev_userdata(EV_A) == this)        // Was init() called?
+  {
+    if (m_terminate)
+      ev_ref(EV_A);
+    ev_async_stop(EV_A_ &m_async_w);
+  }
 }
 
 //static

@@ -37,7 +37,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   // This is a singleton.
   // However, you must call EventLoopThread::instance().init(handler) to initialize it before use.
   friend_Instance;
-  EventLoopThread() : m_inside_invoke_pending(false) { }
+  EventLoopThread() : m_inside_invoke_pending(false), m_terminate(false) { }
   ~EventLoopThread();
   EventLoopThread(EventLoopThread const&) = delete;
 
@@ -52,6 +52,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   std::condition_variable m_invoke_handled_cv;
   bool m_invoke_handled;
   bool m_inside_invoke_pending;
+  bool m_terminate;
 
   ev_async m_async_w;
   std::atomic_bool m_running;
@@ -67,11 +68,10 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
  public:
   void init(AIQueueHandle handler);
-  void flush();
-  void join();
 
   static void start(ev_timer& timeout_watcher);
   static void start(ev_io& io_watcher);
+  static void terminate();
 
   void invoke_pending();
 };

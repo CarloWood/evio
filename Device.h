@@ -1,7 +1,7 @@
 // evio -- Event Driven I/O support.
 //
 //! @file
-//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, InputDeviceStream, OutputDeviceStream, ReadInputDevice, ReadInputDeviceStream, WriteOutputDevice, WriteOutputDeviceStream, LinkBase, LinkInputDevice and LinkOutputDevice.
+//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, InputDeviceStream, OutputDeviceStream, ReadInputDevice, ReadInputDeviceStream, WriteOutputDevice, WriteOutputDeviceStream, LinkInputDevice and LinkOutputDevice.
 //
 // Copyright (C) 2018 Carlo Wood.
 //
@@ -127,7 +127,7 @@ virtual functions of ReadInputDevice
     // Overrides InputDevice::data_received. Calls the two virtual
     // functions below.
 
-  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) const = 0;
+  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
     // Called by the default ReadInputDevice::data_received.
     //
     // This method should be implemented by a user class and return a value
@@ -272,17 +272,13 @@ class IOBase : public AIRefCount
     // Only call init() with a valid, open filedescriptor.
     ASSERT(is_valid(fd));
 
-    // All filedescriptors must be non-blocking because we work with edge-triggered epoll.
+    // Make file descriptor non-blocking by default.
     set_nonblocking(fd);
+
     // Reset all flags except FDS_RW.
     m_flags &= FDS_RW;
     init_input_device(fd);
     init_output_device(fd);
-    // Make file descriptor non-blocking by default.
-    set_nonblocking(fd);
-    Dout(dc::evio, "Setting FDS_REMOVE on " << (void*)this);
-    // Set FDS_REMOVE so that either start_input_device() or start_output_device() will increment the ref count.
-    m_flags |= FDS_REMOVE;
   }
 
   void start()
@@ -359,6 +355,26 @@ class IOBase : public AIRefCount
 //
 // Base class for classes that define Input characteristics.
 //
+// This class implements the following virtual functions of IOBase:
+//
+// void init_input_device(int fd) override;     // Initializes m_input_watcher and registers fd for reading (calls ev_io_init). Adds FDS_R_OPEN to m_flags.
+// int get_input_fd() override;                 // Gets the fd as passed to (the last call to) init_input_device.
+// void start_input_device() override;          // Starts watching the fd.
+// void stop_input_device() override;           // Stops watching the fd.
+// void disable_input_device() override;        // Adds FDS_R_DISABLED to m_flags and stops watching the fd.
+// void enable_input_device() override;         // Removes FDS_R_DISABLED from m_flags and starts watching the fd again.
+//
+// The following new virtual functions are defined:
+//
+// virtual void read_from_fd(int fd);           // Called when more data might be available for reading from fd.
+//
+//   The default implementation calls:
+//
+//   virtual void read_returned_zero();         // read(fd) returned 0.
+//   virtual void read_error(int err);          // read(fd) returned -1 with errno == err (!= EAGAIN or EWOULDBLOCK).
+//   virtual void data_received(char const* new_data, size_t rlen);     // rlen (> 0) new bytes have been written to the buffer, contiguously available as new_data.
+//
+//   If the buffer is full then stop_input_device is called.
 
 class InputDevice : public virtual IOBase
 {
@@ -468,7 +484,7 @@ class InputDevice : public virtual IOBase
   // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
   virtual void read_from_fd(int fd);
 
-  // The default behaviour is to del() the object.
+  // The default behaviour is to del() this object.
   virtual void read_returned_zero() { del(); }
 
   // The default behaviour is to del() this object.
@@ -476,12 +492,7 @@ class InputDevice : public virtual IOBase
 
   // The default behavior is to do nothing.
   virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
-
-  // Called from the streambuf associated with this device when pubsync() is called on it.
-  friend class Dev2Buf;
-  virtual int sync();
 };
-
 
 //=============================================================================
 //
@@ -489,6 +500,26 @@ class InputDevice : public virtual IOBase
 //
 // Base class for classes that define Output characteristics.
 //
+// This class implements the following virtual functions of IOBase:
+//
+// void init_output_device(int fd) override;    // Initializes m_output_watcher and registers fd for writing (calls ev_io_init). Adds FDS_W_OPEN to m_flags.
+// int get_output_fd() override;                // Gets the fd as passed to (the last call to) init_output_device.
+// void start_output_device() override;         // Starts watching the fd.
+// void stop_output_device() override;          // Stops watching the fd.
+// void disable_output_device() overrid         // Adds FDS_R_DISABLED to m_flags and stops watching the fd.
+// void enable_output_device() override         // Removes FDS_R_DISABLED from m_flags and starts watching the fd again.
+//
+// The following new virtual functions are defined:
+//
+// virtual int sync();                          // Called when this is an ostream and it is being flushed.
+//
+//   The default calls start_output_device() when appropriate.
+//
+// virtual void write_to_fd(int fd);            // The fd is writable.
+//
+//   The default writes the buffer to the fd. It may call:
+//
+//   virtual void write_error(int err);         // write(fd, ...) returned -1 with errno == err (!= EAGAIN or EWOULDBLOCK).
 
 class OutputDevice : public virtual IOBase
 {
@@ -661,11 +692,39 @@ class OutputDeviceStream : public OutputDevice, public std::ostream
 //
 // Base class for reading from a device, using a general read(2) implementation.
 //
+// This class implements the following virtual functions of InputDevice:
+//
+// void data_received(char const* new_data, size_t rlen);       // Decodes the message once enough has arrived to do so.
+//
+// The following new virtual functions are defined:
+//
+// virtual size_t end_of_msg_finder(char const* new_data, size_t rlen);         // Called with newly received data of rlen contiguous bytes.
+// virtual void decode(MsgBlock msg);						// Called with a complete (contiguous) message.
+//
+//   end_of_msg_finder must return the number of bytes of the bytes passed to
+//   it that complete the current message, or 0 when there is no complete
+//   message yet. The first time it is called new_data points to the very
+//   beginning of a new message. If 0 is returned then subsequent calls are
+//   to added data. Once a non-zero value is returned, the next call will
+//   have new_data point immediately after the previous message and thus
+//   at the start of the next message.
+//
+//   For example, if a message is exactly 64 bytes and the buffer pointer
+//   starts at 1000 then the following calls are possible:
+//
+//   end_of_msg_finder(1000, 40) <-- return 0
+//   end_of_msg_finder(1040, 40) <-- return 24
+//   end_of_msg_finder(1064, 40) <-- return 0
+//   end_of_msg_finder(1104, 20) <-- return 0
+//   end_of_msg_finder(1124, 130) <-- return 4
+//   end_of_msg_finder(1128, 126) <-- return 64
+//   end_of_msg_finder(1192, 62) <-- return 0
+//   etc.
 
 class ReadInputDevice : public InputDevice
 {
  protected:
-  // The pure virtual function end_of_msg_finder(char const*, size_t) const
+  // The pure virtual function end_of_msg_finder(char const*, size_t)
   // is called when new data is received.
   //
   // When end_of_msg_finder returns a value > 0, then the pure virtual
@@ -673,7 +732,7 @@ class ReadInputDevice : public InputDevice
   void data_received(char const* new_data, size_t rlen) override;
 
   // Returns the size of the first message, or 0 if there is no complete message.
-  virtual size_t end_of_msg_finder(char const*, size_t) const = 0;
+  virtual size_t end_of_msg_finder(char const*, size_t) = 0;
 
   // Called by the default data_received (see above).
   // Msg is a contiguous message.
@@ -700,49 +759,26 @@ class ReadInputDeviceStream : public ReadInputDevice, public std::istream
 };
 
 //=============================================================================
-// class LinkBase
-//
-// The common part of LinkInputDevice and LinkOutputDevice
-//
-
-class LinkBase
-{
- protected:
-  using buffer_type = LinkBuffer;       // The type of the "link buffer".
-
- public:
-  // The default blocksize for your `StreamBuf' link buffers, used
-  // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = 2048;
-
- protected:
-  //---------------------------------------------------------------------------
-  // Constructor:
-  //
-
-  LinkBase() { }
-
-  // Disallow copy constructing.
-  LinkBase(LinkBase const&) = delete;
-};
-
-
-//=============================================================================
 //
 // class LinkInputDevice
 //
 // Base class which only reads data from its fd and writes it into the buffer.
 //
 
-class LinkInputDevice : public LinkBase, public InputDevice
+class LinkInputDevice : public InputDevice
 {
  public:
+  using buffer_type = LinkBuffer;
   using buflink_type = LinkOutputDevice;
 
  public:
   // Used default posix mode for opening files, when you don't pass it to
   // the constructor.
   static int constexpr mode = std::ios_base::in;
+
+  // The default blocksize for your `StreamBuf' link buffers, used
+  // when you don't pass that size to the constructors.
+  static size_t constexpr default_blocksize_c = 2048;
 
  public:
   //---------------------------------------------------------------------------
@@ -806,13 +842,18 @@ class WriteOutputDeviceStream : public WriteOutputDevice, public std::ostream
 // Base class which only reads data from its buffer and writes it to the fd.
 //
 
-class LinkOutputDevice : public LinkBase, public OutputDevice
+class LinkOutputDevice : public OutputDevice
 {
  public:
+  using buffer_type = LinkBuffer;
   using buflink_type = LinkInputDevice;
 
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int constexpr mode = std::ios_base::out;
+
+  // The default blocksize for your `StreamBuf' link buffers, used
+  // when you don't pass that size to the constructors.
+  static size_t constexpr default_blocksize_c = 2048;
 
  protected:
   //---------------------------------------------------------------------------

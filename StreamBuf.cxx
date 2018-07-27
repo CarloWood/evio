@@ -416,7 +416,8 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
   register char* start = get_area_block_node->block_start();
   setp(start, start + put_area_block_node->get_size());
   isetg(start, start, start);
-  m_idevice = nullptr;  // This is a union so this initializes m_odevice too.
+  m_idevice = nullptr;
+  m_odevice = nullptr;
 }
 
 size_t StreamBuf::new_block_size() const
@@ -455,12 +456,6 @@ void StreamBuf::reduce_buffer()
   setp(start, start + new_block_size);		// note: get_area_block_node == put_area_block_node (the buffer is empty)
 }
 
-int Dev2Buf::sync()
-{
-  // m_idevice points to the device whose constructor this buffer was passed to.
-  return m_idevice->sync();
-}
-
 int Buf2Dev::sync()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
@@ -487,12 +482,10 @@ bool StreamBuf::release(IOBase* device)
   else
   {
     // Resetting the devices is necessary because of `sync'.
-    //FIXME uncomment once InputDevice/OutputDevice are declared again.
-//    if (device == m_idevice)
-//      m_idevice = nullptr;
-//    else if (device == static_cast<IOBase*>(m_odevice))
-//      m_odevice = nullptr;
-    m_idevice = nullptr;        // It's a union, so this resets m_odevice too if that is what it was.
+    if (device == m_idevice)
+      m_idevice = nullptr;
+    else if (device == m_odevice)
+      m_odevice = nullptr;
 
     Dout(dc::malloc, "this = " << (void*)this << "; Calling StreamBuf::release " <<
 	m_device_counter << " device left (" << m_idevice << ", " << m_odevice << ')');

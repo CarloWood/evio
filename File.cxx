@@ -85,6 +85,7 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   }
 
   init(fd);
+  start();
 }
 
 } // namespace evio

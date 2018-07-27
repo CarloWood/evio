@@ -24,6 +24,7 @@
 #pragma once
 
 #include "evio/Device.h"
+#include <type_traits>
 
 namespace evio {
 
@@ -86,54 +87,74 @@ class FileDevice : public virtual IOBase
 template<class IO>
 class File : public FileDevice, public IO
 {
+private:
+  // Create a new `File<IO>' with a default buffer.
+  File() : IO(new typename IO::buffer_type(IO::default_blocksize_c))
+  {
+    DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
+  }
+
 public:
-  //---------------------------------------------------------------------------
-  // Constructors
-  //
+  static File& create() { return *new File; }
 
-  File() : IO(new typename IO::buffer_type(IO::default_blocksize_c)) { } // OutputDeviceStream OutputBuffer
+private:
+  // Create a new `File<IO>' with a given buffer.
+  File(typename IO::buffer_type* buffer) : IO(buffer)
+  {
+    DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  }
 
-#if 0
-  // Create a new `file_dtct<IO>' which has a buffer `iobuf_lp'.
-  File(typename IO::buffer_type* iobuf_lp)
-      {
-        Dout(dc::io, "this = " << (void*)this << "; file_dtct(" << (void*)iobuf_lp << ')');
-      }
+public:
+  static File& create(typename IO::buffer_type* buffer) { return *new File(buffer); }
 
-  // Create a new `file_dtct<IO>' which uses the same buffer as some `iotraits_lp'.
-  File(typename IO::buflink_type& iotraits_lp)
-      {
-        Dout(dc::io, "this = " << (void*)this << "; file_dtct(@" << (void*)&iotraits_lp << ')');
-      }
-#endif
+private:
+  // Create a new `File<IO>' which uses the same buffer as `link_buffer'.
+  template<typename IO_with_buflink_type = IO>
+  File(typename IO_with_buflink_type::buflink_type& link_buffer) : IO(link_buffer->rddbbuf())
+  {
+    DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  }
+
+public:
+  template<typename IO_with_buflink_type = IO>
+  static File& create(typename IO_with_buflink_type::buflink_type& link_buffer) { return *new File(link_buffer); }
 
   // Constructors that combine the above three two `open':
 
-#if 0
-  // Create a new `file_dtct<IO>' which has a buffer `iobuf_lp' and open a file.
-  file_dtct(typename IO::buffer_ct* iobuf_lp, char const* name_lp, int mode_lp = IO::mode, int prot_lp = 0664) :
-      dbbuf_fd_dtct<IO>(iobuf_lp), file_dbct()
-      {
-        Dout(dc::io, "this = " << (void*)this << "; file_dtct(" << (void*)iobuf_lp << ", \"" << name_lp << "\", " << mode_lp << ", " << std::oct << prot_lp << ')');
-        open(name_lp, mode_lp, prot_lp);
-      }
+private:
+  // Create a new `File<IO>' with a default buffer and open a file.
+  File(char const* name, int mode = IO::mode, int prot = 0664) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
+  {
+    DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
+    open(name, mode, prot);
+  }
 
-  // Create a new `file_dtct<IO>' which uses the same buffer as some `iotraits_lp' and open a file.
-  file_dtct(typename IO::buflinkT& iotraits_lp, char const* name_lp, int mode_lp = IO::mode, int prot_lp = 0664) :
-      dbbuf_fd_dtct<IO>(iotraits_lp), file_dbct()
-      {
-        Dout( dc::io, "this = " << (void*)this << "; file_dtct(@" << (void*)&iotraits_lp << ", \"" << name_lp << "\", " << mode_lp << ", " << std::oct << prot_lp << ')');
-        open(name_lp, mode_lp, prot_lp);
-      }
+public:
+  static File& create(char const* name, int mode = IO::mode, int prot = 0664) { return *new File(name, mode, prot); }
 
-  file_dtct(char const* name_lp, int mode_lp = IO::mode, int prot_lp = 0664) :
-      dbbuf_fd_dtct<IO>(NEW( typename IO::buffer_ct(IO::default_blocksize_c, UINT_MAX, UINT_MAX) )), file_dbct()
-      {
-        Dout(dc::io, "this = " << (void*)this << "; file_dtct(" << name_lp << "\", " << mode_lp << ", " << std::oct << prot_lp << ')');
-        open(name_lp, mode_lp, prot_lp);
-      }
-    // Allocate a buffer ourselfs and open a file.
-#endif
+private:
+  // Create a new `File<IO>' with a given buffer and open a file.
+  File(typename IO::buffer_type* buffer, char const* name, int mode = IO::mode, int prot = 0664) : IO(buffer)
+  {
+    DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+    open(name, mode, prot);
+  }
+
+public:
+  static File& create(typename IO::buffer_type* buffer, char const* name, int mode = IO::mode, int prot = 0664) { return *new File(buffer, name, mode, prot); }
+
+private:
+  // Create a new `File<IO>' which uses the same buffer as `link_buffer' and open a file.
+  template<typename IO_with_buflink_type = IO>
+  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = IO::mode, int prot = 0664) : IO(link_buffer->rddbbuf())
+  {
+    DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+    open(name, mode, prot);
+  }
+
+public:
+  template<typename IO_with_buflink_type = IO>
+  static File& create(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = IO::mode, int prot = 0664) { return *new File(link_buffer, name, mode, prot); }
 
 public:
   //---------------------------------------------------------------------------
@@ -141,7 +162,7 @@ public:
   //
 
   // Call the `open' of the base class, which does the real work.
-  void open(char const* name, int mode = IO::mode, int prot = 0664) { return FileDevice::open(name, mode, prot); }
+  void open(char const* name, int mode = 0, int prot = 0664) { return FileDevice::open(name, mode | IO::mode, prot); }
 
   // Call the `close' of the base class, which does the real work.
   using FileDevice::close;

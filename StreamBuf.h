@@ -581,11 +581,9 @@ class StreamBuf : public std::streambuf
   // Protected attributes:
   //
 
-  // The device whose constructor this StreamBuf was passed to.
-  union {
-    InputDevice* m_idevice;
-    OutputDevice* m_odevice;
-  };
+  // The devices whose constructor this StreamBuf was passed to.
+  InputDevice* m_idevice;
+  OutputDevice* m_odevice;
 
   // Count of number of devices.
   int m_device_counter;
@@ -679,11 +677,6 @@ class Dev2Buf : public StreamBuf
 
   // Administration:
   void reduce_buf_if_empty() { reduce_buffer_if_empty(); }      // Should be called to make sure that the buffer also decreases.
-
-  // Called when `async_flush' or `close' is called etc.
-  // Classes derived from `StreamBuf' should override this function
-  // so that it doesn't return until the buffer is emptied.
-  int sync() override;
 };
 
 // Writing to a device:
