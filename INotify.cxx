@@ -23,34 +23,79 @@
 
 #include "sys.h"
 #include "INotify.h"
+#include "threadsafe/aithreadsafe.h"
+#include "threadsafe/AIReadWriteSpinLock.h"
 #include "utils/macros.h"
+#include "utils/nearest_power_of_two.h"
 #include "libcwd/buf2str.h"
 #include <algorithm>
 #include <sys/inotify.h>
 
 namespace evio {
 
-namespace {
-SingletonInstance<INotifyDevice> dummy __attribute__ ((__unused__));
-} // namespace
+//=============================================================================
+//
+// class INotifyDevice
+//
+// An inotify device.
+//
+// SYNOPSIS
+//
+// This class implements a wrapper around inotify_init1(2), inotify_add_watch(2)
+// and inotify_rm_watch(2) to watch path names for events.  See inotify(7) for
+// more details.
+
+class INotifyDevice : public ReadInputDevice, public virtual IOBase
+{
+ private:
+  // Disallow copy constructing.
+  INotifyDevice(INotifyDevice const&) = delete;
+
+  size_t m_len_so_far;
+  union { char m_buf[4]; int32_t m_name_len; };
+  std::mutex m_inotify_mutex;   // Mutex for the inotify fd.
+
+  // Map watch descriptors to their corresponding INotify objects.
+  using wd_to_inotify_map_type = std::vector<std::pair<int, INotify*>>;
+  // Use AIReadWriteSpinLock because we'll be doing vastly more read locks than write locks.
+  using wd_to_inotify_map_ts = aithreadsafe::Wrapper<wd_to_inotify_map_type, aithreadsafe::policy::ReadWrite<AIReadWriteSpinLock>>;
+  wd_to_inotify_map_ts m_wd_to_inotify_map;
+
+  static wd_to_inotify_map_type::const_iterator get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd);
+
+ protected:
+  size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
+  void decode(MsgBlock msg) override;
+
+ public:
+  // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
+  INotifyDevice(InputBuffer* ibuf) : ReadInputDevice(ibuf), m_len_so_far(0) { m_name_len = -1; }
+
+  int add_watch(char const* pathname, uint32_t mask, INotify* obj);
+  void rm_watch(int wd);
+};
 
 int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
 {
-  if (AI_UNLIKELY(!is_open_r()))
+  int wd;
   {
-    // Set up the inotify device.
-    int fd = inotify_init1(IN_NONBLOCK);
-    ASSERT(fd != -1);
-    init(fd);
-    start_input_device();
-  }
-  int fd = get_input_fd();
-  int wd = inotify_add_watch(fd, pathname, mask);
-  if (AI_UNLIKELY(wd == -1))
-  {
-    // FIXME, throw an error.
-    ASSERT(wd >= 0);
-    return -1;
+    std::lock_guard<std::mutex> lock(m_inotify_mutex);
+    if (AI_UNLIKELY(!is_open_r()))
+    {
+      // Set up the inotify device.
+      int fd = inotify_init1(IN_NONBLOCK);
+      ASSERT(fd != -1);
+      init(fd);
+      start_input_device();
+    }
+    int fd = get_input_fd();
+    wd = inotify_add_watch(fd, pathname, mask);
+    if (AI_UNLIKELY(wd == -1))
+    {
+      // FIXME, throw an error.
+      ASSERT(wd >= 0);
+      return -1;
+    }
   }
   wd_to_inotify_map_ts::wat(m_wd_to_inotify_map)->push_back(std::make_pair(wd, obj));
   return wd;
@@ -85,8 +130,12 @@ INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify
 
 void INotifyDevice::rm_watch(int wd)
 {
+  int result;
   int fd = get_input_fd();
-  int result = inotify_rm_watch(fd, wd);
+  {
+    std::lock_guard<std::mutex> lock(m_inotify_mutex);
+    result = inotify_rm_watch(fd, wd);
+  }
   {
     wd_to_inotify_map_ts::rat wd_to_inotify_map_r(m_wd_to_inotify_map);
     auto iter = get_inotify_obj(wd_to_inotify_map_r, wd);
@@ -138,6 +187,40 @@ void INotifyDevice::decode(MsgBlock msg)
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
   Dout(dc::notice, "Received inotify event for wd " << event->wd << ": " << event->mask << " with cookie " << event->cookie << " and name \"" << buf2str(event->name, event->len) << "\".");
+  if ((event->mask & IN_Q_OVERFLOW))
+    DoutFatal(dc::core, "inotify: IN_Q_OVERFLOW happened!");
+  INotify* obj = get_inotify_obj(wd_to_inotify_map_ts::rat(m_wd_to_inotify_map), event->wd)->second;
+  obj->event_occurred(event);
+}
+
+namespace {
+  // This will be lazy initialized once at the first call to INotify::add_watch.
+  // Because no thread should read it until they pass that point of initialization check,
+  // there is no need for a lock guard for this read access. However, we DO need a
+  // mutex to assure that only a single thread will do the initialization.
+  std::mutex inotify_device_ptr_initialization_mutex;
+  std::atomic<INotifyDevice*> inotify_device_ptr;
+} // namespace
+
+//static
+int INotify::add_watch(char const* pathname, uint32_t mask, INotify* inotify)
+{
+  if (AI_UNLIKELY(inotify_device_ptr == nullptr))
+  {
+    std::lock_guard<std::mutex> lock(inotify_device_ptr_initialization_mutex);
+    if (inotify_device_ptr == nullptr)
+      inotify_device_ptr = new INotifyDevice(new InputBuffer(utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1)));
+  }
+  return inotify_device_ptr.load()->add_watch(pathname, mask, inotify);
+}
+
+//static
+void INotify::rm_watch(int wd)
+{
+  INotifyDevice* ptr = inotify_device_ptr.load();
+  // Call add_watch before rm_watch.
+  ASSERT(ptr != nullptr);
+  ptr->rm_watch(wd);
 }
 
 } // namespace evio

@@ -84,6 +84,8 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
     }
   }
 
+  // Success.
+  m_filename = filename;
   init(fd);
   start();
 }

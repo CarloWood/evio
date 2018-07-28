@@ -25,15 +25,8 @@
 
 #include "evio.h"
 #include "StreamBuf.h"
+#include "EventLoopThread.h"
 #include "utils/AIRefCount.h"
-
-class EventLoopThread;
-
-#if defined(CWDEBUG) && !defined(DOXYGEN)
-NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct evio;
-NAMESPACE_DEBUG_CHANNELS_END
-#endif
 
 namespace evio {
 
@@ -61,18 +54,14 @@ Introduction
 ------------
 
 The classes `InputDevice' and `OutputDevice' define some default input/output
-characteristics, but do not define methods related to decoding or buffering.
+characteristics and provide the hook with libev, but do not define methods
+related to decoding or buffering.
 
-The other input/output classes above override one or more of the virtual
-functions of `InputDevice' and/or `OutputDevice'.  The following virtual
-functions are not overridden by any of the default classes in this file:
-`can_be_removed' and `fd_done'.  The first determines whether the object
-must be removed while the latter is called when the object is actual being
-removed.
+The other input/output classes above, override one or more of the virtual
+functions of `InputDevice' and/or `OutputDevice'.
 
-From any of these functions you can call del() to remove the whole object
-as usual (fire-and-forget).  It doesn't `delete' the object immedeately
-but just marks it for removal (see `can_be_removed').
+From any of these functions you can call del() to mark the object for deletion
+as soon as it is finished (fire and forget).
 
 virtual functions of InputDevice
 --------------------------------
@@ -439,7 +428,12 @@ class InputDevice : public virtual IOBase
 
  private:
   // The call back used by libev.
-  static void s_evio_cb(EV_P_ ev_io* w, int) { static_cast<InputDevice*>(w->data)->read_from_fd(w->fd); }
+  static void s_evio_cb(EV_P_ ev_io* w, int)
+  {
+    // Release the mutex on 'loop' while calling an external function.
+    auto release_lock = EventLoopThread::temporary_release(EV_A);
+    static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);
+  }
 
  public:
   //---------------------------------------------------------------------------
@@ -604,7 +598,12 @@ class OutputDevice : public virtual IOBase
 
  private:
   // The call back used by libev.
-  static void s_evio_cb(EV_P_ ev_io* w, int) { static_cast<OutputDevice*>(w->data)->write_to_fd(w->fd); }
+  static void s_evio_cb(EV_P_ ev_io* w, int)
+  {
+    // Release the mutex on 'loop' while calling an external function.
+    auto release_lock = EventLoopThread::temporary_release(EV_A);
+    static_cast<OutputDevice*>(w->data)->write_to_fd(w->fd);
+  }
 
  public:
   //---------------------------------------------------------------------------

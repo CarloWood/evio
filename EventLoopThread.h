@@ -24,7 +24,6 @@
 #pragma once
 
 #include "evio.h"
-#include "Device.h"
 #include "statefultask/AIThreadPool.h"
 #include "utils/Singleton.h"
 #include <thread>
@@ -71,7 +70,32 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
   static void start(ev_timer& timeout_watcher);
   static void start(ev_io& io_watcher);
-  static void terminate();
+  static void terminate();                      // Exit as soon as all watchers added by start() have finished.
 
   void invoke_pending();
+
+  class TemporaryRelease
+  {
+#if EV_MULTIPLICITY
+    struct ev_loop* m_loop;
+   public:
+    TemporaryRelease(EV_P) : m_loop(loop) { EventLoopThread::release_cb(loop); }
+    ~TemporaryRelease() { EventLoopThread::acquire_cb(m_loop); }
+#else
+   public:
+    TemporaryRelease() { EventLoopThread::release_cb(); }
+    ~TemporaryRelease() { EventLoopThread::acquire_cb(); }
+#endif
+  };
+
+  static TemporaryRelease temporary_release(EV_P)
+  {
+    return TemporaryRelease(EV_A);
+  }
 };
+
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+extern channel_ct evio;
+NAMESPACE_DEBUG_CHANNELS_END
+#endif

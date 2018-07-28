@@ -68,9 +68,15 @@ class FileDevice : public virtual IOBase
   void open(char const* filename, int mode, int prot = 0664, int additional_posix_modes = 0);
 
   // Call the `close' of the base class, which does the real work.
-  void close() { ansi_close(); }
-};
+  void close() { ansi_close(); m_filename.clear(); }
 
+ private:
+  std::string m_filename;       // The name of the opened file.
+
+ public:
+  // Returns the currently open filename (empty if not open).
+  std::string const& open_filename() const { return m_filename; }
+};
 
 //=============================================================================
 //

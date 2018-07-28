@@ -28,6 +28,7 @@
 #include "debug.h"
 #include "StreamBuf.h"
 #include "Device.h"
+#include "utils/is_power_of_two.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #else
@@ -401,7 +402,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
 #ifdef CWDEBUG
   if (minimum_blocksize < 64)
     Dout(dc::warning, "StreamBuf with a minimum_blocksize smaller then 64 !");
-  if (((minimum_blocksize - 1) & minimum_blocksize) != 0)
+  if (!utils::is_power_of_two(minimum_blocksize))
     DoutFatal(dc::core, "Please use a minimum_blocksize that is a power of 2 for StreamBuf");
 #endif
   log2_min_buf_size = 6; // log(64)/log(2)
