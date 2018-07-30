@@ -24,13 +24,13 @@
 #pragma once
 
 #include "sys.h"
+#include "debug.h"
 #include <deque>
 #include <cstdlib>              // Needed for malloc(2) etc.
 #include <streambuf>
 #include <new>
 #include <iostream>
 #include <unistd.h>             // Needed for read(2) and write(2)
-#include "debug.h"
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -699,6 +699,9 @@ class Buf2Dev : public StreamBuf
   // Classes derived from `StreamBuf' should override this function
   // so that it doesn't return until the buffer is emptied.
   int sync() override;
+  // Alternatively, this can be called, i.e. for non-streams, whenever anything was
+  // written to the buffer to make sure that it is written out.
+  void flush();
 };
 
 // Linking two devices together:
@@ -714,6 +717,7 @@ class LinkBuffer : public Dev2Buf
   size_t buf2dev_contiguous_forced() { return force_next_contiguous_number_of_bytes(); }
   char* buf2dev_ptr() const { return igptr(); }
   void buf2dev_bump(int n) { igbump(n); }
+  void flush();
   //-----------------------------------------------------------
 
   // Because this class has the same interface as Buf2Dev, it is safe to provide these casting operators:
@@ -769,24 +773,6 @@ inline bool StreamBuf::is_contiguous(size_t len) const
     DoutFatal( dc::core, "Ack! getpointer out of sync with get_area_block_node !" );
 #endif
   return (igptr() + len <= get_area_block_node->block_start() + get_area_block_node->get_size());
-}
-
-inline void StreamBuf::set_input_device(InputDevice* device)
-{
-  // Don't pass a StreamBuf to more than one device.
-  // Also note set_input_device should only be called from the constructor of an InputDevice, don't call it directly.
-  ASSERT(!m_idevice);
-  ++m_device_counter;
-  m_idevice = device;
-}
-
-inline void StreamBuf::set_output_device(OutputDevice* device)
-{
-  // Don't pass a StreamBuf to more than one device.
-  // Also note set_output_device should only be called from the constructor of an OutputDevice, don't call it directly.
-  ASSERT(!m_odevice);
-  ++m_device_counter;
-  m_odevice = device;
 }
 
 inline void StreamBuf::reduce_buffer_if_empty()

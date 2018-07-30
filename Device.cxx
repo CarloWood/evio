@@ -108,7 +108,7 @@ void InputDevice::start_input_device()
   // Don't call start twice on a row.
   ASSERT(!is_active());
   // Don't start a device after calling del() on it.
-  ASSERT(!must_be_removed());
+  ASSERT(!must_be_removed() || ref_count() > 0);        // If this is false then the object is ALREADY deleted!
   // Increment it once more to stop this object from being deleted while being active.
   // This is not really necessary I think, because the reference count is already incremented
   // the first time that init_input_device is caleld; which is only decremented when calling
@@ -304,7 +304,7 @@ try_again_read1:
     }
 
     // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
-    // read so far), and when using edge triggered epoll we must continue to call read until it returns EAGAIN.
+    // read so far). Perhaps we should just try to continue to read until EAGAIN.
     if (rlen < space)   // Did we read everything, or process at least
       return;           //  one message ?
 

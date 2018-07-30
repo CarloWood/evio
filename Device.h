@@ -170,10 +170,14 @@ class IOBase : public AIRefCount
   flags_t m_flags;
 
  private:
+  // At least one of these must be overridden to initialize the appropriate device(s).
+  // Both are called by init().
   virtual void init_input_device(int) { }
   virtual void init_output_device(int) { }
 
  protected:
+  // Requests.
+  // Call these from derived classes to start watching, stop watching, temporarily disable and enable the device.
   virtual void start_input_device() { }
   virtual void start_output_device() { }
   virtual void stop_input_device() { }
@@ -182,8 +186,18 @@ class IOBase : public AIRefCount
   virtual void disable_output_device() { }
   virtual void enable_input_device() { }
   virtual void enable_output_device() { }
+
+  // Queries.
+  // Called to obtain the fd that init_input_device() was called with if that actually did initialize an input device; otherwise -1 is returned.
   virtual int get_input_fd() { return -1; }
+  // Called to obtain the fd that init_output_device() was called with if that actually did initialize an output device; otherwise -1 is returned.
   virtual int get_output_fd() { return -1; }
+
+  // Events.
+  // The filedescriptor(s) of this device were just closed (close_fds() was called).
+  // If INTERNAL_FDS_DONT_CLOSE is set than the fd(s) weren't really closed, but this method is still called.
+  // When we get here the object is also marked as FDS_DEAD.
+  virtual void closed() { }
 
  protected:
   IOBase() : m_flags(0) { }
@@ -306,34 +320,39 @@ class IOBase : public AIRefCount
     }
   }
 
-  void ansi_close()
+  void close_fds()
   {
     int input_fd = get_input_fd();
     int output_fd = get_output_fd();
     if (!(input_fd == -1 || is_valid(input_fd)))
     {
-      Dout(dc::warning, "Calling IOBase::ansi_close on object with input fd = " << input_fd << " that isn't open.");
+      Dout(dc::warning, "Calling IOBase::close_fds on object with input fd = " << input_fd << " that isn't open.");
       return;
     }
     else if (!(output_fd == -1 || is_valid(output_fd)))
     {
-      Dout(dc::warning, "Calling IOBase::ansi_close on object with output fd = " << output_fd << " that isn't open.");
+      Dout(dc::warning, "Calling IOBase::close_fds on object with output fd = " << output_fd << " that isn't open.");
       return;
     }
     stop_input_device();
     stop_output_device();
-    if (input_fd != -1)
+    if (!dont_close())
     {
-      DEBUG_ONLY(int err = )
-      ::close(input_fd);
-      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
+      if (input_fd != -1)
+      {
+        DEBUG_ONLY(int err = )
+        ::close(input_fd);
+        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
+      }
+      if (output_fd != -1 && output_fd != input_fd)
+      {
+        DEBUG_ONLY(int err = )
+        ::close(output_fd);
+        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
+      }
     }
-    if (output_fd != -1 && output_fd != input_fd)
-    {
-      DEBUG_ONLY(int err = )
-      ::close(output_fd);
-      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
-    }
+    m_flags |= FDS_DEAD;
+    closed();
   }
 };
 
@@ -634,6 +653,15 @@ class OutputDevice : public virtual IOBase
       start_output_device();
   }
 
+  void restart_if_non_active()
+  {
+    // This function should be called only from Buf2Dev::flush, and therefore be an output device.
+    ASSERT(writable_type());
+    //FIXME: this looks like a race condition. Two different threads can call this function.
+    if (is_writable() && !is_active())
+      start_output_device();
+  }
+
   void close()
   {
     DoutFatal(dc::core, "FIXME");
@@ -795,8 +823,13 @@ class LinkInputDevice : public InputDevice
   //
 
   LinkInputDevice(LinkBuffer* lbuf) : InputDevice(lbuf) { }
-};
 
+  // Tell the output device that new data is received.
+  void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) override
+  {
+    static_cast<LinkBuffer*>(static_cast<Dev2Buf*>(m_ibuffer))->flush();
+  }
+};
 
 //=============================================================================
 //

@@ -463,6 +463,18 @@ int Buf2Dev::sync()
   return m_odevice->sync();
 }
 
+void Buf2Dev::flush()
+{
+  // m_odevice points to the device whose constructor this buffer was passed to.
+  m_odevice->restart_if_non_active();
+}
+
+void LinkBuffer::flush()
+{
+  // m_odevice points to the device whose constructor this buffer was passed to.
+  m_odevice->restart_if_non_active();
+}
+
 bool StreamBuf::release(IOBase* device)
 {
 #ifdef CWDEBUG
@@ -482,17 +494,40 @@ bool StreamBuf::release(IOBase* device)
   }
   else
   {
-    // Resetting the devices is necessary because of `sync'.
-    if (device == m_idevice)
-      m_idevice = nullptr;
-    else if (device == m_odevice)
-      m_odevice = nullptr;
+    // When m_device_counter becomes 2, the ref count of m_odevice is increased.
+    // It should never be deletd before then input device!
+    ASSERT(device == m_idevice);
+    // Resetting the device pointer is necessary because of `sync' and `flush'.
+    m_idevice = nullptr;
 
     Dout(dc::malloc, "this = " << (void*)this << "; Calling StreamBuf::release " <<
-	m_device_counter << " device left (" << m_idevice << ", " << m_odevice << ')');
+        m_device_counter << " output device left: " << m_odevice);
+
+    // Decrease the ref count of the output device again.
+    intrusive_ptr_release(m_odevice);
 
     return false;
   }
+}
+
+void StreamBuf::set_input_device(InputDevice* device)
+{
+  // Don't pass a StreamBuf to more than one device.
+  // Also note set_input_device should only be called from the constructor of an InputDevice, don't call it directly.
+  ASSERT(!m_idevice);
+  if (++m_device_counter == 2)
+    intrusive_ptr_add_ref(m_odevice);
+  m_idevice = device;
+}
+
+void StreamBuf::set_output_device(OutputDevice* device)
+{
+  // Don't pass a StreamBuf to more than one device.
+  // Also note set_output_device should only be called from the constructor of an OutputDevice, don't call it directly.
+  ASSERT(!m_odevice);
+  if (++m_device_counter == 2)
+    intrusive_ptr_add_ref(device);
+  m_odevice = device;
 }
 
 } // namespace evio

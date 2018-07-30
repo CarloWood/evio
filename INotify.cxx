@@ -87,9 +87,13 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       ASSERT(fd != -1);
       init(fd);
       start_input_device();
+      // Exit ev_run when this device is still running.
+      ev_unref(EV_A);
     }
     int fd = get_input_fd();
+    Dout(dc::system|continued_cf, "inotify_add_watch(" << fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");
     wd = inotify_add_watch(fd, pathname, mask);
+    Dout(dc::finish|cond_error_cf(wd == -1), wd);
     if (AI_UNLIKELY(wd == -1))
     {
       // FIXME, throw an error.
@@ -134,12 +138,16 @@ void INotifyDevice::rm_watch(int wd)
   int fd = get_input_fd();
   {
     std::lock_guard<std::mutex> lock(m_inotify_mutex);
+    Dout(dc::system|continued_cf, "inotify_rm_watch(" << fd << ", " << wd << ") = ");
     result = inotify_rm_watch(fd, wd);
+    Dout(dc::finish|cond_error_cf(result == -1), result);
   }
   {
-    wd_to_inotify_map_ts::rat wd_to_inotify_map_r(m_wd_to_inotify_map);
-    auto iter = get_inotify_obj(wd_to_inotify_map_r, wd);
-    wd_to_inotify_map_ts::wat(wd_to_inotify_map_r)->erase(iter);
+    // Although a write lock is only necessary for the erase; the AIReadWriteSpinLock that
+    // wd_to_inotify_map_ts does not support converting a read lock into a write lock.
+    wd_to_inotify_map_ts::wat wd_to_inotify_map_w(m_wd_to_inotify_map);
+    auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
+    wd_to_inotify_map_w->erase(iter);
   }
   // FIXME, throw an error.
   ASSERT(result == 0);
@@ -189,6 +197,8 @@ void INotifyDevice::decode(MsgBlock msg)
   Dout(dc::notice, "Received inotify event for wd " << event->wd << ": " << event->mask << " with cookie " << event->cookie << " and name \"" << buf2str(event->name, event->len) << "\".");
   if ((event->mask & IN_Q_OVERFLOW))
     DoutFatal(dc::core, "inotify: IN_Q_OVERFLOW happened!");
+  if ((event->mask == IN_IGNORED))      // In that case the wd was already removed from m_wd_to_inotify_map (and the INotify object destroyed).
+    return;
   INotify* obj = get_inotify_obj(wd_to_inotify_map_ts::rat(m_wd_to_inotify_map), event->wd)->second;
   obj->event_occurred(event);
 }
