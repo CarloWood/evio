@@ -253,7 +253,7 @@ try_again_write1:
 void InputDevice::read_from_fd(int fd)
 {
   DoutEntering(dc::io, "InputDevice::read_from_fd(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-  size_t space = m_ibuffer->dev2buf_contiguous();
+  ssize_t space = m_ibuffer->dev2buf_contiguous();
   for (;;)
   {
     // Allocate more space in the buffer if needed.

@@ -3,6 +3,43 @@
 This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
 embedding a minimum amount of [libev](http://software.schmorp.de/pkg/libev.html) for io event support using epoll.
 
+## I/O device
+
+Each device class has `IOBase` as virtual base class, which in turn is derived from `RefCount`.
+Therefore, the typical usage of a device class is
+
+```
+boost::intrusive_ptr<Device*> device = new Device<IO>(/* constructor params */);
+```
+
+which as normal would get deleted as soon as the `boost::intrusive_ptr` is destructed.
+However there are exceptions to that rule, see below.
+
+Either after or during construction the device is associated with an (open) filedescriptor
+(by calling, usually internally, `IOBase::init(int fd)` with an open filedescriptor `fd`,
+after which the member function `is_open()` will return true). The filedescriptor is closed
+upon destruction of the device or when the user explicitly calls the member function `close()`.
+In both cases the virtual function `closed()` is called, and `is_open()`
+returns false (after calling `close()`, not after destruction of course ;).
+
+There are three reasons why a Device is not immediately destroyed once the `boost::intrusive_ptr`
+is destructed:
+
+1. Device is (derived from) `PersistentInputFile`. This means that a file path is associated
+   with the device that is monitored using <tt>inotify(7)</tt>; and as soon as there is
+   something / more to read from that path the device will read it. The only way to destroy
+   such an object is by calling `close()`.
+
+2. `IO` is (derived from) `OutputDevice` and there is still data in its buffer that wasn't
+   written yet (and still <em>can</em> be written, of course).
+
+3. `IO` is (derived from) `LinkOutputDevice` and the `InputDevice` that shares the buffer
+   wasn't deleted yet.
+
+### Device classes
+
+* `File<IO>`
+
 The root project should be using
 [autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools) and
 [cwm4](https://github.com/CarloWood/cwm4).

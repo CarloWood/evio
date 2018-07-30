@@ -23,7 +23,8 @@
 
 #pragma once
 
-#include "evio/Device.h"
+#include "Device.h"
+#include "INotify.h"
 #include <type_traits>
 
 namespace evio {
@@ -93,27 +94,19 @@ class FileDevice : public virtual IOBase
 template<class IO>
 class File : public FileDevice, public IO
 {
-private:
+ public:
   // Create a new `File<IO>' with a default buffer.
   File() : IO(new typename IO::buffer_type(IO::default_blocksize_c))
   {
     DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
   }
 
-public:
-  static File& create() { return *new File; }
-
-private:
   // Create a new `File<IO>' with a given buffer.
   File(typename IO::buffer_type* buffer) : IO(buffer)
   {
     DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   }
 
-public:
-  static File& create(typename IO::buffer_type* buffer) { return *new File(buffer); }
-
-private:
   // Create a new `File<IO>' which uses the same buffer as `link_buffer'.
   template<typename IO_with_buflink_type = IO>
   File(typename IO_with_buflink_type::buflink_type& link_buffer) : IO(link_buffer->rddbbuf())
@@ -121,48 +114,31 @@ private:
     DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   }
 
-public:
-  template<typename IO_with_buflink_type = IO>
-  static File& create(typename IO_with_buflink_type::buflink_type& link_buffer) { return *new File(link_buffer); }
-
   // Constructors that combine the above three two `open':
 
-private:
   // Create a new `File<IO>' with a default buffer and open a file.
-  File(char const* name, int mode = IO::mode, int prot = 0664) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
+  File(char const* name, int mode = 0, int prot = 0664) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
   {
     DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode, prot);
+    open(name, mode | IO::mode, prot);
   }
 
-public:
-  static File& create(char const* name, int mode = IO::mode, int prot = 0664) { return *new File(name, mode, prot); }
-
-private:
   // Create a new `File<IO>' with a given buffer and open a file.
-  File(typename IO::buffer_type* buffer, char const* name, int mode = IO::mode, int prot = 0664) : IO(buffer)
+  File(typename IO::buffer_type* buffer, char const* name, int mode = 0, int prot = 0664) : IO(buffer)
   {
     DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode, prot);
+    open(name, mode | IO::mode, prot);
   }
 
-public:
-  static File& create(typename IO::buffer_type* buffer, char const* name, int mode = IO::mode, int prot = 0664) { return *new File(buffer, name, mode, prot); }
-
-private:
   // Create a new `File<IO>' which uses the same buffer as `link_buffer' and open a file.
   template<typename IO_with_buflink_type = IO>
-  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = IO::mode, int prot = 0664) : IO(link_buffer->rddbbuf())
+  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = 0, int prot = 0664) : IO(link_buffer->rddbbuf())
   {
     DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode, prot);
+    open(name, mode | IO::mode, prot);
   }
 
-public:
-  template<typename IO_with_buflink_type = IO>
-  static File& create(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = IO::mode, int prot = 0664) { return *new File(link_buffer, name, mode, prot); }
-
-public:
+ public:
   //---------------------------------------------------------------------------
   // Public methods
   //
@@ -170,10 +146,60 @@ public:
   // Call the `open' of the base class, which does the real work.
   void open(char const* name, int mode = 0, int prot = 0664) { return FileDevice::open(name, mode | IO::mode, prot); }
 
-  // Call the `close' of the base class, which does the real work.
+  // Call `close` of the base class.
   using FileDevice::close;
 };
 
+template<class INPUTDEVICE>
+class PersistentInputFile : public File<INPUTDEVICE>, private INotify
+{
+ public:
+  using File<INPUTDEVICE>::File;
+
+ private:
+  // Override IOBase::closed() event to remove any inotify watch when it exists.
+  void closed() override;
+
+  // Override InputDevice::read_returned_zero().
+  void read_returned_zero() override;
+
+  // Override method of INotify.
+  void event_occurred(inotify_event const* event) override
+  {
+    if ((event->mask & IN_MODIFY))
+      INPUTDEVICE::start_input_device();
+  }
+};
+
+template<class INPUTDEVICE>
+void PersistentInputFile<INPUTDEVICE>::closed()
+{
+  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::closed()");
+  if (is_watched())
+  {
+    rm_watch();
+    Dout(dc::evio, "Decrementing ref count of this device [" << (void*)static_cast<IOBase*>(this) << ']');
+    intrusive_ptr_release(this);
+  }
+}
+
+template<class INPUTDEVICE>
+void PersistentInputFile<INPUTDEVICE>::read_returned_zero()
+{
+  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::read_returned_zero()");
+  INPUTDEVICE::stop_input_device();
+  if (is_watched())     // Already watched?
+    return;
+  // Add an inotify watch for modification of the corresponding path.
+  if (!FileDevice::open_filename().empty())
+  {
+    if (add_watch(FileDevice::open_filename().c_str(), IN_MODIFY))
+    {
+      Dout(dc::evio, "Incrementing ref count of this device [" << (void*)static_cast<IOBase*>(this) << ']');
+      intrusive_ptr_add_ref(this);      // Keep this object alive because the above call registered m_inotify as callback object.
+    }
+  }
+}
 
 //=============================================================================
 //
