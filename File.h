@@ -24,8 +24,6 @@
 #pragma once
 
 #include "Device.h"
-#include "INotify.h"
-#include <type_traits>
 
 namespace evio {
 
@@ -149,57 +147,6 @@ class File : public FileDevice, public IO
   // Call `close` of the base class.
   using FileDevice::close;
 };
-
-template<class INPUTDEVICE>
-class PersistentInputFile : public File<INPUTDEVICE>, private INotify
-{
- public:
-  using File<INPUTDEVICE>::File;
-
- private:
-  // Override IOBase::closed() event to remove any inotify watch when it exists.
-  void closed() override;
-
-  // Override InputDevice::read_returned_zero().
-  void read_returned_zero() override;
-
-  // Override method of INotify.
-  void event_occurred(inotify_event const* event) override
-  {
-    if ((event->mask & IN_MODIFY))
-      INPUTDEVICE::start_input_device();
-  }
-};
-
-template<class INPUTDEVICE>
-void PersistentInputFile<INPUTDEVICE>::closed()
-{
-  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::closed()");
-  if (is_watched())
-  {
-    rm_watch();
-    Dout(dc::io, "Decrementing ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
-    intrusive_ptr_release(this);
-  }
-}
-
-template<class INPUTDEVICE>
-void PersistentInputFile<INPUTDEVICE>::read_returned_zero()
-{
-  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::read_returned_zero()");
-  INPUTDEVICE::stop_input_device();
-  if (is_watched())     // Already watched?
-    return;
-  // Add an inotify watch for modification of the corresponding path.
-  if (!FileDevice::open_filename().empty())
-  {
-    if (add_watch(FileDevice::open_filename().c_str(), IN_MODIFY))
-    {
-      intrusive_ptr_add_ref(this);      // Keep this object alive because the above call registered m_inotify as callback object.
-      Dout(dc::io, "Incremented ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
-    }
-  }
-}
 
 //=============================================================================
 //

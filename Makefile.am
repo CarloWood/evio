@@ -12,6 +12,7 @@ SOURCES = StreamBuf.cxx \
 	  Device.h \
 	  File.cxx \
 	  File.h \
+	  PersistentInputFile.h \
 	  INotify.cxx \
 	  INotify.h
 
