@@ -71,7 +71,6 @@ void StreamBuf::printOn(ostream& os) const
     DoutFatal(dc::core, "Inconsistent total allocated size!");
   os << "get_area_block_node = " << (void*)get_area_block_node;
   os << "; put_area_block_node = " << (void*)put_area_block_node << endl;
-  void* volatile ptr = (void*)gptr();
   os << "get area: " << (void*)ieback() << " - " << (void*)igptr() << "(" << igptr() - ieback() << ")" << " - " << (void*)iegptr() << "(" << iegptr() - ieback() << ")";
 #if CWDEBUG_ALLOC
   os << "\t[ " << find_alloc(ieback())->start() << " (" << find_alloc(ieback())->size() << ") ]";
@@ -500,8 +499,9 @@ bool StreamBuf::release(IOBase* device)
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
 
-    Dout(dc::malloc, "this = " << (void*)this << "; Calling StreamBuf::release " <<
-        m_device_counter << " output device left: " << m_odevice);
+    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
+        m_device_counter << " output device left: " << (void*)static_cast<IOBase*>(m_odevice) <<
+        "; decrementing ref count of that device (now " << m_odevice->ref_count() << ").");
 
     // Decrease the ref count of the output device again.
     intrusive_ptr_release(m_odevice);
@@ -516,7 +516,11 @@ void StreamBuf::set_input_device(InputDevice* device)
   // Also note set_input_device should only be called from the constructor of an InputDevice, don't call it directly.
   ASSERT(!m_idevice);
   if (++m_device_counter == 2)
+  {
     intrusive_ptr_add_ref(m_odevice);
+    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_input_device(" << (void*)static_cast<IOBase*>(device) <<
+        "); incremented ref count of output device [" << (void*)static_cast<IOBase*>(m_odevice) << "] (now " << m_odevice->ref_count() << ").");
+  }
   m_idevice = device;
 }
 
@@ -526,7 +530,11 @@ void StreamBuf::set_output_device(OutputDevice* device)
   // Also note set_output_device should only be called from the constructor of an OutputDevice, don't call it directly.
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
+  {
     intrusive_ptr_add_ref(device);
+    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_output_device(" << (void*)static_cast<IOBase*>(device) <<
+        "); incremented ref count of output device [" << (void*)static_cast<IOBase*>(device) << "] (now " << device->ref_count() << ").");
+  }
   m_odevice = device;
 }
 

@@ -54,14 +54,23 @@ Introduction
 ------------
 
 The classes `InputDevice' and `OutputDevice' define some default input/output
-characteristics and provide the hook with libev, but do not define methods
+characteristics and provide the hooks with libev, but do not define methods
 related to decoding or buffering.
 
-The other input/output classes above, override one or more of the virtual
+The other input/output classes above override one or more of the virtual
 functions of `InputDevice' and/or `OutputDevice'.
 
-From any of these functions you can call del() to mark the object for deletion
-as soon as it is finished (fire and forget).
+virtual functions of IOBase
+---------------------------
+
+  virtual void closed();
+    // The file descriptor(s) of this device were closed.
+    //
+    // This method is called after the filedescriptors were
+    // just closed and can be used for certain cleanup in
+    // derived classes.
+    //
+    // The default does nothing.
 
 virtual functions of InputDevice
 --------------------------------
@@ -82,11 +91,12 @@ virtual functions of InputDevice
     // fd is a file it means EOF, when fd is a socket it means that the
     // the connection was closed.
     //
-    // The default calls `del()'.
+    // The default calls `close()'.
 
   virtual void read_error(int err)
     // The fatal error err occurred; we stopped reading the fd.
-    // The default behaviour is to del() this object.
+    //
+    // The default calls `close()'.
 
   virtual void data_received(char const* new_data, size_t rlen);
     // New data was read from the fd.
@@ -136,6 +146,7 @@ void set_nonblocking(int fd);
 // Return true if fd is a valid open filedescriptor.
 bool is_valid(int fd);
 
+
 //=============================================================================
 //
 // class IOBase
@@ -161,10 +172,9 @@ class IOBase : public AIRefCount
   static flags_t constexpr FDS_REMOVE              = 0x01000000;
   static flags_t constexpr FDS_DEAD                = 0x00800000;
   static flags_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
-  static flags_t constexpr FDS_DONT_CLOSE_ON_DEL   = 0x00200000;
-  static flags_t constexpr FDS_LINKED              = 0x00100000;
+  static flags_t constexpr FDS_LINKED              = 0x00200000;
 #ifdef CWDEBUG
-  static flags_t constexpr FDS_DEBUG               = 0x00080000;
+  static flags_t constexpr FDS_DEBUG               = 0x00100000;
 #endif
 
   flags_t m_flags;
@@ -201,9 +211,7 @@ class IOBase : public AIRefCount
 
  protected:
   IOBase() : m_flags(0) { }
-#ifdef CWDEBUG
-  ~IOBase() { Dout(dc::evio, "Destructing IOBase [" << (void*)this << "]"); }
-#endif
+  ~IOBase() { DoutEntering(dc::evio, "~IOBase() [" << (void*)this << "]"); }
 
   //---------------------------------------------------------------------------
   // Accessors for m_flags; not really _needed_ public, but here they are.
@@ -247,10 +255,6 @@ class IOBase : public AIRefCount
 
   // Return true if this object is marked that it should not close its fd.
   bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
-
-  // Return true if this object is marked that it should not close
-  // its fd when del() is called.
-  bool dont_close_on_del() const { return m_flags & FDS_DONT_CLOSE_ON_DEL; }
 
   // Return true if this object has at least one open filedescriptor.
   bool is_open() const { return m_flags & (m_flags & FDS_RW) >> open_shft; }
@@ -308,53 +312,9 @@ class IOBase : public AIRefCount
     enable_output_device();
   }
 
-  void del()
-  {
-    DoutEntering(dc::io, "IOBase::del() [" << (void*)this << ']');
-    if (!must_be_removed())     // Has not already been marked for removal?
-    {
-      Dout(dc::evio, "Setting FDS_REMOVE on " << (void*)this);
-      m_flags |= FDS_REMOVE;
-      stop_input_device();
-      intrusive_ptr_release(this);
-    }
-  }
-
-  void close_fds()
-  {
-    int input_fd = get_input_fd();
-    int output_fd = get_output_fd();
-    if (!(input_fd == -1 || is_valid(input_fd)))
-    {
-      Dout(dc::warning, "Calling IOBase::close_fds on object with input fd = " << input_fd << " that isn't open.");
-      return;
-    }
-    else if (!(output_fd == -1 || is_valid(output_fd)))
-    {
-      Dout(dc::warning, "Calling IOBase::close_fds on object with output fd = " << output_fd << " that isn't open.");
-      return;
-    }
-    stop_input_device();
-    stop_output_device();
-    if (!dont_close())
-    {
-      if (input_fd != -1)
-      {
-        DEBUG_ONLY(int err = )
-        ::close(input_fd);
-        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
-      }
-      if (output_fd != -1 && output_fd != input_fd)
-      {
-        DEBUG_ONLY(int err = )
-        ::close(output_fd);
-        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
-      }
-    }
-    m_flags |= FDS_DEAD;
-    closed();
-  }
+  void close_fds();
 };
+
 
 //=============================================================================
 //
@@ -437,6 +397,8 @@ class InputDevice : public virtual IOBase
   ~InputDevice()
   {
     DoutEntering(dc::io, "~InputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
+    if (is_open_r())
+      close_fds();
     // Delete the input buffer if it is no longer needed.
     m_ibuffer->release(this);
   }
@@ -482,6 +444,12 @@ class InputDevice : public virtual IOBase
       start_input_device();
   }
 
+  void close()
+  {
+    DoutEntering(dc::io, "InputDevice::close()");
+    close_fds();
+  }
+
  protected:
   // Event: 'fd' is readable.
   //
@@ -496,15 +464,16 @@ class InputDevice : public virtual IOBase
   // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
   virtual void read_from_fd(int fd);
 
-  // The default behaviour is to del() this object.
-  virtual void read_returned_zero() { del(); }
+  // The default behaviour is to close() the filedescriptor(s).
+  virtual void read_returned_zero() { close(); }
 
-  // The default behaviour is to del() this object.
-  virtual void read_error(int UNUSED_ARG(err)) { del(); }
+  // The default behaviour is to close() the filedescriptor(s).
+  virtual void read_error(int UNUSED_ARG(err)) { close(); }
 
   // The default behavior is to do nothing.
   virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
 };
+
 
 //=============================================================================
 //
@@ -587,6 +556,8 @@ class OutputDevice : public virtual IOBase
   ~OutputDevice()
   {
     DoutEntering(dc::io, "~OutputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
+    if (is_open_w())
+      close_fds();
     // Delete the output buffer if it is no longer needed.
     m_obuffer->release(this);
   }
@@ -663,7 +634,8 @@ class OutputDevice : public virtual IOBase
 
   void close()
   {
-    DoutFatal(dc::core, "FIXME");
+    DoutEntering(dc::io, "OutputDevice::close()");
+    close_fds();
   }
 };
 
@@ -679,24 +651,6 @@ class InputDeviceStream : public InputDevice, public std::istream
   using iostream_type = std::istream;
   InputDeviceStream(InputBuffer* ibuf) : InputDevice(ibuf), std::istream(ibuf) { }
 };
-
-
-#if 0
-//=============================================================================
-//
-// class no_output_ct
-//
-
-class no_output_ct : public OutputDevice
-{
- protected:
-  no_output_ct(OutputBuffer* obuf) : OutputDevice(obuf) { }
-  void write_to_fd(int) override
-  {
-    DoutFatal(dc::core, "Don't write data to \"no_output_ct\"");
-  }
-};
-#endif
 
 
 //=============================================================================
@@ -772,6 +726,7 @@ class ReadInputDevice : public InputDevice
   ReadInputDevice(InputBuffer* ibuf) : InputDevice(ibuf) { }
 };
 
+
 //=============================================================================
 //
 // class ReadInputDeviceStream
@@ -783,6 +738,7 @@ class ReadInputDeviceStream : public ReadInputDevice, public std::istream
   using iostream_type = std::istream;
   ReadInputDeviceStream(InputBuffer* ibuf) : ReadInputDevice(ibuf), std::istream(ibuf) { }
 };
+
 
 //=============================================================================
 //
@@ -829,6 +785,7 @@ class LinkInputDevice : public InputDevice
     static_cast<LinkBuffer*>(static_cast<Dev2Buf*>(m_ibuffer))->flush();
   }
 };
+
 
 //=============================================================================
 //

@@ -36,32 +36,71 @@
 
 namespace evio {
 
+void IOBase::close_fds()
+{
+  DoutEntering(dc::io, "IOBase::close_fds() [" << (void*)this << ']');
+  int input_fd = get_input_fd();
+  int output_fd = get_output_fd();
+  if (is_open_r())
+  {
+#ifdef CWDEBUG
+    if (!is_valid(input_fd))
+      Dout(dc::warning, "Calling IOBase::close_fds on input device with invalid fd = " << input_fd << ".");
+#endif
+    stop_input_device();
+  }
+  if (is_open_w())
+  {
+#ifdef CWDEBUG
+    if (!is_valid(output_fd))
+      Dout(dc::warning, "Calling IOBase::close_fds on output device with invalid fd = " << output_fd << ".");
+#endif
+    stop_output_device();
+  }
+  if (!dont_close())
+  {
+    if (input_fd != -1)
+    {
+      DEBUG_ONLY(int err = )
+      ::close(input_fd);
+      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
+    }
+    if (output_fd != -1 && output_fd != input_fd)
+    {
+      DEBUG_ONLY(int err = )
+      ::close(output_fd);
+      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
+    }
+  }
+  m_flags |= FDS_DEAD;
+  if (is_open())
+  {
+    m_flags &= ~(FDS_W_OPEN | FDS_R_OPEN);
+    closed();
+  }
+}
+
 void InputDevice::init_input_device(int fd)
 {
+  DoutEntering(dc::io, "InputDevice::init_input_device(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   // Don't call init() while the InputDevice is already active.
   ASSERT(!is_active());
   ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, fd, EV_READ);
   m_input_watcher.data = this;
-  // Increment ref count once to stop this object from being removed until del() is called.
-  if (!is_open())                       // Only do this the first call init().
-    intrusive_ptr_add_ref(this);
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
-  // Here we mark that the file descriptor that corresponds to reading from
-  // this device is open.
+  // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
   m_flags |= FDS_R_OPEN;
 }
 
 void OutputDevice::init_output_device(int fd)
 {
+  DoutEntering(dc::io, "OutputDevice::init_output_device(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   // Don't call init() while the OutputDevice is already active.
   ASSERT(!is_active());
   ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, fd, EV_WRITE);
   m_output_watcher.data = this;
-  // Increment ref count once to stop this object from being removed until del() is called.
-  if (!is_open())
-    intrusive_ptr_add_ref(this);
-  // Here we mark that the file descriptor that corresponds to writing to this device is open.
+  // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   m_flags |= FDS_W_OPEN;
 }
 
@@ -107,14 +146,15 @@ void InputDevice::start_input_device()
   ASSERT(m_input_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  // Don't start a device after calling del() on it.
+  // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
+  // Did you use boost::intrusive_ptr at all? The recommended way to create a new device is
+  // by using evio::create. For example:
+  // auto device = evio::create<File<InputDevice>>();
+  // device->open("filename.txt");
   ASSERT(!must_be_removed() || ref_count() > 0);        // If this is false then the object is ALREADY deleted!
-  // Increment it once more to stop this object from being deleted while being active.
-  // This is not really necessary I think, because the reference count is already incremented
-  // the first time that init_input_device is caleld; which is only decremented when calling
-  // del() always causing an immediately delete there. The corresponding intrusive_ptr_release
-  // in stop_input_device can also be removed then.
+  // Increment ref count to stop this object from being deleted while being active.
   intrusive_ptr_add_ref(this);
+  Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   EventLoopThread::start(m_input_watcher);
 }
 
@@ -125,17 +165,17 @@ void OutputDevice::start_output_device()
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // Don't call start twice on a row.
   ASSERT(!is_active());
-  // Increment it once more to stop this object from being deleted while being active.
+  // Increment ref count to stop this object from being deleted while being active.
   intrusive_ptr_add_ref(this);
+  Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   EventLoopThread::start(m_output_watcher);
 }
 
 int OutputDevice::sync()
 {
   DoutEntering(dc::io, "OutputDevice::sync() [" << (void*)static_cast<IOBase*>(this) << ']');
-  // Don't flush a stream after having called del() on it. In fact, don't write to it at ALL anymore.
-  // If is_active() is false then that means del() wasn't called: then we got here directly after init().
-  ASSERT(!(is_active() && must_be_removed()));
+  // Don't write to a steam, or flush a stream, after having the last boost::intrusive_ptr that points to the device is deleted.
+  ASSERT(!must_be_removed());
   if (AI_UNLIKELY(!is_writable()))
   {
     Dout(dc::warning, "The device is not writable!");
@@ -150,15 +190,18 @@ int OutputDevice::sync()
 
 void InputDevice::stop_input_device()
 {
-  DoutEntering(dc::io, "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // We assume that stop_input_device can be called from another thread (than start_output_device)
   // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
   // the destruction of the lock object in that function) at which point is_active() will return
   // true.
   if (is_active())
   {
+    // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
+    // therefore only print that we enter this function when we're actually still active.
+    DoutEntering(dc::io, "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
     ev_io_stop(EV_A_ &m_input_watcher);
-    intrusive_ptr_release(this);        // Note: this never brings the reference count to zero, that happens in del().
+    Dout(dc::io, "Decrementing ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+    intrusive_ptr_release(this);
   }
   // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
@@ -172,10 +215,13 @@ int InputDevice::get_input_fd()
 
 void OutputDevice::stop_output_device()
 {
-  DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   if (is_active())
   {
+    // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
+    // therefore only print that we enter this function when we're actually still active.
+    DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
     ev_io_stop(EV_A_ &m_output_watcher);
+    Dout(dc::io, "Decrementing ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
     intrusive_ptr_release(this);
   }
   // The filedescriptor, when open, is still considered to be open:

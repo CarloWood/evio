@@ -178,7 +178,7 @@ void PersistentInputFile<INPUTDEVICE>::closed()
   if (is_watched())
   {
     rm_watch();
-    Dout(dc::evio, "Decrementing ref count of this device [" << (void*)static_cast<IOBase*>(this) << ']');
+    Dout(dc::io, "Decrementing ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
     intrusive_ptr_release(this);
   }
 }
@@ -195,8 +195,8 @@ void PersistentInputFile<INPUTDEVICE>::read_returned_zero()
   {
     if (add_watch(FileDevice::open_filename().c_str(), IN_MODIFY))
     {
-      Dout(dc::evio, "Incrementing ref count of this device [" << (void*)static_cast<IOBase*>(this) << ']');
       intrusive_ptr_add_ref(this);      // Keep this object alive because the above call registered m_inotify as callback object.
+      Dout(dc::io, "Incremented ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
     }
   }
 }
