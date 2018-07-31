@@ -5,15 +5,24 @@ embedding a minimum amount of [libev](http://software.schmorp.de/pkg/libev.html)
 
 ## I/O device
 
-Each device class has `IOBase` as virtual base class, which in turn is derived from `RefCount`.
-Therefore, the typical usage of a device class is
+Each device class has [`evio::IOBase`](Device.h) as virtual base class, which in turn is derived from [`utils::AIRefCount`](../utils/AIRefCount.h).
+
+Therefore one should use `boost::intrusive_ptr` to point to newly created device objects. For example,
 
 ```
-boost::intrusive_ptr<Device*> device = new Device<IO>(/* constructor params */);
+boost::intrusive_ptr<Device<IO>*> device = new Device<IO>(/* constructor params */);
 ```
 
-which as normal would get deleted as soon as the `boost::intrusive_ptr` is destructed.
-However there are exceptions to that rule, see below.
+The recommended way to do this is by using `evio::create`:
+
+```
+auto device = create<Device<IO>>(/* constructor params */);
+```
+
+which does the same thing as the first line.
+
+Normally, such an object would be deleted as soon as the `boost::intrusive_ptr` is destructed,
+however there are exceptions to that rule, see below.
 
 Either after or during construction the device is associated with an (open) filedescriptor
 (by calling, usually internally, `IOBase::init(int fd)` with an open filedescriptor `fd`,
@@ -27,7 +36,7 @@ is destructed:
 
 1. Device is (derived from) `PersistentInputFile`. This means that a file path is associated
    with the device that is monitored using <tt>inotify(7)</tt>; and as soon as there is
-   something / more to read from that path the device will read it. The only way to destroy
+   something/more to read from that path the device will read it. The only way to destroy
    such an object is by calling `close()`.
 
 2. `IO` is (derived from) `OutputDevice` and there is still data in its buffer that wasn't
