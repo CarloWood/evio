@@ -30,6 +30,7 @@
 #include <streambuf>
 #include <new>
 #include <iostream>
+#include <limits>
 #include <unistd.h>             // Needed for read(2) and write(2)
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -46,7 +47,10 @@ namespace evio {
 // Determined during configuration. When N bytes are allocated
 // with malloc(N) then it reality N + malloc_overhead_c bytes
 // are used.
-static int constexpr malloc_overhead_c = CW_MALLOC_OVERHEAD;
+static constexpr int malloc_overhead_c = CW_MALLOC_OVERHEAD;
+
+static constexpr size_t default_input_blocksize_c = 512;
+static constexpr size_t default_output_blocksize_c = 2048;
 
 // Forward declarations.
 class IOBase;
@@ -734,7 +738,11 @@ class LinkBuffer : public Dev2Buf
 class InputBuffer : public Dev2Buf
 {
  public:
-  using Dev2Buf::Dev2Buf;
+  InputBuffer(
+      size_t minimum_blocksize = default_input_blocksize_c,
+      size_t max_alloc = std::numeric_limits<size_t>::max(),
+      size_t buffer_full_watermark = std::numeric_limits<size_t>::max()
+      ) : Dev2Buf(minimum_blocksize, max_alloc, buffer_full_watermark) { }
 
   // Raw binary access (instead of using istream):
   char* raw_gptr() const { return igptr(); }                    // Get pointer to get area.
@@ -747,7 +755,11 @@ class InputBuffer : public Dev2Buf
 class OutputBuffer : public Buf2Dev
 {
  public:
-  using Buf2Dev::Buf2Dev;
+  OutputBuffer(
+      size_t minimum_blocksize = default_output_blocksize_c,
+      size_t max_alloc = std::numeric_limits<size_t>::max(),
+      size_t buffer_full_watermark = std::numeric_limits<size_t>::max()
+      ) : Buf2Dev(minimum_blocksize, max_alloc, buffer_full_watermark) { }
 
   // Raw binary access (instead of using ostream):
   char* raw_pptr() const { return pptr(); }                     // Get pointer to put area.

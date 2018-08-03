@@ -65,7 +65,7 @@ class INotifyDevice : public ReadInputDevice, public virtual IOBase
 
  protected:
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
-  void decode(MsgBlock msg) override;
+  RefCountReleaser decode(MsgBlock msg) override;
 
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
@@ -190,17 +190,19 @@ size_t INotifyDevice::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-void INotifyDevice::decode(MsgBlock msg)
+IOBase::RefCountReleaser INotifyDevice::decode(MsgBlock msg)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
   Dout(dc::notice, "Received inotify event for wd " << event->wd << ": " << event->mask << " with cookie " << event->cookie << " and name \"" << buf2str(event->name, event->len) << "\".");
   if ((event->mask & IN_Q_OVERFLOW))
     DoutFatal(dc::core, "inotify: IN_Q_OVERFLOW happened!");
-  if ((event->mask == IN_IGNORED))      // In that case the wd was already removed from m_wd_to_inotify_map (and the INotify object destroyed).
-    return;
-  INotify* obj = get_inotify_obj(wd_to_inotify_map_ts::rat(m_wd_to_inotify_map), event->wd)->second;
-  obj->event_occurred(event);
+  if ((event->mask != IN_IGNORED))      // In the case of IN_IGNORED the wd was already removed from m_wd_to_inotify_map (and the INotify object destroyed).
+  {
+    INotify* obj = get_inotify_obj(wd_to_inotify_map_ts::rat(m_wd_to_inotify_map), event->wd)->second;
+    obj->event_occurred(event);
+  }
+  return RefCountReleaser();
 }
 
 namespace {

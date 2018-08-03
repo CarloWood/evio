@@ -36,50 +36,6 @@
 
 namespace evio {
 
-void IOBase::close_fds()
-{
-  DoutEntering(dc::io, "IOBase::close_fds() [" << (void*)this << ']');
-  int input_fd = get_input_fd();
-  int output_fd = get_output_fd();
-  if (is_open_r())
-  {
-#ifdef CWDEBUG
-    if (!is_valid(input_fd))
-      Dout(dc::warning, "Calling IOBase::close_fds on input device with invalid fd = " << input_fd << ".");
-#endif
-    stop_input_device();
-  }
-  if (is_open_w())
-  {
-#ifdef CWDEBUG
-    if (!is_valid(output_fd))
-      Dout(dc::warning, "Calling IOBase::close_fds on output device with invalid fd = " << output_fd << ".");
-#endif
-    stop_output_device();
-  }
-  if (!dont_close())
-  {
-    if (input_fd != -1)
-    {
-      DEBUG_ONLY(int err = )
-      ::close(input_fd);
-      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
-    }
-    if (output_fd != -1 && output_fd != input_fd)
-    {
-      DEBUG_ONLY(int err = )
-      ::close(output_fd);
-      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
-    }
-  }
-  m_flags |= FDS_DEAD;
-  if (is_open())
-  {
-    m_flags &= ~(FDS_W_OPEN | FDS_R_OPEN);
-    closed();
-  }
-}
-
 void InputDevice::init_input_device(int fd)
 {
   DoutEntering(dc::io, "InputDevice::init_input_device(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');
@@ -91,6 +47,9 @@ void InputDevice::init_input_device(int fd)
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
   m_flags |= FDS_R_OPEN;
+  // Keep track of whether or not the output device, if any, has the same fd.
+  if ((m_flags & FDS_W_OPEN) && get_output_fd() == fd)
+    m_flags |= FDS_SAME;
 }
 
 void OutputDevice::init_output_device(int fd)
@@ -102,6 +61,9 @@ void OutputDevice::init_output_device(int fd)
   m_output_watcher.data = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   m_flags |= FDS_W_OPEN;
+  // Keep track of whether or not the output device, if any, has the same fd.
+  if ((m_flags & FDS_R_OPEN) && get_input_fd() == fd)
+    m_flags |= FDS_SAME;
 }
 
 void set_nonblocking(int fd)
@@ -188,8 +150,9 @@ int OutputDevice::sync()
   return 0;
 }
 
-void InputDevice::stop_input_device()
+IOBase::RefCountReleaser InputDevice::stop_input_device()
 {
+  RefCountReleaser need_release;
   // We assume that stop_input_device can be called from another thread (than start_output_device)
   // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
   // the destruction of the lock object in that function) at which point is_active() will return
@@ -200,35 +163,38 @@ void InputDevice::stop_input_device()
     // therefore only print that we enter this function when we're actually still active.
     DoutEntering(dc::io, "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
     ev_io_stop(EV_A_ &m_input_watcher);
-    Dout(dc::io, "Decrementing ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    intrusive_ptr_release(this);
+    Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
+    need_release = this;
   }
   // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
+  return need_release;
 }
 
-int InputDevice::get_input_fd()
+int InputDevice::get_input_fd() const
 {
   // Return the raw fd as passed to init_input_device.
   return m_input_watcher.fd;
 }
 
-void OutputDevice::stop_output_device()
+IOBase::RefCountReleaser OutputDevice::stop_output_device()
 {
+  RefCountReleaser need_release;
   if (is_active())
   {
     // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
     // therefore only print that we enter this function when we're actually still active.
     DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
     ev_io_stop(EV_A_ &m_output_watcher);
-    Dout(dc::io, "Decrementing ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    intrusive_ptr_release(this);
+    Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
+    need_release = this;
   }
   // The filedescriptor, when open, is still considered to be open:
   // A subsequent call to start_output_device() will resume handling it.
+  return need_release;
 }
 
-int OutputDevice::get_output_fd()
+int OutputDevice::get_output_fd() const
 {
   // Return the raw fd as passed to init_output_device.
   return m_output_watcher.fd;
@@ -249,7 +215,7 @@ void OutputDevice::write_to_fd(int fd)
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
       // which calls `ishowmanyc' which calls `iunderflow' which reduces the buffer
       // if necessary.
-      stop_output_device();	// Buffer is empty: reset fd bit for select(2) call
+      stop_output_device();	// Buffer is empty; stop watching the fd.
       return;
     }
 #if EWOULDBLOCK != EAGAIN
@@ -361,6 +327,7 @@ try_again_read1:
 void ReadInputDevice::data_received(char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "ReadInputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  RefCountReleaser releaser;
   size_t len;
   while ((len = end_of_msg_finder(new_data, rlen)) > 0)
   {
@@ -375,7 +342,7 @@ void ReadInputDevice::data_received(char const* new_data, size_t rlen)
       if (m_ibuffer->is_contiguous(msg_len))
       {
         MsgBlock msg_block(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node());
-        decode(msg_block);
+        releaser += decode(msg_block);
         m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -384,7 +351,7 @@ void ReadInputDevice::data_received(char const* new_data, size_t rlen)
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
         MsgBlock msg_block(memory_block->block_start(), msg_len, memory_block);
-        decode(msg_block);
+        releaser += decode(msg_block);
         memory_block->release();
       }
 
@@ -408,7 +375,7 @@ void ReadInputDevice::data_received(char const* new_data, size_t rlen)
       char* start = m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
       MsgBlock msg_block(start, msg_len, m_ibuffer->get_get_area_block_node());
-      decode(msg_block);
+      releaser += decode(msg_block);
       m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(m_ibuffer->used_size() == rlen - len);

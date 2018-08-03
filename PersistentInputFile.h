@@ -36,10 +36,10 @@ class PersistentInputFile : public File<INPUTDEVICE>, private INotify
 
  private:
   // Override IOBase::closed() event to remove any inotify watch when it exists.
-  void closed() override;
+  IOBase::RefCountReleaser closed() override;
 
   // Override InputDevice::read_returned_zero().
-  void read_returned_zero() override;
+  IOBase::RefCountReleaser read_returned_zero() override;
 
   // Override method of INotify.
   void event_occurred(inotify_event const* event) override
@@ -50,33 +50,35 @@ class PersistentInputFile : public File<INPUTDEVICE>, private INotify
 };
 
 template<class INPUTDEVICE>
-void PersistentInputFile<INPUTDEVICE>::closed()
+IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
 {
+  IOBase::RefCountReleaser releaser;
   DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::closed()");
   if (is_watched())
   {
     rm_watch();
-    Dout(dc::io, "Decrementing ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
-    intrusive_ptr_release(this);
+    releaser = this;
   }
+  return releaser;
 }
 
 template<class INPUTDEVICE>
-void PersistentInputFile<INPUTDEVICE>::read_returned_zero()
+IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::read_returned_zero()
 {
   DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::read_returned_zero()");
-  INPUTDEVICE::stop_input_device();
-  if (is_watched())     // Already watched?
-    return;
-  // Add an inotify watch for modification of the corresponding path.
-  if (!FileDevice::open_filename().empty())
+  IOBase::RefCountReleaser releaser = INPUTDEVICE::stop_input_device();
+  // Add an inotify watch for modification of the corresponding path (if not already watched).
+  if (!is_watched() && !FileDevice::open_filename().empty())
   {
     if (add_watch(FileDevice::open_filename().c_str(), IN_MODIFY))
     {
-      intrusive_ptr_add_ref(this);      // Keep this object alive because the above call registered m_inotify as callback object.
+      if (releaser)
+        intrusive_ptr_add_ref(this);    // Keep this object alive because the above call registered m_inotify as callback object.
+      releaser.reset();
       Dout(dc::io, "Incremented ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
     }
   }
+  return releaser;
 }
 
 } // namespace evio

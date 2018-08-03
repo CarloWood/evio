@@ -35,7 +35,6 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   using std::ios_base;
 
   int posix_mode;
-  flags_t read_write;
 
   if ((mode & ios_base::app))
     mode |= ios_base::out;
@@ -46,12 +45,11 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   if ((mode & (ios_base::in|ios_base::out)) == (ios_base::in|ios_base::out))
   {
     posix_mode = O_RDWR;
-    read_write = FDS_RW;
   }
   else if ((mode & ios_base::out))
-    posix_mode = O_WRONLY, read_write = FDS_W;
+    posix_mode = O_WRONLY;
   else
-    posix_mode = O_RDONLY, read_write = FDS_R;
+    posix_mode = O_RDONLY;
 
   // Do not call open() on a device that is already initialized with a fd (see IOBase::init) or call close() first.
   ASSERT(!is_open());

@@ -146,7 +146,6 @@ void set_nonblocking(int fd);
 // Return true if fd is a valid open filedescriptor.
 bool is_valid(int fd);
 
-
 //=============================================================================
 //
 // class IOBase
@@ -168,7 +167,7 @@ class IOBase : public AIRefCount
   static flags_t constexpr FDS_R_DISABLED          = 0x10000000;        // Must be FDS_R >> disabled_shft.
   static flags_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
   static flags_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
-  static flags_t constexpr FDS_CHK_EMPTY           = 0x02000000;
+  static flags_t constexpr FDS_SAME                = 0x02000000;
   static flags_t constexpr FDS_REMOVE              = 0x01000000;
   static flags_t constexpr FDS_DEAD                = 0x00800000;
   static flags_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
@@ -186,28 +185,61 @@ class IOBase : public AIRefCount
   virtual void init_output_device(int) { }
 
  protected:
+  struct RefCountReleaser
+  {
+   private:
+    AIRefCount* m_ptr;
+
+   public:
+    void execute()
+    {
+      if (m_ptr)
+      {
+        Dout(dc::io, "Decrementing ref count of device " << (void*)m_ptr << " to " << (m_ptr->ref_count() - 1));
+        intrusive_ptr_release(m_ptr);
+      }
+      m_ptr = nullptr;
+    }
+    RefCountReleaser() : m_ptr(nullptr) { }
+    ~RefCountReleaser() { execute(); }
+    RefCountReleaser(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; }
+    RefCountReleaser& operator=(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; return *this; }
+    RefCountReleaser& operator+=(RefCountReleaser&& releaser)
+    {
+      if (m_ptr && releaser.m_ptr) { ASSERT(m_ptr == releaser.m_ptr); execute(); }
+      m_ptr = releaser.m_ptr;
+      releaser.m_ptr = nullptr;
+      return *this;
+    }
+    void operator=(AIRefCount* ptr) { ASSERT(!m_ptr); m_ptr = ptr; }
+    void reset() { m_ptr = nullptr; }
+    operator bool() const { return m_ptr; }
+  };
+
   // Requests.
   // Call these from derived classes to start watching, stop watching, temporarily disable and enable the device.
   virtual void start_input_device() { }
   virtual void start_output_device() { }
-  virtual void stop_input_device() { }
-  virtual void stop_output_device() { }
+  virtual RefCountReleaser stop_input_device() { return RefCountReleaser(); }
+  virtual RefCountReleaser stop_output_device() { return RefCountReleaser(); }
   virtual void disable_input_device() { }
   virtual void disable_output_device() { }
   virtual void enable_input_device() { }
   virtual void enable_output_device() { }
+  virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }
+  virtual RefCountReleaser close_output_device() { return RefCountReleaser(); }
 
   // Queries.
   // Called to obtain the fd that init_input_device() was called with if that actually did initialize an input device; otherwise -1 is returned.
-  virtual int get_input_fd() { return -1; }
+  virtual int get_input_fd() const { return -1; }
   // Called to obtain the fd that init_output_device() was called with if that actually did initialize an output device; otherwise -1 is returned.
-  virtual int get_output_fd() { return -1; }
+  virtual int get_output_fd() const { return -1; }
 
   // Events.
   // The filedescriptor(s) of this device were just closed (close_fds() was called).
   // If INTERNAL_FDS_DONT_CLOSE is set than the fd(s) weren't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
-  virtual void closed() { }
+  virtual RefCountReleaser closed() { return RefCountReleaser(); }
 
  protected:
   IOBase() : m_flags(0) { }
@@ -247,11 +279,6 @@ class IOBase : public AIRefCount
 
   // Returns true if this object/node is linked into libev.
   bool is_linked() const { return m_flags & FDS_LINKED; }
-
-  // Accessor that returns true if the write buffer is possibly empty.
-  // We assume that the buffer is possibly empty when the last call
-  // to select(2) we didn't monitor this object for writability.
-  bool writebuf_is_maybe_empty() const { return m_flags & FDS_CHK_EMPTY; }
 
   // Return true if this object is marked that it should not close its fd.
   bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
@@ -294,10 +321,11 @@ class IOBase : public AIRefCount
     start_output_device();
   }
 
+  // After this call the object might be destructed.
   void stop()
   {
-    stop_input_device();
-    stop_output_device();
+    RefCountReleaser release1 = stop_input_device();
+    RefCountReleaser release2 = stop_output_device();
   }
 
   void disable()
@@ -312,7 +340,13 @@ class IOBase : public AIRefCount
     enable_output_device();
   }
 
-  void close_fds();
+  RefCountReleaser close_fds()
+  {
+    RefCountReleaser releaser;
+    releaser = close_input_device();
+    releaser += close_output_device();
+    return releaser;
+  }
 };
 
 
@@ -325,9 +359,9 @@ class IOBase : public AIRefCount
 // This class implements the following virtual functions of IOBase:
 //
 // void init_input_device(int fd) override;     // Initializes m_input_watcher and registers fd for reading (calls ev_io_init). Adds FDS_R_OPEN to m_flags.
-// int get_input_fd() override;                 // Gets the fd as passed to (the last call to) init_input_device.
+// int get_input_fd() const override;           // Gets the fd as passed to (the last call to) init_input_device.
 // void start_input_device() override;          // Starts watching the fd.
-// void stop_input_device() override;           // Stops watching the fd.
+// RefCountReleaser stop_input_device() override;           // Stops watching the fd.
 // void disable_input_device() override;        // Adds FDS_R_DISABLED to m_flags and stops watching the fd.
 // void enable_input_device() override;         // Removes FDS_R_DISABLED from m_flags and starts watching the fd again.
 //
@@ -348,7 +382,7 @@ class InputDevice : public virtual IOBase
  public:
   // The default blocksize for your `StreamBuf' input buffers, used
   // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = 512;
+  static size_t constexpr default_blocksize_c = default_input_blocksize_c;
 
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int const mode = std::ios_base::in;
@@ -373,8 +407,8 @@ class InputDevice : public virtual IOBase
   void init_input_device(int fd) override;
  protected:
   void start_input_device() override;
-  void stop_input_device() override;
-  int get_input_fd() override;
+  RefCountReleaser stop_input_device() override;
+  int get_input_fd() const override;
 
  protected:
   //---------------------------------------------------------------------------
@@ -397,10 +431,14 @@ class InputDevice : public virtual IOBase
   ~InputDevice()
   {
     DoutEntering(dc::io, "~InputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
+    // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
+    ASSERT(!is_active());
     if (is_open_r())
-      close_fds();
+      close_input_device();     // This will not delete the object (again) because it isn't active.
     // Delete the input buffer if it is no longer needed.
     m_ibuffer->release(this);
+    // Make sure we detect it if this watcher is used again.
+    Debug(m_input_watcher.data = nullptr);
   }
 
   // Disallow copy constructing.
@@ -434,7 +472,7 @@ class InputDevice : public virtual IOBase
   void disable_input_device() override
   {
     m_flags |= FDS_R_DISABLED;
-    stop_input_device();
+    m_disable_release = stop_input_device();
   }
 
   void enable_input_device() override
@@ -442,13 +480,46 @@ class InputDevice : public virtual IOBase
     m_flags &= ~FDS_R_DISABLED;
     if (is_readable())
       start_input_device();
+    m_disable_release.execute();
   }
 
-  void close()
+  RefCountReleaser close_input_device()
   {
-    DoutEntering(dc::io, "InputDevice::close()");
-    close_fds();
+    DoutEntering(dc::io, "InputDevice::close_input_device() [" << this << ']');
+    RefCountReleaser releaser;
+    int input_fd = m_input_watcher.fd;
+    if (AI_LIKELY(is_open_r()))
+    {
+      bool already_closed = (m_flags & (FDS_SAME | FDS_W_OPEN)) == FDS_SAME;
+#ifdef CWDEBUG
+      if (!already_closed && !is_valid(input_fd))
+        Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << input_fd << ".");
+#endif
+      releaser = stop_input_device();
+      if (!already_closed && !dont_close())
+      {
+        Dout(dc::io|continued_cf, "close(" << input_fd << ") = ");
+        DEBUG_ONLY(int err =) ::close(input_fd);
+        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
+        Dout(dc::finish, err);
+      }
+      m_flags &= ~FDS_R_OPEN;
+      if (!is_open())
+      {
+        m_flags |= FDS_DEAD;
+        closed();
+      }
+    }
+    return releaser;
   }
+
+  RefCountReleaser close()
+  {
+    return close_input_device();
+  }
+
+ private:
+  RefCountReleaser m_disable_release;
 
  protected:
   // Event: 'fd' is readable.
@@ -464,11 +535,11 @@ class InputDevice : public virtual IOBase
   // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
   virtual void read_from_fd(int fd);
 
-  // The default behaviour is to close() the filedescriptor(s).
-  virtual void read_returned_zero() { close(); }
+  // The default behaviour is to close() the filedescriptor.
+  virtual RefCountReleaser read_returned_zero() { return close(); }
 
-  // The default behaviour is to close() the filedescriptor(s).
-  virtual void read_error(int UNUSED_ARG(err)) { close(); }
+  // The default behaviour is to close() the filedescriptor.
+  virtual RefCountReleaser read_error(int UNUSED_ARG(err)) { return close(); }
 
   // The default behavior is to do nothing.
   virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
@@ -484,7 +555,7 @@ class InputDevice : public virtual IOBase
 // This class implements the following virtual functions of IOBase:
 //
 // void init_output_device(int fd) override;    // Initializes m_output_watcher and registers fd for writing (calls ev_io_init). Adds FDS_W_OPEN to m_flags.
-// int get_output_fd() override;                // Gets the fd as passed to (the last call to) init_output_device.
+// int get_output_fd() const override;          // Gets the fd as passed to (the last call to) init_output_device.
 // void start_output_device() override;         // Starts watching the fd.
 // void stop_output_device() override;          // Stops watching the fd.
 // void disable_output_device() overrid         // Adds FDS_R_DISABLED to m_flags and stops watching the fd.
@@ -507,7 +578,7 @@ class OutputDevice : public virtual IOBase
  public:
   // The default blocksize for your `StreamBuf' output buffers, used
   // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = 2048;
+  static size_t constexpr default_blocksize_c = default_output_blocksize_c;
 
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int const mode = std::ios_base::out;
@@ -532,8 +603,8 @@ class OutputDevice : public virtual IOBase
   void init_output_device(int fd) override;
  protected:
   void start_output_device() override;
-  void stop_output_device() override;
-  int get_output_fd() override;
+  RefCountReleaser stop_output_device() override;
+  int get_output_fd() const override;
 
  protected:
   //---------------------------------------------------------------------------
@@ -556,10 +627,14 @@ class OutputDevice : public virtual IOBase
   ~OutputDevice()
   {
     DoutEntering(dc::io, "~OutputDevice() [" << (void*)static_cast<IOBase*>(this) << ']');
+    // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
+    ASSERT(!is_active());
     if (is_open_w())
-      close_fds();
+      close_output_device();    // This will not delete the object (again) because it isn't active.
     // Delete the output buffer if it is no longer needed.
     m_obuffer->release(this);
+    // Make sure we detect it if this watcher is used again.
+    Debug(m_output_watcher.data = nullptr);
   }
 
   // Disallow copy constructing.
@@ -613,7 +688,7 @@ class OutputDevice : public virtual IOBase
   void disable_output_device() override
   {
     m_flags |= FDS_W_DISABLED;
-    stop_output_device();
+    m_disable_release = stop_output_device();
   }
 
   void enable_output_device() override
@@ -621,6 +696,7 @@ class OutputDevice : public virtual IOBase
     m_flags &= ~FDS_W_DISABLED;
     if (is_writable())
       start_output_device();
+    m_disable_release.execute();
   }
 
   void restart_if_non_active()
@@ -632,11 +708,43 @@ class OutputDevice : public virtual IOBase
       start_output_device();
   }
 
-  void close()
+  RefCountReleaser close_output_device()
   {
-    DoutEntering(dc::io, "OutputDevice::close()");
-    close_fds();
+    DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
+    RefCountReleaser releaser;
+    int output_fd = m_output_watcher.fd;
+    if (AI_LIKELY(is_open_w()))
+    {
+      bool already_closed = (m_flags & (FDS_SAME | FDS_R_OPEN)) == FDS_SAME;
+#ifdef CWDEBUG
+      if (!already_closed && !is_valid(output_fd))
+        Dout(dc::warning, "Calling OutputDevice::close on output device with invalid fd = " << output_fd << ".");
+#endif
+      releaser = stop_output_device();
+      if (!already_closed && !dont_close())
+      {
+        Dout(dc::io|continued_cf, "close(" << output_fd << ") = ");
+        DEBUG_ONLY(int err =) ::close(output_fd);
+        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
+        Dout(dc::finish, err);
+      }
+      m_flags &= ~FDS_W_OPEN;
+      if (!is_open())
+      {
+        m_flags |= FDS_DEAD;
+        closed();
+      }
+    }
+    return releaser;
   }
+
+  RefCountReleaser close()
+  {
+    return close_output_device();
+  }
+
+ private:
+  RefCountReleaser m_disable_release;
 };
 
 
@@ -716,7 +824,7 @@ class ReadInputDevice : public InputDevice
 
   // Called by the default data_received (see above).
   // Msg is a contiguous message.
-  virtual void decode(MsgBlock msg) = 0;
+  virtual RefCountReleaser decode(MsgBlock msg) = 0;
 
  protected:
   //---------------------------------------------------------------------------
@@ -853,4 +961,15 @@ class LinkOutputDevice : public OutputDevice
   LinkOutputDevice(LinkBuffer* lbuf) : OutputDevice(lbuf->as_Buf2Dev()) { }
 };
 
+template<typename DeviceType, typename... ARGS>
+boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
+{
+  return new DeviceType(std::forward<ARGS>(args)...);
+}
+
 } // namespace evio
+
+inline std::ostream& operator<<(std::ostream& os, evio::IOBase* device)
+{
+  return os << (void*)device;
+}

@@ -14,7 +14,11 @@ SOURCES = StreamBuf.cxx \
 	  File.h \
 	  PersistentInputFile.h \
 	  INotify.cxx \
-	  INotify.h
+	  INotify.h \
+	  Socket.cxx \
+	  Socket.h \
+	  inet_support.cxx \
+	  inet_support.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@ -pthread
