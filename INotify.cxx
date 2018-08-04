@@ -45,7 +45,7 @@ namespace evio {
 // and inotify_rm_watch(2) to watch path names for events.  See inotify(7) for
 // more details.
 
-class INotifyDevice : public ReadInputDevice, public virtual IOBase
+class INotifyDevice : public ReadInputDeviceBase, public virtual IOBase
 {
  private:
   // Disallow copy constructing.
@@ -69,7 +69,7 @@ class INotifyDevice : public ReadInputDevice, public virtual IOBase
 
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
-  INotifyDevice(InputBuffer* ibuf) : ReadInputDevice(ibuf), m_len_so_far(0) { m_name_len = -1; }
+  INotifyDevice(InputBuffer* ibuf) : ReadInputDeviceBase(ibuf), m_len_so_far(0) { m_name_len = -1; }
 
   int add_watch(char const* pathname, uint32_t mask, INotify* obj);
   void rm_watch(int wd);

@@ -324,9 +324,9 @@ try_again_read1:
   }
 }
 
-void ReadInputDevice::data_received(char const* new_data, size_t rlen)
+void ReadInputDeviceBase::data_received(char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "ReadInputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  DoutEntering(dc::io, "ReadInputDeviceBase::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << (void*)static_cast<IOBase*>(this) << ']');
   RefCountReleaser releaser;
   size_t len;
   while ((len = end_of_msg_finder(new_data, rlen)) > 0)

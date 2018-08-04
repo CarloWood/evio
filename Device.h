@@ -1,7 +1,7 @@
 // evio -- Event Driven I/O support.
 //
 //! @file
-//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, InputDeviceStream, OutputDeviceStream, ReadInputDevice, ReadInputDeviceStream, WriteOutputDevice, WriteOutputDeviceStream, LinkInputDevice and LinkOutputDevice.
+//! @brief Declaration of namespace evio; class IOBase, InputDevice, OutputDevice, InputDeviceStream, OutputDeviceStream, ReadInputDevice, ReadInputDeviceStream, WriteOutputDevice, OStreamDevice, LinkInputDevice and LinkOutputDevice.
 //
 // Copyright (C) 2018 Carlo Wood.
 //
@@ -27,24 +27,25 @@
 #include "StreamBuf.h"
 #include "EventLoopThread.h"
 #include "utils/AIRefCount.h"
+#include <arpa/inet.h>          // Needed for ntohs.
 
 namespace evio {
 
-class LinkInputDevice;	// Base classes for use with objects that read
-class LinkOutputDevice;	// from output buffers, or write to input buffers
-                        // of other objects.
+class LinkInputDevice;	        // Base classes for use with objects that read
+class LinkOutputDevice;	        // from output buffers, or write to input buffers
+                                // of other objects.
 
-class InputDevice;	// Base classes for general linkage to an input/output device.
+class InputDevice;	        // Base classes for general linkage to an input/output device.
 class OutputDevice;
 
-class ReadInputDevice;	// Base classes with a default read(2), write(2)
-class WriteOutputDevice;  // implementation.
+class ReadInputDeviceBase;      // Base classes with a default read(2), write(2)
+class WriteOutputDevice;        // implementation.
 
 class InputDeviceStream;	// Same as InputDevice with istream interface.
 class OutputDeviceStream;	// Same as OutputDevice with ostream interface.
 
-class ReadInputDeviceStream;	// Same as ReadInputDevice with istream interface.
-class WriteOutputDeviceStream; // Same as WriteOutputDevice with ostream interface.
+class ReadInputDeviceStream;    // Same as ReadInputDeviceBase with istream interface.
+class OStreamDevice;  // Same as WriteOutputDevice with ostream interface.
 
 /******************************************************************************
 
@@ -102,7 +103,7 @@ virtual functions of InputDevice
     // New data was read from the fd.
     // The default behavior is to do nothing.
     //
-    // This method is overridden by ReadInputDevice.
+    // This method is overridden by ReadInputDeviceBase.
 
 virtual functions of OutputDevice
 ---------------------------------
@@ -119,22 +120,22 @@ virtual functions of OutputDevice
   virtual void write_error(int err);
     // write(2) returned a (fatal) error. Take action according to `err'.
 
-virtual functions of ReadInputDevice
-----------------------------------
+virtual functions of ReadInputDeviceBase
+----------------------------------------
 
   void data_received(char const* new_data, size_t rlen) override;
     // Overrides InputDevice::data_received. Calls the two virtual
     // functions below.
 
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
-    // Called by the default ReadInputDevice::data_received.
+    // Called by the default ReadInputDeviceBase::data_received.
     //
     // This method should be implemented by a user class and return a value
     // larger than zero, the length of the next message, when a complete message
     // is available. Zero otherwise.
 
   virtual void decode(MsgBlock msg) = 0;
-    // Called by the default ReadInputDevice::data_received when end_of_msg_finder
+    // Called by the default ReadInputDeviceBase::data_received when end_of_msg_finder
     // found a new message. Msg is the new, contiguous, message.
     //
     // This method should be implemented by a user class.
@@ -776,7 +777,7 @@ class OutputDeviceStream : public OutputDevice, public std::ostream
 
 //=============================================================================
 //
-// class ReadInputDevice
+// class ReadInputDeviceBase
 //
 // Base class for reading from a device, using a general read(2) implementation.
 //
@@ -809,7 +810,7 @@ class OutputDeviceStream : public OutputDevice, public std::ostream
 //   end_of_msg_finder(1192, 62) <-- return 0
 //   etc.
 
-class ReadInputDevice : public InputDevice
+class ReadInputDeviceBase : public InputDevice
 {
  protected:
   // The pure virtual function end_of_msg_finder(char const*, size_t)
@@ -820,7 +821,7 @@ class ReadInputDevice : public InputDevice
   void data_received(char const* new_data, size_t rlen) override;
 
   // Returns the size of the first message, or 0 if there is no complete message.
-  virtual size_t end_of_msg_finder(char const*, size_t) = 0;
+  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 
   // Called by the default data_received (see above).
   // Msg is a contiguous message.
@@ -831,7 +832,91 @@ class ReadInputDevice : public InputDevice
   // Constructor:
   //
 
-  ReadInputDevice(InputBuffer* ibuf) : InputDevice(ibuf) { }
+  ReadInputDeviceBase(InputBuffer* ibuf) : InputDevice(ibuf) { }
+};
+
+
+//=============================================================================
+// End Of Message Finders.
+//
+
+// class text
+//
+// A messages end on the first new-line
+
+class text
+{
+ public:
+  // Find the first new-line character.
+  int eomf(char const* new_data, size_t rlen) __attribute__((always_inline))
+  {
+    char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
+    return newline ? newline - new_data + 1 : 0;
+  }
+};
+
+// class record
+//
+// A message starts with its length: an unsigned int16_t in network order
+//
+// This code was optimized. Do not change.
+
+class record
+{
+private:
+  uint16_t remaining_bytes;
+  static uint16_t const one_byte_magic = 0xffff;        // `remaining_bytes' is set to this value when only one
+                                                        // byte of the length was received so far.
+  union
+  {
+    uint16_t remaining_bytes_network_order;
+    char first_two_bytes[2];
+  };
+
+public:
+  int eomf(char const* new_data, size_t rlen)
+  {
+    register uint16_t remaining_bytes_cache = remaining_bytes;
+    if (remaining_bytes_cache == 0)                     // Start of new message?
+    {
+      if (rlen > 1)                                     // Got complete length?
+        remaining_bytes_cache = ntohs(*reinterpret_cast<uint16_t const*>(new_data));
+      else                                              // Only got first byte of length
+      {
+        first_two_bytes[0] = *new_data;                 // `rlen' is always > 0
+        remaining_bytes = one_byte_magic;               // Set flag: we only got one length byte
+        return 0;
+      }
+    }
+    else
+      remaining_bytes = 0;                              // Anticipate that the next test is true
+    if (rlen >= remaining_bytes_cache)                  // Complete message?
+      return remaining_bytes_cache;
+    if (remaining_bytes_cache == one_byte_magic)        // Already got first byte previous call?
+    {
+      first_two_bytes[1] = *new_data;
+      remaining_bytes_cache = ntohs(remaining_bytes_network_order) - 1;
+    }
+    remaining_bytes = remaining_bytes_cache - rlen;
+    return 0;
+  }
+
+  record() : remaining_bytes(0) { }
+};
+
+template<class T>
+class ReadInputDevice : public ReadInputDeviceBase
+{
+ private:
+  T m_protocol;
+
+ protected:
+  using ReadInputDeviceBase::ReadInputDeviceBase;
+
+  size_t end_of_msg_finder(char const* start, size_t count) override
+  {
+    return m_protocol.eomf(start, count);
+  }
 };
 
 
@@ -840,11 +925,11 @@ class ReadInputDevice : public InputDevice
 // class ReadInputDeviceStream
 //
 
-class ReadInputDeviceStream : public ReadInputDevice, public std::istream
+class ReadInputDeviceStream : public InputDevice, public std::istream
 {
  protected:
   using iostream_type = std::istream;
-  ReadInputDeviceStream(InputBuffer* ibuf) : ReadInputDevice(ibuf), std::istream(ibuf) { }
+  ReadInputDeviceStream(InputBuffer* ibuf) : InputDevice(ibuf), std::istream(ibuf) { }
 };
 
 
@@ -920,14 +1005,14 @@ class WriteOutputDevice : public OutputDevice
 
 //=============================================================================
 //
-// class WriteOutputDeviceStream
+// class OStreamDevice
 //
 
-class WriteOutputDeviceStream : public WriteOutputDevice, public std::ostream
+class OStreamDevice : public WriteOutputDevice, public std::ostream
 {
  protected:
   using iostream_type = std::ostream;
-  WriteOutputDeviceStream(OutputBuffer* obuf) : WriteOutputDevice(obuf), std::ostream(obuf) { }
+  OStreamDevice(OutputBuffer* obuf) : WriteOutputDevice(obuf), std::ostream(obuf) { }
 };
 
 
