@@ -62,6 +62,7 @@ IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
   return releaser;
 }
 
+// Read thread.
 template<class INPUTDEVICE>
 IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::read_returned_zero()
 {

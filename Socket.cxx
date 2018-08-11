@@ -57,7 +57,7 @@ bool SocketDevice::priv_connect(struct sockaddr* addr, size_t rcvbuf_size, size_
   if (fd < 0)
     return false;
 
-  if (m_addr->sa_family == AF_INET)
+  if (m_addr->sa_family == AF_INET || m_addr->sa_family == AF_INET6)
   {
     if (!set_rcvsockbuf(fd, m_rcvbuf_size, minimum_input_size) ||
 	!set_sndsockbuf(fd, m_sndbuf_size, minimum_output_size))

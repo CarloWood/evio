@@ -28,7 +28,7 @@
 #include <chrono>
 
 //static
-void EventLoopThread::acquire_cb(EV_P)
+void EventLoopThread::acquire_cb(EV_P) EV_THROW
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
   Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " returned from epoll_wait()");
@@ -36,7 +36,7 @@ void EventLoopThread::acquire_cb(EV_P)
 }
 
 //static
-void EventLoopThread::release_cb(EV_P)
+void EventLoopThread::release_cb(EV_P) EV_THROW
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
   event_loop_thread->m_loop_mutex.unlock();
@@ -196,6 +196,13 @@ void EventLoopThread::init(AIQueueHandle handler)
     ;
 }
 
+void EventLoopThread::bump_terminate()
+{
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
+  if (m_terminate)
+    ev_async_send(EV_A_ &m_async_w);    // Wake up the event loop (again) if we are terminating.
+}
+
 //static
 void EventLoopThread::terminate()
 {
@@ -239,12 +246,26 @@ void EventLoopThread::start(ev_timer& timeout_watcher)
 }
 
 //static
-void EventLoopThread::start(ev_io& io_watcher)
+bool EventLoopThread::start_if_not_active(ev_io& io_watcher)
 {
   EventLoopThread& self(instance());
   std::lock_guard<std::mutex> lock(self.m_loop_mutex);
+  if (ev_is_active(&io_watcher))
+    return false;
   ev_io_start(EV_A_ &io_watcher);
   ev_async_send(EV_A_ &self.m_async_w);
+  return true;
+}
+
+//static
+bool EventLoopThread::stop_if_active(ev_io& io_watcher)
+{
+  EventLoopThread& self(instance());
+  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
+  if (!ev_is_active(&io_watcher))
+    return false;
+  ev_io_stop(EV_A_ &io_watcher);
+  return true;
 }
 
 namespace {

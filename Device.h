@@ -177,7 +177,7 @@ class IOBase : public AIRefCount
   static flags_t constexpr FDS_DEBUG               = 0x00100000;
 #endif
 
-  flags_t m_flags;
+  std::atomic<flags_t> m_flags;
 
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
@@ -415,7 +415,7 @@ class InputDevice : public virtual IOBase
   //---------------------------------------------------------------------------
   // Constructor:
   //
-  // Protected: May only be constructed by dbbuf_fd_dtct.
+  // Accepts a Dev2Buf* so that both a LinkBuffer as well as an InputBuffer can be passed.
   //
   InputDevice(Dev2Buf* ibuf) : m_ibuffer(static_cast<InputBuffer*>(ibuf))
   {
@@ -484,6 +484,7 @@ class InputDevice : public virtual IOBase
     m_disable_release.execute();
   }
 
+  // FIXME: make this thread-safe
   RefCountReleaser close_input_device()
   {
     DoutEntering(dc::io, "InputDevice::close_input_device() [" << this << ']');
@@ -514,6 +515,7 @@ class InputDevice : public virtual IOBase
     return releaser;
   }
 
+  // Read thread; maybe other threads.
   RefCountReleaser close()
   {
     return close_input_device();
@@ -537,13 +539,13 @@ class InputDevice : public virtual IOBase
   virtual void read_from_fd(int fd);
 
   // The default behaviour is to close() the filedescriptor.
-  virtual RefCountReleaser read_returned_zero() { return close(); }
+  virtual RefCountReleaser read_returned_zero() { return close(); }             // Read thread.
 
   // The default behaviour is to close() the filedescriptor.
-  virtual RefCountReleaser read_error(int UNUSED_ARG(err)) { return close(); }
+  virtual RefCountReleaser read_error(int UNUSED_ARG(err)) { return close(); }  // Read thread.
 
   // The default behavior is to do nothing.
-  virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }
+  virtual void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) { }     // Read thread.
 };
 
 
@@ -611,7 +613,7 @@ class OutputDevice : public virtual IOBase
   //---------------------------------------------------------------------------
   // Constructor:
   //
-  // Protected: May only be constructed by dbbuf_fd_dtct.
+  // Accepts a Buf2Dev* so that both a LinkBuffer as well as an OutputBuffer can be passed.
   //
   OutputDevice(Buf2Dev* obuf) : m_obuffer(static_cast<OutputBuffer*>(obuf))
   {
@@ -652,7 +654,7 @@ class OutputDevice : public virtual IOBase
   // 5) write(2) returned EINTR caused by SIGPIPE.
   // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
   // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-  virtual void write_to_fd(int fd);
+  virtual void write_to_fd(int fd);     // Write thread.
 
   // This default implementation `close's the object (which removes it).
   virtual void write_error(int UNUSED_ARG(err)) { close(); }
@@ -700,6 +702,7 @@ class OutputDevice : public virtual IOBase
     m_disable_release.execute();
   }
 
+  // FIXME: make this thread-safe.
   void restart_if_non_active()
   {
     // This function should be called only from Buf2Dev::flush, and therefore be an output device.
@@ -818,7 +821,7 @@ class ReadInputDeviceBase : public InputDevice
   //
   // When end_of_msg_finder returns a value > 0, then the pure virtual
   // function decode is called.
-  void data_received(char const* new_data, size_t rlen) override;
+  void data_received(char const* new_data, size_t rlen) override;       // Read thread.
 
   // Returns the size of the first message, or 0 if there is no complete message.
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
@@ -876,7 +879,7 @@ private:
 public:
   int eomf(char const* new_data, size_t rlen)
   {
-    register uint16_t remaining_bytes_cache = remaining_bytes;
+    uint16_t remaining_bytes_cache = remaining_bytes;
     if (remaining_bytes_cache == 0)                     // Start of new message?
     {
       if (rlen > 1)                                     // Got complete length?
@@ -973,7 +976,7 @@ class LinkInputDevice : public InputDevice
   LinkInputDevice(LinkBuffer* lbuf) : InputDevice(lbuf) { }
 
   // Tell the output device that new data is received.
-  void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) override
+  void data_received(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen)) override        // Read thread;
   {
     static_cast<LinkBuffer*>(static_cast<Dev2Buf*>(m_ibuffer))->flush();
   }

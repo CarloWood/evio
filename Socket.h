@@ -201,7 +201,7 @@ class SocketDevice : public virtual IOBase
 
 //=============================================================================
 //
-// class sock_dtct
+// class Socket
 //
 // Base class for 'connect' SOCKet BUFfers.
 //
@@ -291,7 +291,14 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
     m_addr = addr;
     m_rcvbuf_size = rcvbuf_size;
     m_sndbuf_size = sndbuf_size;
-    init(fd);
+    if (!set_rcvsockbuf(fd, m_rcvbuf_size, INPUT::m_ibuffer->minimum_block_size()) ||
+	!set_sndsockbuf(fd, m_sndbuf_size, OUTPUT::m_obuffer->minimum_block_size()))
+    {
+      // Why does this happen?
+      ASSERT(false);
+      return;
+    }
+    IOBase::init(fd);
     start();
   }
 

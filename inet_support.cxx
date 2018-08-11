@@ -23,6 +23,8 @@
 
 #include "sys.h"
 #include "inet_support.h"
+#include "utils/nearest_power_of_two.h"
+#include "utils/is_power_of_two.h"
 #include <netdb.h>		// Needed for struct hostent
 #include <netinet/in.h>
 #include <sys/socket.h>		// Needed for AF_INET
@@ -89,19 +91,17 @@ bool set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
   int opt = rcvbuf_size;
   if (opt == 0)
   {
-    // From a correspondence with Alan Cox:
-    // the tcp code fundamentally gets upset when the buffer space is
-    // less than about 2*mtu + a bit. --Alan
-    // Therefore, select() does never return if we use a buffersize that
-    // is too small. For Linux mtu seems to be 1024 bytes... --Carlo
-    opt = 2 * minimum_size + 256;
+    // FIXME: this heuristic makes little sense.
+    // See http://www.masterraghu.com/subjects/np/introduction/unix_network_programming_v1.3/ch02lev1sec11.html for information about this subject.
+    opt = utils::nearest_power_of_two(2 * minimum_size + 256);
     if (opt < 8192)
       opt = 8192;
   }
-  Dout( dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes." );
+  Dout(dc::warning(!utils::is_power_of_two(opt)), "set_rcvsockbuf: socket receive buffer is not a power of two!");
+  Dout(dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (optval_t)&opt, sizeof(opt)) < 0)
   {
-    Dout( dc::system|error_cf, "listen_sock_dtct<SOCK_TYPE>::read_from_fd: setsockopt(" << sock_fd << ", SOL_SOCKET, SO_RCVBUF, [" << opt << "], " << sizeof(opt) << ')' );
+    Dout(dc::system|error_cf, "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_RCVBUF, [" << opt << "], " << sizeof(opt) << ") = -1");
     return false;
   }
 
@@ -113,14 +113,15 @@ bool set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size)
   int opt = sndbuf_size;
   if (opt == 0)
   {
-    opt = minimum_size;
+    opt = utils::nearest_power_of_two(minimum_size);
     if (opt < 8192)
       opt = 8192;
   }
-  Dout( dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes." );
+  Dout(dc::warning(!utils::is_power_of_two(opt)), "set_sndsockbuf: socket send buffer is not a power of two!");
+  Dout(dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_SNDBUF, (optval_t)&opt, sizeof(opt)) < 0)
   {
-    Dout( dc::system|error_cf, "listen_sock_dtct<SOCK_TYPE>::read_from_fd: setsockopt(" << sock_fd << ", SOL_SOCKET, SO_SNDBUF, [" << opt << "], " << sizeof(opt) << ')' );
+    Dout(dc::system|error_cf, "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_SNDBUF, [" << opt << "], " << sizeof(opt) << ") = -1");
     return false;
   }
 

@@ -106,18 +106,19 @@ void InputDevice::start_input_device()
   DoutEntering(dc::io, "InputDevice::start_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // Call InputDevice::init before calling InputDevice::start.
   ASSERT(m_input_watcher.events != EV_UNDEF);
-  // Don't call start twice on a row.
-  ASSERT(!is_active());
   // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
   // Did you use boost::intrusive_ptr at all? The recommended way to create a new device is
   // by using evio::create. For example:
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!must_be_removed() || ref_count() > 0);        // If this is false then the object is ALREADY deleted!
-  // Increment ref count to stop this object from being deleted while being active.
-  intrusive_ptr_add_ref(this);
-  Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-  EventLoopThread::start(m_input_watcher);
+  // If the device is already active then some other thread already called start_input_device().
+  if (EventLoopThread::start_if_not_active(m_input_watcher))
+  {
+    // Increment ref count to stop this object from being deleted while being active.
+    intrusive_ptr_add_ref(this);
+    Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  }
 }
 
 void OutputDevice::start_output_device()
@@ -125,12 +126,12 @@ void OutputDevice::start_output_device()
   DoutEntering(dc::io, "OutputDevice::start_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
   // Call OutputDevice::init before calling OutputDevice::start.
   ASSERT(m_output_watcher.events != EV_UNDEF);
-  // Don't call start twice on a row.
-  ASSERT(!is_active());
-  // Increment ref count to stop this object from being deleted while being active.
-  intrusive_ptr_add_ref(this);
-  Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-  EventLoopThread::start(m_output_watcher);
+  if (EventLoopThread::start_if_not_active(m_output_watcher))
+  {
+    // Increment ref count to stop this object from being deleted while being active.
+    intrusive_ptr_add_ref(this);
+    Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << (void*)static_cast<IOBase*>(this) << ']');
+  }
 }
 
 int OutputDevice::sync()
@@ -157,12 +158,11 @@ IOBase::RefCountReleaser InputDevice::stop_input_device()
   // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
   // the destruction of the lock object in that function) at which point is_active() will return
   // true.
-  if (is_active())
+  // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
+  // therefore only print that we enter this function when we're actually still active.
+  DoutEntering(dc::io(is_active()), "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
+  if (EventLoopThread::stop_if_active(m_input_watcher))
   {
-    // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
-    // therefore only print that we enter this function when we're actually still active.
-    DoutEntering(dc::io, "InputDevice::stop_input_device() [" << (void*)static_cast<IOBase*>(this) << ']');
-    ev_io_stop(EV_A_ &m_input_watcher);
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
     need_release = this;
   }
@@ -177,15 +177,16 @@ int InputDevice::get_input_fd() const
   return m_input_watcher.fd;
 }
 
+// Read and write threads; possibly other threads.
+// This function is thread-safe.
 IOBase::RefCountReleaser OutputDevice::stop_output_device()
 {
   RefCountReleaser need_release;
-  if (is_active())
+  // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
+  // therefore only print that we enter this function when we're actually still active.
+  DoutEntering(dc::io(is_active()), "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
+  if (EventLoopThread::stop_if_active(m_output_watcher))
   {
-    // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
-    // therefore only print that we enter this function when we're actually still active.
-    DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << (void*)static_cast<IOBase*>(this) << ']');
-    ev_io_stop(EV_A_ &m_output_watcher);
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
     need_release = this;
   }
@@ -219,7 +220,7 @@ void OutputDevice::write_to_fd(int fd)
       return;
     }
 #if EWOULDBLOCK != EAGAIN
-    register int nr_eagain_errors = 1;
+    int nr_eagain_errors = 1;
 try_again_write1:
 #endif
     size_t wlen = ::write(fd, m_obuffer->buf2dev_ptr(), len);
@@ -262,6 +263,7 @@ try_again_write1:
   }
 }
 
+// Read thread.
 void InputDevice::read_from_fd(int fd)
 {
   DoutEntering(dc::io, "InputDevice::read_from_fd(" << fd << ") [" << (void*)static_cast<IOBase*>(this) << ']');

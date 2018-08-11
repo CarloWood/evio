@@ -5,7 +5,8 @@ embedding a minimum amount of [libev](http://software.schmorp.de/pkg/libev.html)
 
 ## I/O device
 
-Each device class has [`evio::IOBase`](Device.h) as virtual base class, which in turn is derived from [`utils::AIRefCount`](../utils/AIRefCount.h).
+Each device class has [`evio::IOBase`](Device.h) as virtual base class, which in turn is derived
+from [`utils::AIRefCount`](https://github.com/CarloWood/ai-utils/blob/master/AIRefCount.h).
 
 Therefore one should use `boost::intrusive_ptr` to point to newly created device objects. For example,
 
@@ -24,30 +25,57 @@ which does the same thing as the first line.
 Normally, such an object would be deleted as soon as the `boost::intrusive_ptr` is destructed,
 however there are exceptions to that rule, see below.
 
-Either after or during construction the device is associated with an (open) filedescriptor
-(by calling, usually internally, `IOBase::init(int fd)` with an open filedescriptor `fd`,
-after which the member function `is_open()` will return true). The filedescriptor is closed
+Either during or after construction, the device is associated with an (open) filedescriptor
+by calling, usually internally, `IOBase::init(int fd)` with an open filedescriptor `fd`.
+Afterwards the member function `is_open()` will return true. The filedescriptor is closed
 upon destruction of the device or when the user explicitly calls the member function `close()`.
-In both cases the virtual function `closed()` is called, and `is_open()`
-returns false (after calling `close()`, not after destruction of course ;).
+In both cases the virtual function `closed()` is called (and, in the case of calling `close()`,
+`is_open()` will return false).
 
-There are three reasons why a Device is not immediately destroyed once the `boost::intrusive_ptr`
+There are three reasons why a Device is not immediately destroyed once the last `boost::intrusive_ptr`
 is destructed:
 
-1. Device is (derived from) `PersistentInputFile`. This means that a file path is associated
-   with the device that is monitored using <tt>inotify(7)</tt>; and as soon as there is
-   something/more to read from that path the device will read it. The only way to destroy
-   such an object is by calling `close()`.
+1. Device is, or is derived from, `PersistentInputFile`. This means that a file path is associated
+   with the device that is monitored using [<tt>inotify(7)</tt>](http://man7.org/linux/man-pages/man7/inotify.7.html);
+   and as soon as there is something/more to read from that path the device will read it.
+   The only way to destroy such an object is by calling `close()`.
 
-2. `IO` is (derived from) `OutputDevice` and there is still data in its buffer that wasn't
-   written yet (and still <em>can</em> be written, of course).
+2. `IO` is, or is derived from, `OutputDevice` and there is still data in the output buffer that
+   wasn't written yet (and still <em>can</em> be written, of course).
 
-3. `IO` is (derived from) `LinkOutputDevice` and the `InputDevice` that shares the buffer
-   wasn't deleted yet.
+3. `IO` is, or is derived from, `LinkOutputDevice` and the `InputDevice` that it shares the buffer
+   with wasn't deleted yet.
+
+4. `IO` is, or is derived from, `InputDevice` and its filedescriptor is still open (that is,
+   read() never returned zero). Most notably this is the case for a `ListenSocket` and for
+   a `Socket` that has an open (read) connection that wasn't closed yet.
 
 ### Device classes
 
-* `File<IO>`
+* `File<INPUT>` or `File<OUTPUT>`.
+* `PipeEnd<INPUT>` or `PipeEnd<OUTPUT>`.
+* `Socket<INPUT, OUTPUT>`.
+* `ListenSocket<Socket<INPUT, OUTPUT>>`.
+
+In all cases `INPUT` and `OUTPUT` become a base class of the device.
+`INPUT` must be derived from `InputDevice`, while `OUTPUT` must be
+derived from `OutputDevice`.
+
+### Thread safety
+
+Device classes are not thread safe and should only be accessed by
+one thread at a time. Under normal usage no mutex is needed however:
+one thread would construct the device object and cause a new filedescriptor
+to be opened. This filedescriptor is registered with libev, which requires
+also a one-thread-at-a-time treatment, but that has been taken care of
+by locking `EventLoopThread::m_loop_mutex` internally whenever libev call
+is performed that manipulates the `loop` object.
+
+As soon as the device is added to libev, callbacks can come in for
+reading and writing (aka, methods of the object are called and those
+access the object). read_from_fd
+
+## Using this git module
 
 The root project should be using
 [autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools) and

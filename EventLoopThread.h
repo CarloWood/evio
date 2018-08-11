@@ -56,8 +56,8 @@ class EventLoopThread : public Singleton<EventLoopThread>
   ev_async m_async_w;
   std::atomic_bool m_running;
 
-  static void acquire_cb(EV_P);
-  static void release_cb(EV_P);
+  static void acquire_cb(EV_P) EV_THROW;
+  static void release_cb(EV_P) EV_THROW;
   static void invoke_pending_cb(EV_P);
   static void async_cb(EV_P_ ev_async* w, int revents);
   static void main(EV_P);
@@ -69,10 +69,19 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void init(AIQueueHandle handler);
 
   static void start(ev_timer& timeout_watcher);
-  static void start(ev_io& io_watcher);
+  static bool start_if_not_active(ev_io& io_watcher);
+  static bool stop_if_active(ev_io& watcher);
   static void terminate();                      // Exit as soon as all watchers added by start() have finished.
 
   void invoke_pending();
+
+  // Call this from the call back of a timer when that expires
+  // AFTER you already called terminate(), in order to wake up
+  // the event loop thread again. If terminate() wasn't called
+  // then it has no effect. You could add it to every timer
+  // call back if you want, but it has to take the lock on
+  // m_loop_mutex shortly so that might be a waste.
+  void bump_terminate();
 
   class TemporaryRelease
   {

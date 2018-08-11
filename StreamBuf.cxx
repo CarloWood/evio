@@ -123,7 +123,7 @@ void StreamBuf::printOn(ostream& os) const
 
 StreamBuf::int_type StreamBuf::overflow(int_type c)
 {
-  DoutEntering(dc::evio, "StreamBuf::overflow(" << (char)c << ") [" << (void*)this << ']');
+  DoutEntering(dc::evio, "StreamBuf::overflow(" << char2str(c) << ") [" << (void*)this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
@@ -163,7 +163,7 @@ int StreamBuf::iunderflow()
   }
   else
   {
-    register char* start = get_area_block_node->block_start();
+    char* start = get_area_block_node->block_start();
     if (igptr() == start + get_area_block_node->get_size())
     {
       output_buffer.pop_front();
@@ -228,7 +228,7 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
     return static_cast<int_type>(EOF);
   }
   get_area_block_node = output_buffer.front();
-  register char* start = get_area_block_node->block_start();
+  char* start = get_area_block_node->block_start();
   isetg(start, start + get_area_block_node->get_size() - 1, start + get_area_block_node->get_size());
   *igptr() = c;
 #ifdef DEBUGDBSTREAMBUF
@@ -256,9 +256,9 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
 
   if (get_area_block_node == put_area_block_node)
   {
-    register char* _igptr = igptr();
-    register char* _pptr = pptr();
-    register streamsize len = _pptr - _igptr;
+    char* _igptr = igptr();
+    char* _pptr = pptr();
+    streamsize len = _pptr - _igptr;
     if (n <= len)
     {
       memcpy(s, _igptr, n);
@@ -278,7 +278,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
     Dout(dc::finish, "Returning " << len);
     return len;
   }
-  register streamsize len = ieback() + get_area_block_node->get_size() - igptr();
+  streamsize len = ieback() + get_area_block_node->get_size() - igptr();
   if (n <= len)
   {
     memcpy(s, igptr(), n);
@@ -298,7 +298,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
   {
     if ((size_t)n <= get_area_block_node->get_size())
     {
-      register char* start = get_area_block_node->block_start();
+      char* start = get_area_block_node->block_start();
       memcpy(s, start, n);
       isetg(start, start + n, start + get_area_block_node->get_size());
 #ifdef DEBUGDBSTREAMBUF
@@ -307,7 +307,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
       Dout(dc::finish, "Returning " << (len + n));
       return len + n;
     }
-    register size_t block_size = get_area_block_node->get_size();
+    size_t block_size = get_area_block_node->get_size();
     memcpy(s, get_area_block_node->block_start(), block_size);
     len += block_size;
     n -= block_size;
@@ -315,7 +315,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
     output_buffer.pop_front();
     get_area_block_node = output_buffer.front();
   }
-  register streamsize left = pptr() - pbase();
+  streamsize left = pptr() - pbase();
   if (n <= left)
   {
     memcpy(s, pbase(), n);
@@ -342,9 +342,9 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  register char const* sp = s;
-  register streamsize m = n;
-  register streamsize left = epptr() - pptr();
+  char const* sp = s;
+  streamsize m = n;
+  streamsize left = epptr() - pptr();
   if (m <= left)
   {
     memcpy(pptr(), sp, m);
@@ -355,7 +355,7 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
     memcpy(pptr(), sp, left);
     sp += left;
     m -= left;
-    register size_t block_size = new_block_size();
+    size_t block_size = new_block_size();
     if (!output_buffer.push_back(block_size))
     {
 #ifdef DEBUGDBSTREAMBUF
@@ -413,7 +413,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
   output_buffer.push_front((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
   get_area_block_node = put_area_block_node = output_buffer.front();
   input_streambuf = this;
-  register char* start = get_area_block_node->block_start();
+  char* start = get_area_block_node->block_start();
   setp(start, start + put_area_block_node->get_size());
   isetg(start, start, start);
   m_idevice = nullptr;
@@ -422,9 +422,9 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_f
 
 size_t StreamBuf::new_block_size() const
 {
-  register size_t nl = used_size();
-  register size_t l2 = get_log2_min_buf_size();
-  register long l = (nl < 2048 ? nl : 2048) + malloc_overhead_c - 1;
+  size_t nl = used_size();
+  size_t l2 = get_log2_min_buf_size();
+  long l = (nl < 2048 ? nl : 2048) + malloc_overhead_c - 1;
 
   if (l >= 2047)
     nl = (((nl - 1) >> 11) + 1) << 11;
@@ -462,12 +462,14 @@ int Buf2Dev::sync()
   return m_odevice->sync();
 }
 
+// Read thread of linked device.
 void Buf2Dev::flush()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
   m_odevice->restart_if_non_active();
 }
 
+// Read thread of linked device.
 void LinkBuffer::flush()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
