@@ -181,6 +181,7 @@ void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
   ASSERT(len < sizeof(m_sockaddr_un_ptr->sun_path));
   std::memcpy(m_sockaddr_un_ptr->sun_path, sockaddr_text.data(), len);
   m_sockaddr_un_ptr->sun_path[len] = '\0';
+  m_sockaddr_un_ptr->sun_family = AF_UNIX;
 }
 
 void SocketAddress::deinit()
