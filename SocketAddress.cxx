@@ -24,6 +24,7 @@ std::string SocketAddress::to_string() const
   {
     case AF_INET:
       add_brackets = false;
+      /*FALL-THROUGH*/
     case AF_INET6:
     {
       char hostname[42];
