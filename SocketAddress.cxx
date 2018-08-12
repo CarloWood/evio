@@ -53,6 +53,8 @@ std::string SocketAddress::to_string() const
   return result;
 }
 
+namespace {
+
 // Decode a string of the form ddd.ddd.ddd.ddd and return its length.
 //                          i = 0   1   2   3
 // The result is written to addr in network order (most significant octet first).
@@ -82,7 +84,7 @@ int decode_ip_address(std::string_view sv, sa_family_t& family, uint8_t* addr)
   bool saw_colon = sv.front() == ':';
   if (saw_colon)
   {
-    ASSERT(sv.size() > 2 && sv[1] == ':');      // An IPv6 address can only start with a colon if that is a double colon.
+    ASSERT(family != AF_INET && sv.size() > 2 && sv[1] == ':');      // An IPv6 address can only start with a colon if that is a double colon.
     sv.remove_prefix(2);                        // Eat the leading double colon.
     saw_double_colon = 0;
     len = 2;
@@ -103,6 +105,7 @@ int decode_ip_address(std::string_view sv, sa_family_t& family, uint8_t* addr)
       p = result.ptr;
       break;
     }
+    ASSERT(family != AF_INET || *result.ptr == '.');
     if (*result.ptr == '.')
     {
       i -= 2;
@@ -111,6 +114,14 @@ int decode_ip_address(std::string_view sv, sa_family_t& family, uint8_t* addr)
         ASSERT(saw_double_colon == 0 && i == 2 && addr[0] == 0xff && addr[1] == 0xff);    // IPv4 mapping only allowed after ::ffff:
         sv.remove_prefix(5);      // Skip over the 'ffff:'.
         len += 5;
+      }
+      else if (family == AF_INET6)
+      {
+        // Prepend with ::ffff:.
+        saw_colon = true;
+        saw_double_colon = 0;
+        addr[0] = addr[1] = 0xff;
+        i = 2;
       }
       p += decode_ipv4_address(sv, addr + i);
       i += 4;
@@ -155,30 +166,75 @@ int decode_port(std::string_view const sv, in_port_t& in_port)
   return result.ptr - sv.data();
 }
 
+} // namespace
+
+void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
+{
+  // These two must be set atomically, but that will be the case
+  // since this function is only called from constructors.
+  m_sockaddr.sa_family = AF_UNIX;
+  m_sockaddr_un_ptr = new struct sockaddr_un;
+
+  // Make sure that sun_path is always null terminated and not too long,
+  // so that all other code can rely on this.
+  size_t len = sockaddr_text.size();
+  ASSERT(len < sizeof(m_sockaddr_un_ptr->sun_path));
+  std::memcpy(m_sockaddr_un_ptr->sun_path, sockaddr_text.data(), len);
+  m_sockaddr_un_ptr->sun_path[len] = '\0';
+}
+
+void SocketAddress::deinit()
+{
+  if (m_sockaddr.sa_family == AF_UNIX)
+    delete m_sockaddr_un_ptr;
+  Debug(m_sockaddr_un_ptr = nullptr);
+}
+
 // Possible formats:
 //
+// /some/full/path
 // ddd.ddd.ddd.ddd:ppppp (optional brackets around ddd.ddd.ddd.ddd, but not recommended).
 // [hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh]:ppppp
 // [::ffff:ddd.ddd.ddd.ddd]:ppppp (the brackets are optional in this case).
-SocketAddress::SocketAddress(std::string_view sockaddr_txt)
+void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, unsigned short sa_family, int port)
 {
-  bool has_brackets = sockaddr_txt.front() == '[';
+  // Don't call this function with an empty sockaddr_text.
+  ASSERT(!sockaddr_text.empty());
+  char first = sockaddr_text.front();
+  if (AI_UNLIKELY(sa_family == AF_UNIX || first == '/'))
+  {
+    // Don't pass a port or a family other than AF_UNIX with a unix socket.
+    ASSERT((sa_family == AF_UNIX || sa_family == AF_UNSPEC) && port == -1);
+    make_sockaddr_un(sockaddr_text);
+    return;
+  }
+  // Always allow brackets around the IP#.
+  bool has_brackets = first == '[';
   if (has_brackets)
-    sockaddr_txt.remove_prefix(1);
+    sockaddr_text.remove_prefix(1);
+  m_sockaddr.sa_family = sa_family;
   uint8_t addr[16];
-  size_t len = decode_ip_address(sockaddr_txt, m_sockaddr.sa_family, addr);
+  size_t len = decode_ip_address(sockaddr_text, m_sockaddr.sa_family, addr);
   if (has_brackets)
   {
-    ASSERT(len < sockaddr_txt.size() && sockaddr_txt[len] == ']');
+    // The matching closing bracket must be present.
+    ASSERT(len < sockaddr_text.size() && sockaddr_text[len] == ']');
     ++len;
   }
-  ASSERT(len < sockaddr_txt.size() && sockaddr_txt[len] == ':');
-  sockaddr_txt.remove_prefix(len + 1);
-
   in_port_t in_port;
-  len = decode_port(sockaddr_txt, in_port);
-  ASSERT(len == sockaddr_txt.size());
+  if (port == -1)
+  {
+    // The port number must be separated by a colon.
+    ASSERT(len < sockaddr_text.size() && sockaddr_text[len] == ':');
+    sockaddr_text.remove_prefix(len + 1);
+    len = decode_port(sockaddr_text, in_port);
+  }
+  else
+    in_port = ntohs(port);
+  // Don't supply trailing characters.
+  ASSERT(len == sockaddr_text.size());
 
+  // Copy the decoded data to the appropriate place.
   if (m_sockaddr.sa_family == AF_INET)
   {
     struct sockaddr_in& sin(reinterpret_cast<struct sockaddr_in&>(m_sockaddr));
@@ -194,6 +250,77 @@ SocketAddress::SocketAddress(std::string_view sockaddr_txt)
     sin6.sin6_flowinfo = 0;
     sin6.sin6_scope_id = 0;
   }
+}
+
+void SocketAddress::move(SocketAddress&& other)
+{
+  struct sockaddr const* ptr = &other.m_sockaddr;
+  switch (ptr->sa_family)
+  {
+    case AF_INET:
+      std::memcpy(&m_sockaddr, ptr, sizeof(struct sockaddr_in));
+      break;
+    case AF_INET6:
+      std::memcpy(&m_sockaddr, ptr, sizeof(struct sockaddr_in6));
+      break;
+    case AF_UNIX:
+      m_sockaddr.sa_family = AF_UNIX;
+      m_sockaddr_un_ptr = other.m_sockaddr_un_ptr;
+      break;
+    default:
+      DoutFatal(dc::core, "SocketAddress::move(SocketAddress&& other): sa_family is not AF_INET, AF_INET6 or AF_UNIX.");
+  }
+  other.m_sockaddr.sa_family = AF_UNSPEC;
+}
+
+void SocketAddress::init(struct sockaddr const* sa_addr)
+{
+  switch (sa_addr->sa_family)
+  {
+    case AF_INET:
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr_in));
+      break;
+    case AF_INET6:
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr_in6));
+      break;
+    case AF_UNIX:
+    {
+      struct sockaddr_un const* sun(reinterpret_cast<struct sockaddr_un const*>(sa_addr));
+      make_sockaddr_un(std::string_view(sun->sun_path, strlen(sun->sun_path)));
+      break;
+    }
+    default:
+      DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX.");
+  }
+}
+
+// Return true if a compare with sa equals val, where
+// the meaning of val is: -1 : less than, 0 : equal to, 1 : greater than.
+bool SocketAddress::compare_with(SocketAddress const& sa, int val) const
+{
+  int res;
+  if (m_sockaddr.sa_family != sa.m_sockaddr.sa_family)
+  {
+    res = (m_sockaddr.sa_family < sa.m_sockaddr.sa_family) ? -1 : 1;
+  }
+  else
+  {
+    switch (m_sockaddr.sa_family)
+    {
+      case AF_INET:
+        res = std::memcmp(&m_sockaddr, &sa.m_sockaddr, sizeof(struct sockaddr_in));
+        break;
+      case AF_INET6:
+        res = std::memcmp(&m_sockaddr, &sa.m_sockaddr, sizeof(struct sockaddr_in6));
+        break;
+      case AF_UNIX:
+        res = strcmp(m_sockaddr_un_ptr->sun_path, sa.m_sockaddr_un_ptr->sun_path);
+        break;
+      default:
+        return false;
+    }
+  }
+  return res == val;
 }
 
 } // namespace evio
