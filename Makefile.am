@@ -22,7 +22,9 @@ SOURCES = StreamBuf.cxx \
 	  ListenSocket.cxx \
 	  ListenSocket.h \
 	  SocketAddress.cxx \
-	  SocketAddress.h
+	  SocketAddress.h \
+	  SocketAddressList.cxx \
+	  SocketAddressList.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@ -pthread
