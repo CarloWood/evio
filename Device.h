@@ -509,7 +509,7 @@ class InputDevice : public virtual IOBase
       if (!is_open())
       {
         m_flags |= FDS_DEAD;
-        closed();
+        releaser += closed();
       }
     }
     return releaser;
@@ -736,7 +736,7 @@ class OutputDevice : public virtual IOBase
       if (!is_open())
       {
         m_flags |= FDS_DEAD;
-        closed();
+        releaser += closed();
       }
     }
     return releaser;
