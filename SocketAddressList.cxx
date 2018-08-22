@@ -37,13 +37,14 @@ SocketAddressList& SocketAddressList::operator=(struct addrinfo const* info_list
 
 std::ostream& operator<<(std::ostream& os, SocketAddressList const& socket_address_list)
 {
-  char const* separator = "{";
+  os << '{';
+  char const* separator = "";
   for (auto&& socket_address : socket_address_list.mList)
   {
     os << separator << socket_address;
     separator = ", ";
   }
-  return os << "}";
+  return os << '}';
 }
 
 } // namespace evio
