@@ -527,27 +527,6 @@ class StreamBuf : public std::streambuf
   // Set the start and end of the put area of my input buffer.
   void isetp(char* p, char* ep) { input_streambuf->setp(p, ep); }
 
-#if 0 //def NEED_STREAMBUF_CONST_BUGFIX
- protected:
-  //---------------------------------------------------------------------------
-  // If `eback', `gptr', `egptr' etc. do not have the `const' type qualifier,
-  // give it them here:
-  //
-
-  class access_streambuf : public std::streambuf {
-  public:
-    typedef char* (std::streambuf::*cast_const)() const;
-    friend class StreamBuf;
-  };
-
-  char* eback() const { return ((this->*((access_streambuf::cast_const)std::streambuf::eback))()); }
-  char* gptr()  const { return ((this->*((access_streambuf::cast_const)std::streambuf::gptr))()); }
-  char* egptr() const { return ((this->*((access_streambuf::cast_const)std::streambuf::egptr))()); }
-  char* pbase() const { return ((this->*((access_streambuf::cast_const)std::streambuf::pbase))()); }
-  char* pptr()  const { return ((this->*((access_streambuf::cast_const)std::streambuf::pptr))()); }
-  char* epptr() const { return ((this->*((access_streambuf::cast_const)std::streambuf::epptr))()); }
-#endif // NEED_STREAMBUF_CONST_BUGFIX
-
  private:
   //---------------------------------------------------------------------------
   // Private attributes:

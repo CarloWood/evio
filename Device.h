@@ -424,8 +424,11 @@ class InputDevice : public virtual IOBase
     m_flags |= FDS_R;
     // Give m_input_watcher known values; cause is_active() to return false.
     ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, -1, EV_UNDEF);
-    // Tell the input buffer that we are the linked input device.
-    m_ibuffer->set_input_device(this);
+    if (m_ibuffer)
+    {
+      // Tell the input buffer that we are the linked input device.
+      m_ibuffer->set_input_device(this);
+    }
   }
 
   // Destructor.
@@ -436,8 +439,11 @@ class InputDevice : public virtual IOBase
     ASSERT(!is_active());
     if (is_open_r())
       close_input_device();     // This will not delete the object (again) because it isn't active.
-    // Delete the input buffer if it is no longer needed.
-    m_ibuffer->release(this);
+    if (m_ibuffer)
+    {
+      // Delete the input buffer if it is no longer needed.
+      m_ibuffer->release(this);
+    }
     // Make sure we detect it if this watcher is used again.
     Debug(m_input_watcher.data = nullptr);
   }
@@ -622,8 +628,11 @@ class OutputDevice : public virtual IOBase
     m_flags |= FDS_W;
     // Give m_output_watcher known values; cause is_active() to return false.
     ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, -1, EV_UNDEF);
-    // Tell the input buffer that we are the linked input device.
-    m_obuffer->set_output_device(this);
+    if (m_obuffer)
+    {
+      // Tell the input buffer that we are the linked input device.
+      m_obuffer->set_output_device(this);
+    }
   }
 
   // Destructor.
@@ -634,8 +643,11 @@ class OutputDevice : public virtual IOBase
     ASSERT(!is_active());
     if (is_open_w())
       close_output_device();    // This will not delete the object (again) because it isn't active.
-    // Delete the output buffer if it is no longer needed.
-    m_obuffer->release(this);
+    if (m_obuffer)
+    {
+      // Delete the output buffer if it is no longer needed.
+      m_obuffer->release(this);
+    }
     // Make sure we detect it if this watcher is used again.
     Debug(m_output_watcher.data = nullptr);
   }
