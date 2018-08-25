@@ -1,3 +1,5 @@
+#pragma once
+
 #include "SocketAddress.h"
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -32,15 +34,17 @@ class AddressInfo
   struct addrinfo* m_addrinfo;
 
  protected:
+  AddressInfo() : m_addrinfo(nullptr) { }
+  AddressInfo(AddressInfo&& addrinfo) : m_addrinfo(addrinfo.m_addrinfo) { addrinfo.m_addrinfo = nullptr; }
   AddressInfo(struct addrinfo* addrinfo) : m_addrinfo(addrinfo) { }
   virtual ~AddressInfo() { }
 
+  // Disallow (move) assignment.
+  AddressInfo& operator=(AddressInfo const& addrinfo) = delete;
+
  public:
-  operator struct addrinfo*() { return m_addrinfo; }
-  operator struct addrinfo const*() const { return m_addrinfo; }
-
+  bool empty() const { return !m_addrinfo; }
   AddressInfo next() const { return AddressInfo(m_addrinfo->ai_next); }
-
   SocketAddress addr() const { return m_addrinfo->ai_addr; }
 
   int flags() const { return m_addrinfo->ai_flags; }
@@ -48,6 +52,9 @@ class AddressInfo
   int socktype() const { return m_addrinfo->ai_socktype; }
   int protocol() const { return m_addrinfo->ai_protocol; }
   AddressInfoHints hints() const { return AddressInfoHints(m_addrinfo->ai_flags, m_addrinfo->ai_family, m_addrinfo->ai_socktype, m_addrinfo->ai_protocol); }
+
+  operator struct addrinfo*() { return m_addrinfo; }
+  operator struct addrinfo const*() const { return m_addrinfo; }
 
   friend std::ostream& operator<<(std::ostream& os, AddressInfo const& addrinfo);
 };
@@ -57,20 +64,19 @@ class AddressInfoList : public AddressInfo
  public:
   AddressInfoList(AddressInfoHints const& hints) : AddressInfo(static_cast<struct addrinfo*>(std::malloc(sizeof(struct addrinfo))))
     { std::memcpy(m_addrinfo, hints.as_addrinfo(), sizeof(struct addrinfo)); }
+  AddressInfoList(AddressInfoList&& addrinfo) : AddressInfo(std::move(addrinfo)) { }
   AddressInfoList(struct addrinfo* addrinfo) : AddressInfo(addrinfo) { }
+  AddressInfoList() { }
+  ~AddressInfoList() { clear(); }
+
+  // Only allow move assignment.
+  AddressInfoList& operator=(AddressInfoList&& addrinfo) { m_addrinfo = addrinfo.m_addrinfo; addrinfo.m_addrinfo = nullptr; return *this; }
 
   char const* canonname() const { return m_addrinfo->ai_canonname; }
   struct addrinfo*& raw_ref() { return m_addrinfo; }
 
-  ~AddressInfoList()
-  {
-    while (m_addrinfo)
-    {
-      struct addrinfo* next_ai = m_addrinfo->ai_next;
-      std::free(m_addrinfo);
-      m_addrinfo = next_ai;
-    }
-  }
+  void clear();
+  void add(struct addrinfo* addrinfo);
 };
 
 } // namespace evio

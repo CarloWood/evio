@@ -87,4 +87,22 @@ std::ostream& operator<<(std::ostream& os, AddressInfo const& addrinfo)
   return os << '}';
 }
 
+void AddressInfoList::clear()
+{
+  while (m_addrinfo)
+  {
+    struct addrinfo* next_ai = m_addrinfo->ai_next;
+    std::free(m_addrinfo);
+    m_addrinfo = next_ai;
+  }
+}
+
+void AddressInfoList::add(struct addrinfo* addrinfo)
+{
+  struct addrinfo** ptr = &m_addrinfo;
+  while (*ptr)
+    ptr = &(*ptr)->ai_next;
+  *ptr = addrinfo;
+}
+
 } // namespace evio
