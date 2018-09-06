@@ -83,6 +83,9 @@ class EventLoopThread : public Singleton<EventLoopThread>
   // m_loop_mutex shortly so that might be a waste.
   void bump_terminate();
 
+  // Obtain id of the Event Loop Thread. Mainly for debugging purposes.
+  std::thread::id id() const { return m_event_thread.get_id(); }
+
   class TemporaryRelease
   {
 #if EV_MULTIPLICITY
@@ -102,6 +105,11 @@ class EventLoopThread : public Singleton<EventLoopThread>
     return TemporaryRelease(EV_A);
   }
 };
+
+inline bool in_event_loop_thread()
+{
+  return EventLoopThread::instance().id() == std::this_thread::get_id();
+}
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
