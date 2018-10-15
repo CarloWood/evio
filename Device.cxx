@@ -24,7 +24,7 @@
 #include "sys.h"
 #include "Device.h"
 #include "EventLoopThread.h"
-#include "libcwd/buf2str.h"
+#include "debug.h"
 #ifdef CW_CONFIG_NONBLOCK_SYSV
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -32,6 +32,9 @@
 #else
 #include <unistd.h>     // Needed for fcntl.
 #include <fcntl.h>
+#endif
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
 #endif
 
 namespace evio {
@@ -281,7 +284,7 @@ void InputDevice::read_from_fd(int fd)
 
     ssize_t rlen;
     char* new_data = m_ibuffer->dev2buf_ptr();
-try_again_read1:
+//try_again_read1:
     rlen = ::read(fd, new_data, space);
 
     if (rlen == 0)                      // EOF reached ?

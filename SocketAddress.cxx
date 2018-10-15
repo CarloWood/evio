@@ -31,6 +31,7 @@
 #include <arpa/inet.h>
 #include <iostream>
 #include <charconv>
+#include <cstring>
 
 namespace evio {
 
@@ -120,8 +121,11 @@ int decode_ip_address(std::string_view sv, sa_family_t& family, uint8_t* addr)
     uint16_t hextet;
     std::from_chars_result result = std::from_chars(p, end, hextet, 16);
     ASSERT(result.ec == std::errc());
+    // hextet was *just* initialized.
+PRAGMA_DIAGNOSTIC_PUSH_IGNORE_maybe_uninitialized
     addr[i] = hextet >> 8;
     addr[i + 1] = hextet & 0xff;
+PRAGMA_DIAGNOSTIC_POP
     i += 2;
     if (i == 16 || result.ptr == end || *result.ptr == ']')
     {

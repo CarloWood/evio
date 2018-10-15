@@ -29,15 +29,15 @@
 #include "StreamBuf.h"
 #include "Device.h"
 #include "utils/is_power_of_two.h"
+#include <cstdlib>
 #ifdef CWDEBUG
-#include "libcwd/buf2str.h"
+#include <libcwd/buf2str.h>
+using namespace libcwd;
 #else
 #undef DEBUGDBSTREAMBUF
 #endif
-#include <cstdlib>
 
 using namespace std;
-using namespace libcwd;
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -476,7 +476,7 @@ void LinkBuffer::flush()
   m_odevice->restart_if_non_active();
 }
 
-bool StreamBuf::release(IOBase* device)
+bool StreamBuf::release(IOBase* DEBUG_ONLY(device))
 {
 #ifdef CWDEBUG
   if (m_device_counter == 0)

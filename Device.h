@@ -27,6 +27,7 @@
 #include "StreamBuf.h"
 #include "EventLoopThread.h"
 #include "utils/AIRefCount.h"
+#include <cstring>
 #include <arpa/inet.h>          // Needed for ntohs.
 
 namespace evio {

@@ -27,9 +27,11 @@
 #include "threadsafe/AIReadWriteSpinLock.h"
 #include "utils/macros.h"
 #include "utils/nearest_power_of_two.h"
-#include "libcwd/buf2str.h"
 #include <algorithm>
 #include <sys/inotify.h>
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 
 namespace evio {
 
@@ -134,7 +136,7 @@ INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify
 
 void INotifyDevice::rm_watch(int wd)
 {
-  int result;
+  [[maybe_unused]] int result;
   int fd = get_input_fd();
   {
     std::lock_guard<std::mutex> lock(m_inotify_mutex);
