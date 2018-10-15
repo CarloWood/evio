@@ -27,5 +27,5 @@ SOURCES = StreamBuf.cxx \
 	  SocketAddressList.h
 
 libevio_la_SOURCES = ${SOURCES}
-libevio_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@ -pthread
+libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 libevio_la_LIBADD = ../statefultask/libstatefultask.la ../threadsafe/libthreadsafe.la ../utils/libutils_r.la @LIBCWD_R_LIBS@
