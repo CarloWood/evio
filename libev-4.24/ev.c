@@ -1828,11 +1828,19 @@ typedef struct
   #include "ev_wrap.h"
 
   static struct ev_loop default_loop_struct;
-  EV_API_DECL struct ev_loop *ev_default_loop_ptr = 0; /* needs to be initialised to make it a definition despite extern */
+#ifdef EV_API_STATIC
+  static struct ev_loop *ev_default_loop_ptr;
+#else
+  struct ev_loop *ev_default_loop_ptr;
+#endif
 
 #else
 
-  EV_API_DECL ev_tstamp ev_rt_now = 0; /* needs to be initialised to make it a definition despite extern */
+#ifdef EV_API_STATIC
+  static ev_tstamp ev_rt_now;
+#else
+  ev_tstamp ev_rt_now;
+#endif
   #define VAR(name,decl) static decl;
     #include "ev_vars.h"
   #undef VAR
