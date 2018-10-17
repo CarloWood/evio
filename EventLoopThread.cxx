@@ -225,7 +225,7 @@ void EventLoopThread::terminate()
 EventLoopThread::~EventLoopThread()
 {
   DoutEntering(dc::evio, "EventLoopThread::~EventLoopThread()");
-  // Call EventLoopThread::instance().join() before leaving main().
+  // Call EventLoopThread::instance().terminate() before leaving main().
   ASSERT(!m_event_thread.joinable());
 
   if (ev_userdata(EV_A) == this)        // Was init() called?
