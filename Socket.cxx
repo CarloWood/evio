@@ -51,8 +51,8 @@ bool SocketDevice::priv_connect(struct sockaddr* addr, size_t rcvbuf_size, size_
   m_rcvbuf_size = rcvbuf_size;
   m_sndbuf_size = sndbuf_size;
 
-  Dout(dc::system|continued_cf, "socket(" << addr->sa_family << ", SOCK_STREAM | SOCK_NONBLOCK, 0) = ");
-  int fd = socket(addr->sa_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
+  Dout(dc::system|continued_cf, "socket(" << addr->sa_family << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
+  int fd = socket(addr->sa_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
   if (fd < 0)
     return false;

@@ -24,6 +24,7 @@
 #pragma once
 
 #include "Device.h"
+#include <fcntl.h>
 
 namespace evio {
 
@@ -64,7 +65,7 @@ class FileDevice : public virtual IOBase
   //
   // See `ifstream_dct::ifstream_dct' for a description of the
   // possible values of `mode'.
-  void open(char const* filename, int mode, int prot = 0664, int additional_posix_modes = 0);
+  void open(char const* filename, int mode, int prot = 0664, int additional_posix_modes = O_CLOEXEC);
 
   // Call the `close' of the base class, which does the real work.
   void close() { m_filename.clear(); close_fds(); }
@@ -115,25 +116,25 @@ class File : public FileDevice, public IO
   // Constructors that combine the above three two `open':
 
   // Create a new `File<IO>' with a default buffer and open a file.
-  File(char const* name, int mode = 0, int prot = 0664) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
+  File(char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
   {
     DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot);
+    open(name, mode | IO::mode, prot, additional_posix_modes);
   }
 
   // Create a new `File<IO>' with a given buffer and open a file.
-  File(typename IO::buffer_type* buffer, char const* name, int mode = 0, int prot = 0664) : IO(buffer)
+  File(typename IO::buffer_type* buffer, char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(buffer)
   {
     DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot);
+    open(name, mode | IO::mode, prot, additional_posix_modes);
   }
 
   // Create a new `File<IO>' which uses the same buffer as `link_buffer' and open a file.
   template<typename IO_with_buflink_type = IO>
-  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = 0, int prot = 0664) : IO(link_buffer->rddbbuf())
+  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(link_buffer->rddbbuf())
   {
     DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot);
+    open(name, mode | IO::mode, prot, additional_posix_modes);
   }
 
  public:
@@ -142,7 +143,7 @@ class File : public FileDevice, public IO
   //
 
   // Call the `open' of the base class, which does the real work.
-  void open(char const* name, int mode = 0, int prot = 0664) { return FileDevice::open(name, mode | IO::mode, prot); }
+  void open(char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) { return FileDevice::open(name, mode | IO::mode, prot, additional_posix_modes); }
 
   // Call `close` of the base class.
   using FileDevice::close;

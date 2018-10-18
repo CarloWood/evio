@@ -31,8 +31,8 @@ bool ListenSocketDevice::priv_listen(struct sockaddr* bind_addr, int backlog)
   if (is_open())
     return false;
 
-  Dout(dc::system|continued_cf, "socket(" << bind_addr->sa_family << ", SOCK_STREAM, 0) = ");
-  int fd = socket(bind_addr->sa_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
+  Dout(dc::system|continued_cf, "socket(" << bind_addr->sa_family << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
+  int fd = socket(bind_addr->sa_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   // Need to give the namespace inside templates for the cond_* due to bug in compiler.
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
   if (fd < 0)
@@ -166,7 +166,7 @@ void ListenSocketDevice::read_from_fd(int fd)
 
 bool ListenSocketDevice::maybe_out_of_fds()
 {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd >= 0)
     ::close(fd);
   return fd == -1;

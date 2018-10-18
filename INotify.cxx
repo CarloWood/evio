@@ -85,7 +85,7 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
     if (AI_UNLIKELY(!is_open_r()))
     {
       // Set up the inotify device.
-      int fd = inotify_init1(IN_NONBLOCK);
+      int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
       ASSERT(fd != -1);
       init(fd);
       start_input_device();

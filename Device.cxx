@@ -87,8 +87,15 @@ void set_nonblocking(int fd)
   int res;
   if ((res = fcntl(fd, F_GETFL)) == -1)
     perror("fcntl(fd, F_GETFL)");
-  else if (!(res & nonb) && fcntl(fd, F_SETFL, res | nonb) == -1)
+  else
+  {
+#ifdef O_CLOEXEC
+    if (!(res & O_CLOEXEC))
+      Dout(dc::warning, "O_CLOEXEC is not set on fd " << fd);
+#endif
+    if (!(res & nonb) && fcntl(fd, F_SETFL, res | nonb) == -1)
     perror("fcntl(fd, F_SETL, nonb)");
+  }
 #endif
   return;
 }
