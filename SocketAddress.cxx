@@ -25,6 +25,7 @@
 #include "debug.h"
 #include "SocketAddress.h"
 #include "utils/macros.h"
+#include "utils/itoa.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -75,6 +76,53 @@ std::string SocketAddress::to_string() const
       break;
   }
   return result;
+}
+
+void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf)
+{
+  char* buf = arpa_out_buf.data();
+  std::array<char, 4> octet_buf;
+  switch (m_sockaddr.sa_family)
+  {
+    case AF_INET:
+    {
+      struct sockaddr_in& sin(reinterpret_cast<struct sockaddr_in&>(m_sockaddr));
+      unsigned long octets = ntohl(sin.sin_addr.s_addr);
+      // This writes at most 16 chars to buf.
+      for (int i = 0; i < 4; ++i)
+      {
+        unsigned char val = octets & 0xff;
+        char const* p = utils::itoa(octet_buf, val);
+        while (*p) *buf++ = *p++;
+        *buf++ = '.';
+        octets >>= 8;
+      }
+      // Plus 14 (including the trailing 0) makes 30.
+      strcpy(buf, "in-addr.arpa.");
+      break;
+    }
+    case AF_INET6:
+    {
+      struct sockaddr_in6& sin6(reinterpret_cast<struct sockaddr_in6&>(m_sockaddr));
+      static char const hexdigit[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+      // This writes 64 chars to buf.
+      for (int i = 15; i >= 0; --i)
+      {
+        unsigned int nyble = sin6.sin6_addr.s6_addr[i];
+        for (int j = 0; j < 2; ++j)
+        {
+          *buf++ = hexdigit[0xf & nyble];
+          *buf++ = '.';
+          nyble >>= 4;
+        }
+      }
+      // Plus 10 (including the trailing 0) makes 74.
+      strcpy(buf, "ip6.arpa.");
+      break;
+    }
+    default:
+      DoutFatal(dc::fatal, "SocketAddress::ptr_qname called for " << *this << ", which isn't an IP address.");
+  }
 }
 
 namespace {
