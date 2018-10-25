@@ -26,6 +26,7 @@
 #include "SocketAddress.h"
 #include "utils/macros.h"
 #include "utils/itoa.h"
+#include "utils/AIAlert.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -33,6 +34,27 @@
 #include <iostream>
 #include <charconv>
 #include <cstring>
+
+namespace evio {
+
+struct gai_error_codes
+{
+  int mCode;
+
+  gai_error_codes(int code) : mCode(code) { }
+  operator int() const { return mCode; }
+};
+
+std::error_code make_error_code(gai_error_codes);
+
+} // namespace evio
+
+// Register evio::gai_error_codes as valid error code.
+namespace std {
+
+template<> struct is_error_code_enum<evio::gai_error_codes> : true_type { };
+
+} // namespace std
 
 namespace evio {
 
@@ -54,10 +76,9 @@ std::string SocketAddress::to_string() const
     {
       char hostname[42];
       char service[6];
-      int err = getnameinfo(&m_sockaddr, sizeof(m_storage), hostname, sizeof(hostname), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
-      if (err != 0)
-        std::cout << "Error: " << gai_strerror(err) << std::endl;
-      ASSERT(err == 0);
+      gai_error_codes err = getnameinfo(&m_sockaddr, sizeof(m_storage), hostname, sizeof(hostname), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
+      if (err)
+        THROW_FALERTC(err, "getnameinfo");
       result.reserve(48);    // The longest internet address result is "[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"
       if (add_brackets)
         result = '[';
@@ -131,44 +152,62 @@ namespace {
 //                          i = 0   1   2   3
 // The result is written to addr in network order (most significant octet first).
 // addr must be an array of at least four bytes.
-int decode_ipv4_address(std::string_view sv, uint8_t* addr)
+int decode_ipv4_address(std::string_view ipv4_str, uint8_t* addr)
 {
-  char const* p = sv.data();
-  char const* const end = p + sv.size();
+  char const* p = ipv4_str.data();
+  char const* const end = p + ipv4_str.size();
   int i = 0;
   for (;;)
   {
     std::from_chars_result result = std::from_chars(p, end, addr[i]);
-    ASSERT(result.ec == std::errc());
+    if (AI_UNLIKELY(result.ec != std::errc()))
+      THROW_ALERTC(result.ec,
+          "decode_ipv4_address: \"[IPV4_STR]\": octet at \"[OCTET_STR]\"",
+          AIArgs("[IPV4_STR]",  ipv4_str)
+                ("[OCTET_STR]", std::string_view(p, end - p)));
     p = result.ptr;
     if (++i == 4)       // In this case result.ptr can point to anything.
       break;
-    ASSERT(p < end && *p == '.');
+    if (AI_UNLIKELY(p == end || *p != '.'))
+      THROW_ALERT("decode_ipv4_address: \"[IPV4_STR]\": expected period.", AIArgs("[IPV4_STR]", ipv4_str));
     ++p;
   }
-  return p - sv.data();
+  return p - ipv4_str.data();
 }
 
-int decode_ip_address(std::string_view sv, sa_family_t& family, uint8_t* addr)
+int decode_ip_address(std::string_view ip_number_str, sa_family_t& family, uint8_t* addr)
 {
+  std::string_view orig_ip_number_str(ip_number_str);
   int len = 0;
   int saw_double_colon = -1;                    // Set to i for the first byte after a double colon; or -1 is there is no double colon (yet).
-  bool saw_colon = sv.front() == ':';
+  bool saw_colon = ip_number_str.front() == ':';
   if (saw_colon)
   {
-    ASSERT(family != AF_INET && sv.size() > 2 && sv[1] == ':');      // An IPv6 address can only start with a colon if that is a double colon.
-    sv.remove_prefix(2);                        // Eat the leading double colon.
+    if (AI_UNLIKELY(!(family != AF_INET && ip_number_str.size() > 2 && ip_number_str[1] == ':')))
+    {
+      THROW_ALERT((family == AF_INET)
+          ? "decode_ip_address: \"[IP_NUMBER_STR]\": IPv4 can not start with a colon."
+          : "decode_ip_address: \"[IP_NUMBER_STR]\": IPv6 can only start with a colon if that is a double colon.",
+          AIArgs("[IP_NUMBER_STR]", orig_ip_number_str));
+    }
+    ip_number_str.remove_prefix(2);                        // Eat the leading double colon.
     saw_double_colon = 0;
     len = 2;
   }
-  char const* p = sv.data();
-  char const* const end = sv.data() + sv.size();
+  char const* p = ip_number_str.data();
+  char const* const end = ip_number_str.data() + ip_number_str.size();
   int i = 0;                                    // Index into addr.
   while (p < end && *p != ']')
   {
     uint16_t hextet;
     std::from_chars_result result = std::from_chars(p, end, hextet, 16);
-    ASSERT(result.ec == std::errc());
+    if (AI_UNLIKELY(result.ec != std::errc()))
+    {
+      THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": std::from_chars failed for \"[HEXTET]\": [ERROR_MSG].",
+          AIArgs("[IP_NUMBER_STR]", orig_ip_number_str)
+                ("[HEXTET]",        std::string_view(p, end - p))
+                ("[ERROR_MSG]",     make_error_code(result.ec).message()));
+    }
     // hextet was *just* initialized.
 PRAGMA_DIAGNOSTIC_PUSH_IGNORE_maybe_uninitialized
     addr[i] = hextet >> 8;
@@ -180,14 +219,23 @@ PRAGMA_DIAGNOSTIC_POP
       p = result.ptr;
       break;
     }
-    ASSERT(family != AF_INET || *result.ptr == '.');
+    if (AI_UNLIKELY(family == AF_INET && *result.ptr != '.'))
+    {
+      THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": IPv4 parse error; expected a period at \"[PTR]\".",
+          AIArgs("[IP_NUMBER_STR]", orig_ip_number_str)
+                ("[PTR]", result.ptr));
+    }
     if (*result.ptr == '.')
     {
       i -= 2;
       if (saw_colon)    // IPv6?
       {
-        ASSERT(saw_double_colon == 0 && i == 2 && addr[0] == 0xff && addr[1] == 0xff);    // IPv4 mapping only allowed after ::ffff:
-        sv.remove_prefix(5);      // Skip over the 'ffff:'.
+        if (AI_UNLIKELY(!(saw_double_colon == 0 && i == 2 && addr[0] == 0xff && addr[1] == 0xff)))
+        {
+          THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": IPv4 mapping only allowed after \"::ffff:\".",
+              AIArgs("[IP_NUMBER_STR]", orig_ip_number_str));
+        }
+        ip_number_str.remove_prefix(5);      // Skip over the 'ffff:'.
         len += 5;
       }
       else if (family == AF_INET6)
@@ -198,12 +246,24 @@ PRAGMA_DIAGNOSTIC_POP
         addr[0] = addr[1] = 0xff;
         i = 2;
       }
-      p += decode_ipv4_address(sv, addr + i);
+      try
+      {
+        p += decode_ipv4_address(ip_number_str, addr + i);
+      }
+      catch (AIAlert::Error const& error)
+      {
+        THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": ",
+            AIArgs("[IP_NUMBER_STR]", orig_ip_number_str),
+            error);
+      }
       i += 4;
       break;
     }
     p = result.ptr;
-    ASSERT(*p == ':');
+    if (AI_UNLIKELY(*p != ':'))
+      THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": expected ':' at \"[PTR]\"",
+          AIArgs("[IP_NUMBER_STR]", orig_ip_number_str)
+                ("[PTR]", p));
     saw_colon = true;
     ++p;
     if (AI_UNLIKELY(*p == ':'))
@@ -212,11 +272,13 @@ PRAGMA_DIAGNOSTIC_POP
       ++p;
     }
   }
-  len += p - sv.data();
+  len += p - ip_number_str.data();
   family = saw_colon ? AF_INET6 : AF_INET;
   if (saw_colon)
   {
-    ASSERT(i == 16 || saw_double_colon != -1);
+    if (AI_UNLIKELY(i != 16 && saw_double_colon == -1))
+      THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": not enough hextets and no '::'",
+          AIArgs("[IP_NUMBER_STR]", orig_ip_number_str));
     int offset = 16 - i;
     if (offset > 0)
     {
@@ -236,7 +298,10 @@ int decode_port(std::string_view const sv, in_port_t& in_port)
 {
   uint16_t port;
   std::from_chars_result result = std::from_chars(sv.data(), sv.data() + sv.size(), port);
-  ASSERT(result.ec == std::errc());
+  // Note: sv must be numeric port (in string form). Not a service name.
+  // Throw if there wasn't any digit, or if the result doesn't fit in a in_port_t.
+  if (AI_UNLIKELY(result.ec != std::errc()))
+    THROW_ALERTC(result.ec, "decode_port: \"[PORT]\"", AIArgs("[PORT]", sv));
   in_port = ntohs(port);
   return result.ptr - sv.data();
 }
@@ -253,7 +318,8 @@ void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
   // Make sure that sun_path is always null terminated and not too long,
   // so that all other code can rely on this.
   size_t len = sockaddr_text.size();
-  ASSERT(len < sizeof(m_sockaddr_un_ptr->sun_path));
+  if (AI_UNLIKELY(len >= sizeof(m_sockaddr_un_ptr->sun_path)))
+    THROW_FALERTC(SocketAddress_make_sockaddr_un_path_too_long, "\"[SOCKADDR_TEXT]\": UNIX socket path is too long");
   std::memcpy(m_sockaddr_un_ptr->sun_path, sockaddr_text.data(), len);
   m_sockaddr_un_ptr->sun_path[len] = '\0';
   m_sockaddr_un_ptr->sun_family = AF_UNIX;
@@ -285,30 +351,73 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, unsigned sho
     return;
   }
   // Always allow brackets around the IP#.
+  std::string_view orig_sockaddr_text(sockaddr_text);
   bool has_brackets = first == '[';
   if (has_brackets)
     sockaddr_text.remove_prefix(1);
   m_sockaddr.sa_family = sa_family;
   uint8_t addr[16];
-  size_t len = decode_ip_address(sockaddr_text, m_sockaddr.sa_family, addr);
+  size_t len;
+  try
+  {
+    len = decode_ip_address(sockaddr_text, m_sockaddr.sa_family, addr);
+  }
+  catch (AIAlert::Error const& error)
+  {
+    THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+        "\"[SOCKADDR_TEXT]\": ",
+        AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text),
+        error);
+  }
   if (has_brackets)
   {
     // The matching closing bracket must be present.
-    ASSERT(len < sockaddr_text.size() && sockaddr_text[len] == ']');
+    if (AI_UNLIKELY(len == sockaddr_text.size() || sockaddr_text[len] != ']'))
+    {
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": missing ']'",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
+    }
     ++len;
   }
   in_port_t in_port;
   if (port == -1)
   {
     // The port number must be separated by a colon.
-    ASSERT(len < sockaddr_text.size() && sockaddr_text[len] == ':');
+    if (AI_UNLIKELY(len == sockaddr_text.size()))
+    {
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": missing trailing \":port\"",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
+    }
+    else if (AI_UNLIKELY(sockaddr_text[len] != ':'))
+    {
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": IPv4 extra characters",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text)("[REST]", sockaddr_text));
+    }
     sockaddr_text.remove_prefix(len + 1);
-    len = decode_port(sockaddr_text, in_port);
+    try
+    {
+      len = decode_port(sockaddr_text, in_port);
+    }
+    catch (AIAlert::Error const& error)
+    {
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": ",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text),
+          error);
+    }
   }
   else
     in_port = ntohs(port);
-  // Don't supply trailing characters.
-  ASSERT(len == sockaddr_text.size());
+  if (AI_UNLIKELY(len != sockaddr_text.size()))
+  {
+    // Don't supply trailing characters.
+    THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+        "\"[SOCKADDR_TEXT]\": trailing characters after port number",
+        AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
+  }
 
   // Copy the decoded data to the appropriate place.
   if (m_sockaddr.sa_family == AF_INET)
@@ -397,6 +506,78 @@ bool SocketAddress::compare_with(SocketAddress const& sa, int val) const
     }
   }
   return res == val;
+}
+
+//============================================================================
+// Error code handling.
+// See https://akrzemi1.wordpress.com/2017/07/12/your-own-error-code/
+
+//----------------------------------------------------------------------------
+// evio error category
+
+namespace {
+
+struct ErrorCategory : std::error_category
+{
+  char const* name() const noexcept override;
+  std::string message(int ev) const override;
+};
+
+char const* ErrorCategory::name() const noexcept
+{
+  return "evio";
+}
+
+std::string ErrorCategory::message(int ev) const
+{
+  switch (static_cast<error_codes>(ev))
+  {
+    case SocketAddress_decode_sockaddr_parse_error:
+      return "evio::SocketAddress::decode_sockaddr parse error";
+    case SocketAddress_make_sockaddr_un_path_too_long:
+      return "UNIX socket path is too long";
+    default:
+      return "evio::SocketAddress::decode_sockaddr (unrecognized error)";
+  }
+}
+
+ErrorCategory const theErrorCategory { };
+
+} // namespace
+
+std::error_code make_error_code(error_codes code)
+{
+  return std::error_code(static_cast<int>(code), theErrorCategory);
+}
+
+//----------------------------------------------------------------------------
+// gai error codes (as returned by getnameinfo(3), getaddrinfo(3), etc)
+
+namespace {
+
+struct GaiErrorCategory : std::error_category
+{
+  char const* name() const noexcept override;
+  std::string message(int ev) const override;
+};
+
+char const* GaiErrorCategory::name() const noexcept
+{
+  return "gai";
+}
+
+std::string GaiErrorCategory::message(int ev) const
+{
+  return gai_strerror(ev);
+}
+
+GaiErrorCategory const theGaiErrorCategory { };
+
+} // namespace
+
+std::error_code make_error_code(gai_error_codes code)
+{
+  return std::error_code(static_cast<int>(code), theGaiErrorCategory);
 }
 
 } // namespace evio

@@ -27,6 +27,7 @@
 #include "threadsafe/AIReadWriteSpinLock.h"
 #include "utils/macros.h"
 #include "utils/nearest_power_of_two.h"
+#include "utils/AIAlert.h"
 #include <algorithm>
 #include <sys/inotify.h>
 #ifdef CWDEBUG
@@ -86,7 +87,8 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
     {
       // Set up the inotify device.
       int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-      ASSERT(fd != -1);
+      if (fd == -1)
+        THROW_FALERTE("with pathname = \"[PATHNAME]\"; inotify_init1");
       init(fd);
       start_input_device();
       // Exit ev_run when this device is still running.
@@ -97,11 +99,8 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
     wd = inotify_add_watch(fd, pathname, mask);
     Dout(dc::finish|cond_error_cf(wd == -1), wd);
     if (AI_UNLIKELY(wd == -1))
-    {
-      // FIXME, throw an error.
-      ASSERT(wd >= 0);
-      return -1;
-    }
+      THROW_FALERTE("inotify_add_watch([FD], \"[PATHNAME]\", [MASK])",
+          AIArgs("[FD]", fd)("[PATHNAME]", pathname)("[MASK]", mask));
   }
   wd_to_inotify_map_ts::wat(m_wd_to_inotify_map)->push_back(std::make_pair(wd, obj));
   return wd;
@@ -126,10 +125,7 @@ INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify
   auto result = std::find_if(wd_to_inotify_map_r->begin(), wd_to_inotify_map_r->end(), find_watch_descriptor);
 
   if (AI_UNLIKELY(result == wd_to_inotify_map_r->end()))
-  {
-    // FIXME, throw an error.
-    ASSERT(result != wd_to_inotify_map_r->end());
-  }
+    THROW_FALERT("Could not find watch descriptor [WD] in m_wd_to_inotify_map!", AIArgs("[WD]", wd));
 
   return result;
 }
@@ -142,7 +138,10 @@ void INotifyDevice::rm_watch(int wd)
     std::lock_guard<std::mutex> lock(m_inotify_mutex);
     Dout(dc::system|continued_cf, "inotify_rm_watch(" << fd << ", " << wd << ") = ");
     result = inotify_rm_watch(fd, wd);
+    int err = errno;
     Dout(dc::finish|cond_error_cf(result == -1), result);
+    if (AI_UNLIKELY(result == -1))
+      THROW_FALERTC(err, "inotify_rm_watch([FD], [WD])", AIArgs("[FD]", fd)("[WD]", wd));
   }
   {
     // Although a write lock is only necessary for the erase; the AIReadWriteSpinLock that
@@ -151,8 +150,6 @@ void INotifyDevice::rm_watch(int wd)
     auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
     wd_to_inotify_map_w->erase(iter);
   }
-  // FIXME, throw an error.
-  ASSERT(result == 0);
 }
 
 size_t INotifyDevice::end_of_msg_finder(char const* new_data, size_t rlen)

@@ -29,6 +29,7 @@
 #include <sys/un.h>
 #include <iosfwd>
 #include <array>
+#include <system_error>
 
 namespace evio {
 
@@ -113,4 +114,19 @@ class SocketAddress
   bool compare_with(SocketAddress const& sa, int val) const;
 };
 
+enum error_codes
+{
+  SocketAddress_decode_sockaddr_parse_error = -1,
+  SocketAddress_make_sockaddr_un_path_too_long = 1
+};
+
+std::error_code make_error_code(error_codes);
+
 } // namespace evio
+
+// Register evio::error_codes as valid error code.
+namespace std {
+
+template<> struct is_error_code_enum<evio::error_codes> : true_type { };
+
+} // namespace std
