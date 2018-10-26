@@ -92,7 +92,7 @@ class SocketAddress
 
   // Convert to arpa address.
   using arpa_buf_t = std::array<char, 74>;
-  void ptr_qname(arpa_buf_t& arpa_out_buf);
+  void ptr_qname(arpa_buf_t& arpa_out_buf) const;
 
   // Comparison.
   friend bool operator!=(SocketAddress const& sa1, SocketAddress const& sa2) { return !sa1.compare_with(sa2, 0); }

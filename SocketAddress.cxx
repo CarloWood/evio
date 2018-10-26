@@ -99,7 +99,7 @@ std::string SocketAddress::to_string() const
   return result;
 }
 
-void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf)
+void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf) const
 {
   char* buf = arpa_out_buf.data();
   std::array<char, 4> octet_buf;
@@ -107,7 +107,7 @@ void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf)
   {
     case AF_INET:
     {
-      struct sockaddr_in& sin(reinterpret_cast<struct sockaddr_in&>(m_sockaddr));
+      struct sockaddr_in const& sin(reinterpret_cast<struct sockaddr_in const&>(m_sockaddr));
       unsigned long octets = ntohl(sin.sin_addr.s_addr);
       // This writes at most 16 chars to buf.
       for (int i = 0; i < 4; ++i)
@@ -124,7 +124,7 @@ void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf)
     }
     case AF_INET6:
     {
-      struct sockaddr_in6& sin6(reinterpret_cast<struct sockaddr_in6&>(m_sockaddr));
+      struct sockaddr_in6 const& sin6(reinterpret_cast<struct sockaddr_in6 const&>(m_sockaddr));
       static char const hexdigit[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
       // This writes 64 chars to buf.
       for (int i = 15; i >= 0; --i)
