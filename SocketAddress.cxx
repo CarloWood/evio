@@ -452,8 +452,12 @@ void SocketAddress::move(SocketAddress&& other)
       m_sockaddr.sa_family = AF_UNIX;
       m_sockaddr_un_ptr = other.m_sockaddr_un_ptr;
       break;
+    case AF_UNSPEC:
+      // AF_UNSPEC should mean 'uninitialized', see the default constructor of SocketAddress.
+      std::memcpy(&m_sockaddr, ptr, sizeof(struct sockaddr));
+      break;
     default:
-      DoutFatal(dc::core, "SocketAddress::move(SocketAddress&& other): sa_family is not AF_INET, AF_INET6 or AF_UNIX.");
+      DoutFatal(dc::core, "SocketAddress::move(SocketAddress&& other): sa_family is not AF_INET, AF_INET6, AF_UNIX or AF_UNSPEC.");
   }
   other.m_sockaddr.sa_family = AF_UNSPEC;
 }
