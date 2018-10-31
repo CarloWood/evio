@@ -66,7 +66,7 @@ class SocketAddress
   SocketAddress(unsigned short sin_family, std::string_view sin_addr_text, unsigned short port) { decode_sockaddr(sin_addr_text, sin_family, port); }
   // Construct a SocketAddress from a fully initialized struct sockaddr_in (AF_INET),
   // struct sockaddr_in6 (AF_INET6) or struct sockaddr_un (AF_UNIX).
-  SocketAddress(struct sockaddr* sa_addr) { init(sa_addr); }
+  SocketAddress(struct sockaddr const* sa_addr) { init(sa_addr); }
   // Move constructor (only useful for AF_UNIX sockets).
   SocketAddress(SocketAddress&& other) { move(std::move(other)); }
   // Copy constructor.

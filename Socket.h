@@ -25,6 +25,7 @@
 
 #include "Device.h"
 #include "debug.h"
+#include "inet_support.h"
 #include <netinet/in.h>
 #include <sys/un.h>
 
@@ -77,7 +78,6 @@ class SocketDevice : public virtual IOBase
   // Returns true on success (or EINPROGRESS).
   bool priv_connect(struct sockaddr* addr,
       size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size,
       struct sockaddr* bind_addr);
 
  protected:
@@ -88,30 +88,26 @@ class SocketDevice : public virtual IOBase
   // Connect to internet address `ip', port `port'.
   // The socket receive and send buffer sizes are set to respectively
   // `rcvbuf_size' and `sndbuf_size'. If `rcvbuf_size' is 0 then
-  // `__minimum_input_size' is used to determine the receive socket buffer
-  // size and if `sndbuf_size' is 0 then `__minimum_output_size' is used
-  // to determine the send socket buffer size. These should be set to the
-  // minimum block size of the input and output respectively.
+  // `minimum_input_size()' is used to determine the receive socket buffer
+  // size and if `sndbuf_size' is 0 then `minimum_output_size()' is used
+  // to determine the send socket buffer size.
   //
   // Returns true on success (or EINPROGRESS).
   bool priv_in_connect(struct in_addr ip, unsigned short int port,
-      size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size);
+      size_t rcvbuf_size, size_t sndbuf_size);
 
   // Connect to internet address `ip', port `port'.
   // Bind to the local interface with address `local_ip'.
   // The socket receive and send buffer sizes are set to respectively
   // `rcvbuf_size' and `sndbuf_size'. If `rcvbuf_size' is 0 then
-  // `minimum_input_size' is used to determine the receive socket buffer
-  // size and if `sndbuf_size' is 0 then `minimum_output_size' is used
-  // to determine the send socket buffer size. These should be set to the
-  // minimum block size of the input and output respectively.
+  // `minimum_input_size()' is used to determine the receive socket buffer
+  // size and if `sndbuf_size' is 0 then `minimum_output_size()' is used
+  // to determine the send socket buffer size.
   //
   // Returns true on success (or EINPROGRESS).
   bool priv_in_connect(struct in_addr ip, unsigned short int port,
       struct in_addr local_ip,
-      size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size);
+      size_t rcvbuf_size, size_t sndbuf_size);
 
   // FIXME: host lookup is blocking
   // Connect to remote host `host', port `port'.
@@ -121,8 +117,7 @@ class SocketDevice : public virtual IOBase
   //
   // Returns true on success (or EINPROGRESS).
   bool priv_in_connect(char const* host, unsigned short int port,
-      size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size);
+      size_t rcvbuf_size, size_t sndbuf_size);
 
   // FIXME: host lookup is blocking
   // Connect to remote host `host', port `port'.
@@ -134,16 +129,40 @@ class SocketDevice : public virtual IOBase
   // Returns true on success (or EINPROGRESS).
   bool priv_in_connect(char const* host, unsigned short int port,
       struct in_addr local_ip,
-      size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size);
+      size_t rcvbuf_size, size_t sndbuf_size);
 
   // Connect to Unix domain socket path `path'.
   // See above for a description of four sizes.
   //
   // Returns true on success (or EINPROGRESS).
   bool priv_un_connect(char const* path,
-      size_t rcvbuf_size, size_t sndbuf_size,
-      size_t minimum_input_size, size_t minimum_output_size);
+      size_t rcvbuf_size, size_t sndbuf_size);
+
+ protected:
+  virtual size_t minimum_input_size() const = 0;
+  virtual size_t minimum_output_size() const = 0;
+
+ public:
+  // Associate this object with an existing and open socket `fd'.
+  void init(int fd, struct sockaddr* addr, size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
+  {
+#ifdef CWDEBUG
+    if (is_open())
+      DoutFatal(dc::core, "Trying to `init' a Socket that is already open.");
+#endif
+    m_addr = addr;
+    m_rcvbuf_size = rcvbuf_size;
+    m_sndbuf_size = sndbuf_size;
+    if (!set_rcvsockbuf(fd, m_rcvbuf_size, minimum_input_size()) ||
+	!set_sndsockbuf(fd, m_sndbuf_size, minimum_output_size()))
+    {
+      // Why does this happen?
+      ASSERT(false);
+      return;
+    }
+    IOBase::init(fd);
+    start();
+  }
 
  public:
   //---------------------------------------------------------------------------
@@ -213,6 +232,10 @@ class SocketDevice : public virtual IOBase
 template<class INPUT, class OUTPUT>
 class Socket : public SocketDevice, public INPUT, public OUTPUT
 {
+ protected:
+  size_t minimum_input_size() const override { return INPUT::m_ibuffer->minimum_block_size(); }
+  size_t minimum_output_size() const override { return OUTPUT::m_obuffer->minimum_block_size(); }
+
  public:
   //---------------------------------------------------------------------------
   // Constructors
@@ -281,34 +304,13 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
   // Public methods
   //
 
-  // Associate this object with an existing and open socket `fd'.
-  void init(int fd, struct sockaddr* addr, size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
-  {
-#ifdef CWDEBUG
-    if (is_open())
-      DoutFatal(dc::core, "Trying to `init' a Socket that is already open.");
-#endif
-    m_addr = addr;
-    m_rcvbuf_size = rcvbuf_size;
-    m_sndbuf_size = sndbuf_size;
-    if (!set_rcvsockbuf(fd, m_rcvbuf_size, INPUT::m_ibuffer->minimum_block_size()) ||
-	!set_sndsockbuf(fd, m_sndbuf_size, OUTPUT::m_obuffer->minimum_block_size()))
-    {
-      // Why does this happen?
-      ASSERT(false);
-      return;
-    }
-    IOBase::init(fd);
-    start();
-  }
-
   // See `SocketDevice' for a description.
   bool connect(
       struct in_addr ip, unsigned short int port,
       size_t rcvbuf_size = 0, size_t sndbuf_size = 0
       )
   {
-    return priv_in_connect(ip, port, rcvbuf_size, sndbuf_size, INPUT::m_ibuffer->minimum_block_size(), OUTPUT::m_obuffer->minimum_block_size());
+    return priv_in_connect(ip, port, rcvbuf_size, sndbuf_size);
   }
 
   // See `SocketDevice' for a description.
@@ -317,7 +319,7 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
       struct in_addr local_ip,
       size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
   {
-    return priv_in_connect(ip, port, local_ip, rcvbuf_size, sndbuf_size, INPUT::m_ibuffer->minimum_block_size(), OUTPUT::m_obuffer->minimum_block_size());
+    return priv_in_connect(ip, port, local_ip, rcvbuf_size, sndbuf_size);
   }
 
   // See `SocketDevice' for a description.
@@ -325,7 +327,7 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
       char const* host, unsigned short int port,
       size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
   {
-    return priv_in_connect(host, port, rcvbuf_size, sndbuf_size, INPUT::m_ibuffer->minimum_block_size(), OUTPUT::m_obuffer->minimum_block_size());
+    return priv_in_connect(host, port, rcvbuf_size, sndbuf_size);
   }
 
   // See `SocketDevice' for a description.
@@ -334,7 +336,7 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
       struct in_addr local_ip,
       size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
   {
-    return priv_in_connect(host, port, local_ip, rcvbuf_size, sndbuf_size, INPUT::m_ibuffer->minimum_block_size(), OUTPUT::m_obuffer->minimum_block_size());
+    return priv_in_connect(host, port, local_ip, rcvbuf_size, sndbuf_size);
   }
 
   // See `SocketDevice' for a description.
@@ -342,22 +344,8 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
       char const* path,
       size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
   {
-    return priv_un_connect(path, rcvbuf_size, sndbuf_size, INPUT::m_ibuffer->minimum_block_size(), OUTPUT::m_obuffer->minimum_block_size());
+    return priv_un_connect(path, rcvbuf_size, sndbuf_size);
   }
-
-  //---------------------------------------------------------------------------
-  // Base class methods.
-  // See `SocketDevice' for a description.
-  //
-
-public:
-  using SocketDevice::remote_ip;
-  using SocketDevice::remote_port;
-  using SocketDevice::local_ip;
-  using SocketDevice::local_port;
-  using SocketDevice::get_rcvbuf_size;
-  using SocketDevice::get_sndbuf_size;
-  using SocketDevice::get_path;
 };
 
 } // namespace evio

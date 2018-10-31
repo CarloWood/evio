@@ -26,6 +26,7 @@
 #include "Device.h"
 #include "debug.h"
 #include "inet_support.h"
+#include "Socket.h"
 #include <sys/un.h>
 #include <sys/socket.h>
 
@@ -204,7 +205,7 @@ void ListenSocket<SOCK_TYPE>::spawn_accepted(int fd, struct sockaddr* addr)
 {
   SOCK_TYPE* sock = new SOCK_TYPE;
   AllocTag1(sock);
-  sock->init(fd, addr);
+  sock->SocketDevice::init(fd, addr);
   new_connection(*sock);
 }
 
