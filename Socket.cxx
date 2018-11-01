@@ -23,7 +23,7 @@
 
 #include "sys.h"
 #include "Socket.h"
-#include "inet_support.h"
+#include "utils/AIAlert.h"
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -122,6 +122,7 @@ bool SocketDevice::priv_in_connect(struct in_addr ip, unsigned short int port, s
          reinterpret_cast<struct sockaddr*>(local_addr));
 }
 
+#if 0
 bool SocketDevice::priv_in_connect(char const* host, unsigned short int port, size_t rcvbuf_size, size_t sndbuf_size)
 {
   struct hostent* h = gethostbyname(host);	// FIXME: This is blocking
@@ -163,6 +164,7 @@ bool SocketDevice::priv_in_connect(char const* host, unsigned short int port, st
 
   return priv_in_connect(ip, port, local_ip, rcvbuf_size, sndbuf_size);
 }
+#endif
 
 bool SocketDevice::priv_un_connect(char const* path, size_t rcvbuf_size, size_t sndbuf_size)
 {
@@ -178,44 +180,23 @@ bool SocketDevice::priv_un_connect(char const* path, size_t rcvbuf_size, size_t 
   return priv_connect((struct sockaddr*)un_addr, rcvbuf_size, sndbuf_size);
 }
 
-struct in_addr SocketDevice::local_ip() const
+SocketAddress SocketDevice::local_address() const
 {
-#ifdef CWDEBUG
-  if (!m_addr || m_addr->sa_family != AF_INET)
-    DoutFatal(dc::core, "Calling SocketDevice::local_ip for a non AF_INET socket");
-#endif
-  struct sockaddr_in local_addr;
-  socklen_t namelen = sizeof(local_addr);
+  // Don't call this function when !is_open() (aka, init() was called).
+  ASSERT(m_addr);
+  SocketAddress result;
+  socklen_t namelen = sizeof(result);
 
+  // Shouldn't this always be the case for a SocketDevice?
   ASSERT(get_output_fd() == get_input_fd());
-  if (getsockname(get_output_fd(), (struct sockaddr*)&local_addr, &namelen) < 0)
+  if (getsockname(get_output_fd(), result, &namelen) < 0)
   {
-    Dout(dc::warning|error_cf, "SocketDevice::local_ip: getsockname(" << get_output_fd() << ", " << std::hex << &local_addr << ", [" << namelen << "])");
-    struct in_addr dummy;
-    memset(&dummy, 0, sizeof(dummy));
-    return dummy;
+    std::ostringstream descr;
+    descr << "getsockname(" << get_output_fd() << ", " << std::hex << &result << ", [" << std::dec << namelen << "])";
+    THROW_FALERTE(descr.str());
   }
 
-  return local_addr.sin_addr;
-}
-
-unsigned short int SocketDevice::local_port() const
-{
-#ifdef CWDEBUG
-  if (!m_addr || m_addr->sa_family != AF_INET)
-    DoutFatal(dc::core, "Calling SocketDevice::local_port for a non AF_INET socket");
-#endif
-  struct sockaddr_in local_addr;
-  socklen_t namelen = sizeof(local_addr);
-
-  ASSERT(get_output_fd() == get_input_fd());
-  if (getsockname(get_output_fd(), (struct sockaddr*)&local_addr, &namelen) < 0)
-  {
-    Dout(dc::warning|error_cf, "SocketDevice::local_port: getsockname(" << get_output_fd() << ", " << std::hex << &local_addr << ", [" << namelen << "])");
-    return 0;
-  }
-
-  return local_addr.sin_port;
+  return result;
 }
 
 } // namespace evio

@@ -86,6 +86,7 @@ class SocketAddress
 
   // Automatic conversion to struct sockaddr*.
   operator struct sockaddr const*() const { return is_un() ? reinterpret_cast<struct sockaddr const*>(m_sockaddr_un_ptr) : &m_sockaddr; }
+  operator struct sockaddr*() { return is_un() ? reinterpret_cast<struct sockaddr*>(m_sockaddr_un_ptr) : &m_sockaddr; }
 
   // Conversion to a human readable string.
   std::string to_string() const;

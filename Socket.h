@@ -24,8 +24,9 @@
 #pragma once
 
 #include "Device.h"
-#include "debug.h"
+#include "SocketAddress.h"
 #include "inet_support.h"
+#include "debug.h"
 #include <netinet/in.h>
 #include <sys/un.h>
 
@@ -109,6 +110,7 @@ class SocketDevice : public virtual IOBase
       struct in_addr local_ip,
       size_t rcvbuf_size, size_t sndbuf_size);
 
+#if 0
   // FIXME: host lookup is blocking
   // Connect to remote host `host', port `port'.
   // `host' can be either the hostname of the remote site you want to
@@ -130,9 +132,10 @@ class SocketDevice : public virtual IOBase
   bool priv_in_connect(char const* host, unsigned short int port,
       struct in_addr local_ip,
       size_t rcvbuf_size, size_t sndbuf_size);
+#endif
 
   // Connect to Unix domain socket path `path'.
-  // See above for a description of four sizes.
+  // See above for a description of rcvbuf_size and sndbuf_size.
   //
   // Returns true on success (or EINPROGRESS).
   bool priv_un_connect(char const* path,
@@ -169,43 +172,21 @@ class SocketDevice : public virtual IOBase
   // Public accessors:
   //
 
-  // Returns the remote IP number that this socket connected with.
+  // Returns the remote IP number and port that this socket connected with.
   // Only valid when `is_open' returns true.
-  struct in_addr remote_ip() const
-  {
-#ifdef CWDEBUG
-    if (!m_addr || m_addr->sa_family != AF_INET)
-      DoutFatal(dc::core, "Calling SocketDevice::remote_ip for a non AF_INET socket");
-#endif
-    return ((struct sockaddr_in*)m_addr)->sin_addr;
-  }
+  SocketAddress address() const { return m_addr; }
 
-  // Returns the remote port that this socket connected with.
+  // Returns the local IP number and port of this socket.
   // Only valid when `is_open' returns true.
-  unsigned short int remote_port() const
-  {
-#ifdef CWDEBUG
-    if (!m_addr || m_addr->sa_family != AF_INET)
-      DoutFatal(dc::core, "Calling SocketDevice::remote_port for a non AF_INET socket");
-#endif
-     return ntohs(((struct sockaddr_in*)m_addr)->sin_port);
-  }
-
-  // Returns the local IP number of this socket.
-  // Only valid when `is_open' returns true.
-  struct in_addr local_ip() const;
-
-  // Returns the local port of this socket.
-  // Only valid when `is_open' returns true.
-  unsigned short int local_port() const;
+  SocketAddress local_address() const;
 
   // Returns a pointer to the bind address if any.
   struct sockaddr const* bind_addr() const { return m_local_addr; }
 
-  // Accessor for _rcvbuf_size.
+  // Accessor for m_rcvbuf_size.
   size_t get_rcvbuf_size() const { return m_rcvbuf_size; }
 
-  // Accessor for _sndbuf_size.
+  // Accessor for m_sndbuf_size.
   size_t get_sndbuf_size() const { return m_sndbuf_size; }
 
   char const* get_path() const
@@ -322,6 +303,7 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
     return priv_in_connect(ip, port, local_ip, rcvbuf_size, sndbuf_size);
   }
 
+#if 0
   // See `SocketDevice' for a description.
   bool connect(
       char const* host, unsigned short int port,
@@ -338,6 +320,7 @@ class Socket : public SocketDevice, public INPUT, public OUTPUT
   {
     return priv_in_connect(host, port, local_ip, rcvbuf_size, sndbuf_size);
   }
+#endif
 
   // See `SocketDevice' for a description.
   bool connect(
