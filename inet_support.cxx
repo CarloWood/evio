@@ -134,6 +134,8 @@ size_t size_of_addr(struct sockaddr const* addr)
   {
     case AF_INET:
       return sizeof(struct sockaddr_in);
+    case AF_INET6:
+      return sizeof(struct sockaddr_in6);
     case AF_UNIX:
       return sizeof(struct sockaddr_un);
     default:

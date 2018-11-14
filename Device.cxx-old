@@ -163,7 +163,7 @@ int OutputDevice::sync()
   return 0;
 }
 
-IOBase::RefCountReleaser InputDevice::stop_input_device()
+RefCountReleaser InputDevice::stop_input_device()
 {
   RefCountReleaser need_release;
   // We assume that stop_input_device can be called from another thread (than start_output_device)
@@ -191,7 +191,7 @@ int InputDevice::get_input_fd() const
 
 // Read and write threads; possibly other threads.
 // This function is thread-safe.
-IOBase::RefCountReleaser OutputDevice::stop_output_device()
+RefCountReleaser OutputDevice::stop_output_device()
 {
   RefCountReleaser need_release;
   // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
@@ -407,9 +407,3 @@ void ReadInputDeviceBase::data_received(char const* new_data, size_t rlen)
 }
 
 } // namespace evio
-
-#if defined(CWDEBUG) && !defined(DOXYGEN)
-NAMESPACE_DEBUG_CHANNELS_START
-channel_ct evio("EVIO");
-NAMESPACE_DEBUG_CHANNELS_END
-#endif

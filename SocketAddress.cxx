@@ -327,8 +327,13 @@ void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
 
 void SocketAddress::deinit()
 {
+  // This private function is only called immediately before a re-initialization
+  // and therefore only needs to take care of freeing m_sockaddr_un_ptr.
   if (m_sockaddr.sa_family == AF_UNIX)
+  {
     delete m_sockaddr_un_ptr;
+    m_sockaddr_un_ptr = nullptr;
+  }
   Debug(m_sockaddr_un_ptr = nullptr);
 }
 
@@ -338,7 +343,7 @@ void SocketAddress::deinit()
 // ddd.ddd.ddd.ddd:ppppp (optional brackets around ddd.ddd.ddd.ddd, but not recommended).
 // [hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh]:ppppp
 // [::ffff:ddd.ddd.ddd.ddd]:ppppp (the brackets are optional in this case).
-void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, unsigned short sa_family, int port)
+void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t sa_family, int port)
 {
   // Don't call this function with an empty sockaddr_text.
   ASSERT(!sockaddr_text.empty());

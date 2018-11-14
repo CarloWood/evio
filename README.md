@@ -142,5 +142,5 @@ Finally, run
 
 to let cwm4 do its magic, and commit all the changes.
 
-Checkout [ai-statefultask-testsuite](https://github.com/CarloWood/ai-statefultask-testsuite)
+Checkout [ai-evio-testsuite](https://github.com/CarloWood/ai-evio-testsuite)
 for an example of a project that uses this submodule.

@@ -30,7 +30,6 @@
 #include <streambuf>
 #include <new>
 #include <iostream>
-#include <limits>
 #include <unistd.h>             // Needed for read(2) and write(2)
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -49,11 +48,8 @@ namespace evio {
 // are used.
 static constexpr int malloc_overhead_c = CW_MALLOC_OVERHEAD;
 
-static constexpr size_t default_input_blocksize_c = 512;
-static constexpr size_t default_output_blocksize_c = 2048;
-
 // Forward declarations.
-class IOBase;
+class FileDescriptor;
 class InputDevice;
 class OutputDevice;
 class MsgBlock;
@@ -359,9 +355,7 @@ class StreamBuf : public std::streambuf
   // bytes in the output buffer exceed `buffer_full_watermark'.
   // After using this constructor, the input buffer is the same as the
   // output buffer. Use `set_input_buffer' to change this.
-  StreamBuf(size_t minimum_blocksize,
-            size_t max_alloc = std::numeric_limits<size_t>::max(),              // The default causes push_back and push_front to only fail when we actually run out of memory.
-            size_t buffer_full_watermark = std::numeric_limits<size_t>::max()); // The default causes buffer_full() to never return true.
+  StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc);
 
  public:
   //---------------------------------------------------------------------------
@@ -588,7 +582,7 @@ class StreamBuf : public std::streambuf
 
   // When both (or the only) associated devices call this function,
   // then we delete ourselfs.
-  bool release(IOBase* device);
+  bool release(FileDescriptor const* device);
 
  protected:
   //---------------------------------------------------------------------------
@@ -717,11 +711,8 @@ class LinkBuffer : public Dev2Buf
 class InputBuffer : public Dev2Buf
 {
  public:
-  InputBuffer(
-      size_t minimum_blocksize = default_input_blocksize_c,
-      size_t max_alloc = std::numeric_limits<size_t>::max(),
-      size_t buffer_full_watermark = std::numeric_limits<size_t>::max()
-      ) : Dev2Buf(minimum_blocksize, max_alloc, buffer_full_watermark) { }
+  InputBuffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+    Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc) { set_input_device(input_device); }
 
   // Raw binary access (instead of using istream):
   char* raw_gptr() const { return igptr(); }                    // Get pointer to get area.
@@ -734,11 +725,8 @@ class InputBuffer : public Dev2Buf
 class OutputBuffer : public Buf2Dev
 {
  public:
-  OutputBuffer(
-      size_t minimum_blocksize = default_output_blocksize_c,
-      size_t max_alloc = std::numeric_limits<size_t>::max(),
-      size_t buffer_full_watermark = std::numeric_limits<size_t>::max()
-      ) : Buf2Dev(minimum_blocksize, max_alloc, buffer_full_watermark) { }
+  OutputBuffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+    Buf2Dev(minimum_blocksize, buffer_full_watermark, max_alloc) { set_output_device(output_device); }
 
   // Raw binary access (instead of using ostream):
   char* raw_pptr() const { return pptr(); }                     // Get pointer to put area.

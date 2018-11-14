@@ -26,6 +26,7 @@
 #include "evio.h"
 #include "StreamBuf.h"
 #include "EventLoopThread.h"
+#include "RefCountReleaser.h"
 #include "utils/AIRefCount.h"
 #include <cstring>
 #include <arpa/inet.h>          // Needed for ntohs.
@@ -187,37 +188,6 @@ class IOBase : public AIRefCount
   virtual void init_output_device(int) { }
 
  protected:
-  struct RefCountReleaser
-  {
-   private:
-    AIRefCount* m_ptr;
-
-   public:
-    void execute()
-    {
-      if (m_ptr)
-      {
-        Dout(dc::io, "Decrementing ref count of device " << (void*)m_ptr << " to " << (m_ptr->ref_count() - 1));
-        intrusive_ptr_release(m_ptr);
-      }
-      m_ptr = nullptr;
-    }
-    RefCountReleaser() : m_ptr(nullptr) { }
-    ~RefCountReleaser() { execute(); }
-    RefCountReleaser(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; }
-    RefCountReleaser& operator=(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; return *this; }
-    RefCountReleaser& operator+=(RefCountReleaser&& releaser)
-    {
-      if (m_ptr && releaser.m_ptr) { ASSERT(m_ptr == releaser.m_ptr); execute(); }
-      m_ptr = releaser.m_ptr;
-      releaser.m_ptr = nullptr;
-      return *this;
-    }
-    void operator=(AIRefCount* ptr) { ASSERT(!m_ptr); m_ptr = ptr; }
-    void reset() { m_ptr = nullptr; }
-    operator bool() const { return m_ptr; }
-  };
-
   // Requests.
   // Call these from derived classes to start watching, stop watching, temporarily disable and enable the device.
   virtual void start_input_device() { }
@@ -239,7 +209,7 @@ class IOBase : public AIRefCount
 
   // Events.
   // The filedescriptor(s) of this device were just closed (close_fds() was called).
-  // If INTERNAL_FDS_DONT_CLOSE is set than the fd(s) weren't really closed, but this method is still called.
+  // If INTERNAL_FDS_DONT_CLOSE is set then the fd(s) weren't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
   virtual RefCountReleaser closed() { return RefCountReleaser(); }
 
@@ -382,10 +352,6 @@ class IOBase : public AIRefCount
 class InputDevice : public virtual IOBase
 {
  public:
-  // The default blocksize for your `StreamBuf' input buffers, used
-  // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = default_input_blocksize_c;
-
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int const mode = std::ios_base::in;
 
@@ -408,9 +374,11 @@ class InputDevice : public virtual IOBase
   // Override base class member functions.
   void init_input_device(int fd) override;
  protected:
+  int get_input_fd() const override;
   void start_input_device() override;
   RefCountReleaser stop_input_device() override;
-  int get_input_fd() const override;
+  void disable_input_device();
+  void enable_input_device();
 
  protected:
   //---------------------------------------------------------------------------
@@ -586,10 +554,6 @@ class InputDevice : public virtual IOBase
 class OutputDevice : public virtual IOBase
 {
  public:
-  // The default blocksize for your `StreamBuf' output buffers, used
-  // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = default_output_blocksize_c;
-
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int const mode = std::ios_base::out;
 
@@ -967,10 +931,6 @@ class LinkInputDevice : public InputDevice
   // the constructor.
   static int constexpr mode = std::ios_base::in;
 
-  // The default blocksize for your `StreamBuf' link buffers, used
-  // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = 2048;
-
  public:
   //---------------------------------------------------------------------------
   // Public accessor:
@@ -1047,10 +1007,6 @@ class LinkOutputDevice : public OutputDevice
 
   // Used default posix mode for opening files, when you don't pass it to the constructor.
   static int constexpr mode = std::ios_base::out;
-
-  // The default blocksize for your `StreamBuf' link buffers, used
-  // when you don't pass that size to the constructors.
-  static size_t constexpr default_blocksize_c = 2048;
 
  protected:
   //---------------------------------------------------------------------------

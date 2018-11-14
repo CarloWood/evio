@@ -27,7 +27,8 @@
 #include "sys.h"
 #include "debug.h"
 #include "StreamBuf.h"
-#include "Device.h"
+#include "InputDevice.h"
+#include "OutputDevice.h"
 #include "utils/is_power_of_two.h"
 #include <cstdlib>
 #ifdef CWDEBUG
@@ -42,6 +43,7 @@ using namespace std;
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 channel_ct io("IO");
+channel_ct evio("EVIO");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -394,7 +396,7 @@ streamsize StreamBuf::xsputn(char const* s, streamsize n)
   return n;
 }
 
-StreamBuf::StreamBuf(size_t minimum_blocksize, size_t max_alloc, size_t buffer_full_watermark) :
+StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     max_used_size(buffer_full_watermark), output_buffer(max_alloc), m_device_counter(0)
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << (void*)this << ']');
@@ -476,11 +478,12 @@ void LinkBuffer::flush()
   m_odevice->restart_if_non_active();
 }
 
-bool StreamBuf::release(IOBase* DEBUG_ONLY(device))
+bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
 {
 #ifdef CWDEBUG
   if (m_device_counter == 0)
   {
+    // FIXME: this debug output is old, it doesn't work like this anymore.
     DoutFatal(dc::core,
 	"\n\tCalling `StreamBuf::release' while `m_device_counter' equals 0."
 	"\n\tAlways allocate a `StreamBuf' with `new' and pass it" <<
@@ -496,13 +499,13 @@ bool StreamBuf::release(IOBase* DEBUG_ONLY(device))
   else
   {
     // When m_device_counter becomes 2, the ref count of m_odevice is increased.
-    // It should never be deletd before then input device!
+    // It should never be deleted before the input device!
     ASSERT(device == m_idevice);
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
 
     Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
-        m_device_counter << " output device left: " << (void*)static_cast<IOBase*>(m_odevice) <<
+        m_device_counter << " output device left: " << m_odevice <<
         "; decrementing ref count of that device (now " << m_odevice->ref_count() << ").");
 
     // Decrease the ref count of the output device again.
@@ -515,13 +518,13 @@ bool StreamBuf::release(IOBase* DEBUG_ONLY(device))
 void StreamBuf::set_input_device(InputDevice* device)
 {
   // Don't pass a StreamBuf to more than one device.
-  // Also note set_input_device should only be called from the constructor of an InputDevice, don't call it directly.
+  // Also note set_input_device should only be called from InputDevice::input, don't call it directly.
   ASSERT(!m_idevice);
   if (++m_device_counter == 2)
   {
     intrusive_ptr_add_ref(m_odevice);
-    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_input_device(" << (void*)static_cast<IOBase*>(device) <<
-        "); incremented ref count of output device [" << (void*)static_cast<IOBase*>(m_odevice) << "] (now " << m_odevice->ref_count() << ").");
+    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_input_device(" << device <<
+        "); incremented ref count of output device [" << m_odevice << "] (now " << m_odevice->ref_count() << ").");
   }
   m_idevice = device;
 }
@@ -529,13 +532,13 @@ void StreamBuf::set_input_device(InputDevice* device)
 void StreamBuf::set_output_device(OutputDevice* device)
 {
   // Don't pass a StreamBuf to more than one device.
-  // Also note set_output_device should only be called from the constructor of an OutputDevice, don't call it directly.
+  // Also note set_output_device should only be called from OutputDevice::output, don't call it directly.
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
   {
     intrusive_ptr_add_ref(device);
-    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_output_device(" << (void*)static_cast<IOBase*>(device) <<
-        "); incremented ref count of output device [" << (void*)static_cast<IOBase*>(device) << "] (now " << device->ref_count() << ").");
+    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_output_device(" << device <<
+        "); incremented ref count of output device [" << device << "] (now " << device->ref_count() << ").");
   }
   m_odevice = device;
 }

@@ -36,10 +36,10 @@ class PersistentInputFile : public File<INPUTDEVICE>, private INotify
 
  private:
   // Override IOBase::closed() event to remove any inotify watch when it exists.
-  IOBase::RefCountReleaser closed() override;
+  RefCountReleaser closed() override;
 
   // Override InputDevice::read_returned_zero().
-  IOBase::RefCountReleaser read_returned_zero() override;
+  RefCountReleaser read_returned_zero() override;
 
   // Override method of INotify.
   void event_occurred(inotify_event const* event) override
@@ -50,9 +50,9 @@ class PersistentInputFile : public File<INPUTDEVICE>, private INotify
 };
 
 template<class INPUTDEVICE>
-IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
+RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
 {
-  IOBase::RefCountReleaser releaser;
+  RefCountReleaser releaser;
   DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::closed()");
   if (is_watched())
   {
@@ -64,10 +64,10 @@ IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
 
 // Read thread.
 template<class INPUTDEVICE>
-IOBase::RefCountReleaser PersistentInputFile<INPUTDEVICE>::read_returned_zero()
+RefCountReleaser PersistentInputFile<INPUTDEVICE>::read_returned_zero()
 {
   DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::read_returned_zero()");
-  IOBase::RefCountReleaser releaser = INPUTDEVICE::stop_input_device();
+  RefCountReleaser releaser = INPUTDEVICE::stop_input_device();
   // Add an inotify watch for modification of the corresponding path (if not already watched).
   if (!is_watched() && !FileDevice::open_filename().empty())
   {

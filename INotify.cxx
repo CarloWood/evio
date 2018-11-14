@@ -189,7 +189,7 @@ size_t INotifyDevice::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-IOBase::RefCountReleaser INotifyDevice::decode(MsgBlock msg)
+RefCountReleaser INotifyDevice::decode(MsgBlock msg)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());

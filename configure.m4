@@ -7,8 +7,8 @@ CW_SYS_MALLOC_OVERHEAD
 # Determine the kind of nonblocking sockets that we have.
 CW_SYS_NONBLOCK
 
-# evio depends on statefultask (it uses AIThreadPool).
-m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [statefultask threadsafe], [ ])])
+# evio depends on threadpool.
+m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [threadpool], [ ])])
 
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq([CW_SUBMODULE_SUBDIRS], cwm4_submodule_basename, [ ])])
 m4_append_uniq([CW_SUBMODULE_CONFIG_FILES], cwm4_quote(cwm4_submodule_path[/Makefile]), [ ])
