@@ -127,4 +127,11 @@ class FileDescriptor : public AIRefCount
   virtual RefCountReleaser closed() { return RefCountReleaser(); }
 };
 
+// Convenience function to create devices.
+template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
+boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
+{
+  return new DeviceType(std::forward<ARGS>(args)...);
+}
+
 } // namespace evio
