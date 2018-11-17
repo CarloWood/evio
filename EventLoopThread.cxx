@@ -126,37 +126,29 @@ void EventLoopThread::handle_invoke_pending()
       auto duration = std::chrono::milliseconds(1);
       auto queues_access = thread_pool.queues_read_access();
       auto& queue = thread_pool.get_queue(queues_access, m_handler);
-      bool queue_was_full = false;
-      bool queue_full;
-      do
+      DEBUG_ONLY(bool queue_was_full = false;)
       {
+        bool queue_full;
+        auto queue_access = queue.producer_access();
+        do
         {
-          auto queue_access = queue.producer_access();
-          if (!(queue_full = queue_access.length() == queue.capacity()))
+          if ((queue_full = queue_access.length() == queue.capacity()))
           {
+            // Queue is full! Wait for a broadcast.
+            Dout(dc::warning(!queue_was_full), "Thread pool queue " << m_handler << " is full! Now no longer handling any filedescriptor I/O until this is resolved.");
+            Debug(queue_was_full = true);
+            queue_access.wait();        // Wait until queue_access.notify_one() is called.
+          }
+          else
+          {
+            Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
             Dout(dc::evio, "Queuing call to invoke_pending() in thread pool queue " << m_handler);
             queue_access.move_in([this](){ invoke_pending(); return false; });
           }
         }
-        if (queue_full)
-        {
-          if (!queue_was_full)
-          {
-            Dout(dc::warning, "Thread pool queue " << m_handler << " is full! Now no longer handling any filedescriptor I/O until this is resolved.");
-            queue_was_full = true;
-          }
-          // Exponentially back off, sleeping 1, 2, 4, 8, 16, 32 and then 64 (repeated) ms.
-          std::this_thread::sleep_for(duration);
-          if (duration < max_duration)
-            duration *= 2;
-        }
+        while (queue_full);
       }
-      while (queue_full);
       queue.notify_one();
-      if (queue_was_full)
-      {
-        Dout(dc::warning, "Queue is no longer full; resuming I/O.");
-      }
     }
 
     // Wait until invoke_pending() was called.
