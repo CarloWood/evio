@@ -38,16 +38,8 @@ bool Socket::connect(SocketAddress socket_address, size_t rcvbuf_size, size_t sn
   if (is_open())
     return false;
 
-  // The address to connect to needs to make sense.
+  // The address to connect needs to make sense.
   ASSERT(!socket_address.is_unspecified());
-
-  if (!m_socket_address.is_unspecified())
-    Dout(dc::warning, "Socket::connect: Already connected to " << m_socket_address << " ?!");
-
-  m_socket_address = socket_address;
-
-  m_rcvbuf_size = rcvbuf_size;
-  m_sndbuf_size = sndbuf_size;
 
   struct sockaddr const* addr = static_cast<struct sockaddr const*>(socket_address);
   Dout(dc::system|continued_cf, "socket(" << addr->sa_family << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
@@ -56,20 +48,6 @@ bool Socket::connect(SocketAddress socket_address, size_t rcvbuf_size, size_t sn
   if (fd < 0)
     return false;
 
-  if (socket_address.is_ip())
-  {
-    Dout(dc::warning, "FIXME: need minimum input/output buffer sizes here.");
-#if 0
-    if (!set_rcvsockbuf(fd, m_rcvbuf_size, minimum_input_size()) ||
-	!set_sndsockbuf(fd, m_sndbuf_size, minimum_output_size()))
-    {
-      Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-      DEBUG_ONLY(int ret =) ::close(fd);
-      Dout(dc::finish|cond_error_cf(ret == -1), ret);
-      return false;
-    }
-#endif
-  }
   if (!if_addr.is_unspecified())
   {
     if (bind(fd, if_addr, sizeof(struct sockaddr_in)) == -1)
@@ -88,12 +66,48 @@ bool Socket::connect(SocketAddress socket_address, size_t rcvbuf_size, size_t sn
   }
   Dout(dc::finish|cond_error_cf(ret < 0), ret);
 
+  init(fd, socket_address, rcvbuf_size, sndbuf_size);
+
+  return true;
+}
+
+void Socket::init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size, size_t sndbuf_size)
+{
+#ifdef CWDEBUG
+  if (is_open())
+    DoutFatal(dc::core, "Trying to `init' a Socket that is already open.");
+#endif
+
+  if (!m_socket_address.is_unspecified())
+    Dout(dc::warning, "Socket::init: Already connected to " << m_socket_address << " ?!");
+
+  m_socket_address = socket_address;
+
+  m_rcvbuf_size = rcvbuf_size;
+  m_sndbuf_size = sndbuf_size;
+
+  if (socket_address.is_ip())
+  {
+    try
+    {
+      set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->minimum_block_size());
+      set_sndsockbuf(fd, sndbuf_size, m_obuffer->minimum_block_size());
+    }
+    catch (AIAlert::Error const& error)
+    {
+      Dout(dc::system|continued_cf, "close(" << fd << ") = ");
+      DEBUG_ONLY(int ret =) ::close(fd);
+      Dout(dc::finish|cond_error_cf(ret == -1), ret);
+      THROW_ALERT("Socket::init([FD], [SOCKET_ADDRESS], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
+          AIArgs("[FD]", fd)("[SOCKET_ADDRESS]", socket_address)("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
+          error);
+    }
+  }
+
   FileDescriptor::init(fd);     // link in
   start_input_device();
   if (m_obuffer && !m_obuffer->buffer_empty())
     start_output_device();
-
-  return true;
 }
 
 SocketAddress Socket::local_address() const

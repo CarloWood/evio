@@ -25,6 +25,7 @@
 #include "inet_support.h"
 #include "utils/nearest_power_of_two.h"
 #include "utils/is_power_of_two.h"
+#include "utils/AIAlert.h"
 #include <netdb.h>		// Needed for struct hostent
 #include <netinet/in.h>
 #include <sys/socket.h>		// Needed for AF_INET
@@ -86,7 +87,7 @@ char const* strherror(int herrno)
   return "Value of `herror' out of range";
 }
 
-bool set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
+void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
 {
   int opt = rcvbuf_size;
   if (opt == 0)
@@ -101,14 +102,12 @@ bool set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
   Dout(dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (optval_t)&opt, sizeof(opt)) < 0)
   {
-    Dout(dc::system|error_cf, "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_RCVBUF, [" << opt << "], " << sizeof(opt) << ") = -1");
-    return false;
+    THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_RCVBUF, [[OPT]], [SIZE]) = -1",
+        AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
   }
-
-  return true;
 }
 
-bool set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size)
+void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size)
 {
   int opt = sndbuf_size;
   if (opt == 0)
@@ -121,11 +120,9 @@ bool set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size)
   Dout(dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_SNDBUF, (optval_t)&opt, sizeof(opt)) < 0)
   {
-    Dout(dc::system|error_cf, "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_SNDBUF, [" << opt << "], " << sizeof(opt) << ") = -1");
-    return false;
+    THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_SNDBUF, [[OPT]], [SIZE]) = -1",
+        AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
   }
-
-  return true;
 }
 
 size_t size_of_addr(struct sockaddr const* addr)

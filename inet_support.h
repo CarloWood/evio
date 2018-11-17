@@ -35,8 +35,8 @@ struct sockaddr_un;
 namespace evio {
 
 int print_hostent_on(struct hostent const* h, std::ostream& o);
-bool set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size);
-bool set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size);
+void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size);
+void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size);
 size_t size_of_addr(struct sockaddr const* addr);
 char const* strherror(int herrno);
 

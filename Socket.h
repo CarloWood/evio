@@ -54,10 +54,11 @@ class Socket : public InputDevice, public OutputDevice
 
   // The receive socket buffer that we want to be set.
   // The actual size can be set to a larger value, see net/inet_support.cc
-  // A value of 0 here means: use the same size as the size of our buffer.
+  // A value of 0 here means: use a size that depends on the minimum block
+  // size of our input buffer.
   size_t m_rcvbuf_size;
 
-  // Idem for the send socket buffer.
+  // Idem for the send socket buffer (except, output buffer).
   size_t m_sndbuf_size;
 
   //---------------------------------------------------------------------------
@@ -81,29 +82,7 @@ class Socket : public InputDevice, public OutputDevice
   bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
 
   // Associate this object with an existing and open socket `fd'.
-  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
-  {
-#ifdef CWDEBUG
-    if (is_open())
-      DoutFatal(dc::core, "Trying to `init' a Socket that is already open.");
-#endif
-    m_socket_address = socket_address;
-    m_rcvbuf_size = rcvbuf_size;
-    m_sndbuf_size = sndbuf_size;
-    Dout(dc::warning, "FIXME: need minimum input and output buffersizes here.");
-#if 0
-    if (!set_rcvsockbuf(fd, m_rcvbuf_size, minimum_input_size()) ||
-	!set_sndsockbuf(fd, m_sndbuf_size, minimum_output_size()))
-    {
-      // Why does this happen?
-      ASSERT(false);
-      return;
-    }
-#endif
-    FileDescriptor::init(fd);
-    start_input_device();
-    start_output_device();
-  }
+  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
 
  public:
   //---------------------------------------------------------------------------
