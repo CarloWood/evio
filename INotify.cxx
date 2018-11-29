@@ -90,6 +90,8 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       if (fd == -1)
         THROW_FALERTE("with pathname = \"[PATHNAME]\"; inotify_init1");
       init(fd);
+      // Call input() before calling add_watch(). The library should have done this!
+      ASSERT(m_input_decoder && m_ibuffer);
       start_input_device();
       // Exit ev_run when this device is still running.
       ev_unref(EV_A);

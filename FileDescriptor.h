@@ -28,6 +28,12 @@
 #include <cstdint>
 #include <atomic>
 
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+extern channel_ct evio;
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 namespace evio {
 
 // Return true if fd is a valid open filedescriptor.
@@ -72,7 +78,7 @@ class FileDescriptor : public AIRefCount
   bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
 
   // Return true if this object has at least one open filedescriptor.
-  bool is_open() const { return m_flags & (m_flags & FDS_RW) >> open_shft; }
+  bool is_open() const { return m_flags & ((m_flags & FDS_RW) >> open_shft); }
 
   // Return true if this object is marked as having an open fd for writing.
   bool is_open_w() const { return m_flags & FDS_W_OPEN; }
@@ -102,6 +108,8 @@ class FileDescriptor : public AIRefCount
   virtual void init_output_device(int UNUSED_ARG(fd)) { }
 
  protected:
+  FileDescriptor() : m_flags(0) { }
+
   // Queries.
   // Called to obtain the fd that init_input_device() was called with if that actually did initialize an input device; otherwise -1 is returned.
   virtual int get_input_fd() const { return -1; }
@@ -131,7 +139,11 @@ class FileDescriptor : public AIRefCount
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
 boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
-  return new DeviceType(std::forward<ARGS>(args)...);
+  DoutEntering(dc::evio, "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name() << ", ARGS...>(ARGS&&...)");
+  DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
+  AllocTag2(device, "Created with evio::create.");
+  Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << device << "].");
+  return device;
 }
 
 } // namespace evio

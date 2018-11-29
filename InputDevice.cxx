@@ -87,12 +87,12 @@ void InputDevice::start_input_device()
   // by using evio::create. For example:
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
-  ASSERT(ref_count() > 0);      // If this is false then the object is ALREADY deleted!
+  ASSERT(!is_destructed());
   // If the device is already active then some other thread already called start_input_device().
   if (EventLoopThread::start_if_not_active(m_input_watcher))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    intrusive_ptr_add_ref(this);
+    inhibit_deletion();
     Dout(dc::evio, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
   }
 }
@@ -139,6 +139,12 @@ RefCountReleaser InputDevice::close_input_device()
   int input_fd = m_input_watcher.fd;
   if (AI_LIKELY(is_open_r()))
   {
+    // FDS_SAME is set when this is both, an input device and an output device and is
+    // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
+    // for reading and writing is the same.
+    //
+    // Therefore, if FDS_W_OPEN is no longer set then that means that the file
+    // descriptor was closed as a result of a call to close_output_device().
     bool already_closed = (m_flags & (FDS_SAME | FDS_W_OPEN)) == FDS_SAME;
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(input_fd))
@@ -153,11 +159,14 @@ RefCountReleaser InputDevice::close_input_device()
       Dout(dc::finish, err);
     }
     m_flags &= ~FDS_R_OPEN;
+    // Mark the device as dead when it has no longer any open file descriptor.
     if (!is_open())
     {
       m_flags |= FDS_DEAD;
       releaser += closed();
     }
+    else if ((m_flags & FDS_SAME))
+      releaser += close_output_device();
   }
   return releaser;
 }

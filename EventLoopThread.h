@@ -110,9 +110,3 @@ inline bool in_event_loop_thread()
 {
   return EventLoopThread::instance().id() == std::this_thread::get_id();
 }
-
-#if defined(CWDEBUG) && !defined(DOXYGEN)
-NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct evio;
-NAMESPACE_DEBUG_CHANNELS_END
-#endif

@@ -61,28 +61,18 @@ class Socket : public InputDevice, public OutputDevice
   // Idem for the send socket buffer (except, output buffer).
   size_t m_sndbuf_size;
 
+ public:
   //---------------------------------------------------------------------------
   // Constructor
   //
 
   Socket() : m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
 
-#if CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, Socket const* sdptr)
-  {
-    return os << static_cast<void const*>(static_cast<FileDescriptor const*>(sdptr));
-  }
-#endif
-
- protected:
-//  virtual size_t minimum_input_size() const = 0;
-//  virtual size_t minimum_output_size() const = 0;
-
- public:
-  bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
-
   // Associate this object with an existing and open socket `fd'.
   void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
+
+  // Create a socket(2), bind it to if_addr, and call init().
+  bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
 
  public:
   //---------------------------------------------------------------------------
@@ -109,6 +99,13 @@ class Socket : public InputDevice, public OutputDevice
     assert(m_socket_address.is_un());
     return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_socket_address))->sun_path;
   }
+
+#if CWDEBUG
+  friend std::ostream& operator<<(std::ostream& os, Socket const* sdptr)
+  {
+    return os << static_cast<void const*>(static_cast<FileDescriptor const*>(sdptr));
+  }
+#endif
 };
 
 } // namespace evio

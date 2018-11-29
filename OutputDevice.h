@@ -66,31 +66,8 @@ class OutputDevice : public virtual FileDescriptor
   }
 #endif
 
-  OutputDevice() : m_output_stream(nullptr), m_obuffer(nullptr)
-  {
-    DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
-    // Mark that OutputDevice is a derived class.
-    m_flags |= FDS_W;
-    // Give m_output_watcher known values; cause is_active() to return false.
-    ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, -1, EV_UNDEF);
-  }
-
-  // Destructor.
-  ~OutputDevice()
-  {
-    DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
-    // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
-    ASSERT(!is_active());
-    if (is_open_w())
-      close_output_device();    // This will not delete the object (again) because it isn't active.
-    if (m_obuffer)
-    {
-      // Delete the output buffer if it is no longer needed.
-      m_obuffer->release(this);
-    }
-    // Make sure we detect it if this watcher is used again.
-    Debug(m_output_watcher.data = nullptr);
-  }
+  OutputDevice();
+  ~OutputDevice();
 
   // Disallow copy constructing.
   OutputDevice(OutputDevice const&) = delete;

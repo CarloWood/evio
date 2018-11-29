@@ -27,6 +27,12 @@
 #include "debug.h"
 #include <chrono>
 
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+extern channel_ct evio;
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 //static
 void EventLoopThread::acquire_cb(EV_P) EV_THROW
 {

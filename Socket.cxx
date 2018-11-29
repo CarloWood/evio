@@ -81,6 +81,10 @@ void Socket::init(int fd, SocketAddress const& socket_address, size_t rcvbuf_siz
   if (!m_socket_address.is_unspecified())
     Dout(dc::warning, "Socket::init: Already connected to " << m_socket_address << " ?!");
 
+  // Call Socket::input and/or Socket::output before calling Socket::init.
+  // If you don't call either - then this socket is not usable for input/output respectively!
+  ASSERT(m_ibuffer || m_obuffer);
+
   m_socket_address = socket_address;
 
   m_rcvbuf_size = rcvbuf_size;
@@ -90,8 +94,10 @@ void Socket::init(int fd, SocketAddress const& socket_address, size_t rcvbuf_siz
   {
     try
     {
-      set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->minimum_block_size());
-      set_sndsockbuf(fd, sndbuf_size, m_obuffer->minimum_block_size());
+      if (m_ibuffer)
+        set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->minimum_block_size());
+      if (m_obuffer)
+        set_sndsockbuf(fd, sndbuf_size, m_obuffer->minimum_block_size());
     }
     catch (AIAlert::Error const& error)
     {
@@ -105,7 +111,8 @@ void Socket::init(int fd, SocketAddress const& socket_address, size_t rcvbuf_siz
   }
 
   FileDescriptor::init(fd);     // link in
-  start_input_device();
+  if (m_ibuffer)
+    start_input_device();
   if (m_obuffer && !m_obuffer->buffer_empty())
     start_output_device();
 }

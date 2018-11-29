@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "Device.h"
+#include "InputDevice.h"
 #include "debug.h"
 #include "inet_support.h"
 #include "Socket.h"
@@ -36,79 +36,24 @@ namespace evio {
 //
 // class ListenSocketDevice
 //
-// Base class for listen sockets, spawning connected socket streams.
-//
-// SYNOPSIS
-//
-// This class implements listen() for "server" sockets.
+// Base class for ListenSocket.
 //
 
 class ListenSocketDevice : public InputDevice
 {
  private:
-  //---------------------------------------------------------------------------
-  // Private attribute:
-  //
-
-  // The address we bind to.
-  struct sockaddr* m_bind_addr;
-
-  //---------------------------------------------------------------------------
-  // Private manipulator:
-  //
-
-  // Set the bind address to its new value.
-  // If this is a UNIX domain socket then at destruction of this object,
-  // the bind address will be unlink(2)-ed.
-  void set_bind_addr(struct sockaddr* bind_addr)
-  {
-    if (m_bind_addr)
-    {
-      if (m_bind_addr->sa_family == AF_UNIX)
-        unlink(((struct sockaddr_un*)m_bind_addr)->sun_path);
-      free(m_bind_addr);
-    }
-    m_bind_addr = bind_addr;
-  }
+  SocketAddress m_bind_addr;            // The address we bind to.
 
  public:
   //---------------------------------------------------------------------------
   // Constructors:
   //
 
-  // Make an ListenSocketDevice for association with a new TCP/IP socket.
-  // If you use this constructor, you need to call `listen' before it will actually do anything.
-  ListenSocketDevice(Dev2Buf* ibuf) : InputDevice(ibuf), m_bind_addr(nullptr)
+  // Make a ListenSocketDevice for association with a new TCP/IP socket.
+  // You need to call `listen' before it will actually do anything.
+  ListenSocketDevice()
   {
     DoutEntering(dc::evio, "ListenSocketDevice() [" << this << ']');
-  }
-
-  // Make a ListenSocket associated with a new TCP/IP listen socket and start listening on port `port'.
-  //
-  // Connecting clients will spawn an object of `SOCK_TYPE' which must be a Socket<>.
-  // This new object then will generate the events (virtual function) `new_message_received' etcetera when they occur.
-  // `backlog' is the size of the client queue waiting for accept().
-  ListenSocketDevice(Dev2Buf* ibuf, unsigned short int port, int backlog = 4) : InputDevice(ibuf), m_bind_addr(nullptr)
-  {
-    DoutEntering(dc::evio, "ListenSocket(" << port << ", " << backlog << ") [" << this << ']');
-    listen(port, backlog);
-  }
-
- // Make a ListenSocket associated with a new unix domain listen socket and start listening on `path'.
- // `backlog' is the size of the client queue waiting for accept().
-  ListenSocketDevice(Dev2Buf* ibuf, char const* path, int backlog = 4) : InputDevice(ibuf), m_bind_addr(nullptr)
-  {
-    DoutEntering(dc::evio, "ListenSocket(\"" << path << "\", " << backlog << ')');
-    listen(path, backlog);
-  }
-
-  // Make a `ListenSocket' from a listen socket filedescriptor `fd'.
-  // `bind_addr' must be an address allocated with new, being the address this listen socket is bound to.
-  ListenSocketDevice(Dev2Buf* ibuf, int fd, struct sockaddr* bind_addr) : InputDevice(ibuf), m_bind_addr(bind_addr)
-  {
-    DoutEntering(dc::evio, "ListenSocket(" << fd << ", {" << *bind_addr << "}) [" << this << ']');
-    init(fd);
-    start();
   }
 
 public:
@@ -116,17 +61,31 @@ public:
   // Public methods:
   //
 
-  // Open a socket for listening on port `port' explicitly, after the
-  // associated 'ListenSocketDevice' object already exists (for
-  // instance, after using the default constructor).
-  // `backlog' is the size of the client queue waiting for accept().
-  void listen(unsigned short int port, int backlog);
+  // After construction listen must be called.
 
-  // Open a socket in de UNIX domain for listening on `path' explicitly,
-  // after the associated 'ListenSocketDevice' object already exists (for
-  // instance, after using the default constructor).
+  // Open the listen socket.
+  // `sockaddr' is the interface to bind to plus the port to listen on; or a UNIX socket.
   // `backlog' is the size of the client queue waiting for accept().
-  void listen(char const* path, int backlog);
+  //
+  // When a new connection is accepted the virtual function spawn_accepted will be called.
+  void listen(SocketAddress&& sockaddr, int backlog = 4);
+
+  // Convenience function in case you want to pass an lvalue.
+  void listen(SocketAddress const& sockaddr, int backlog = 4) { listen(SocketAddress(sockaddr), backlog); }
+
+  // Start listening on an existing listen socket with filedescriptor fd.
+  // bind_addr must be the address this listen socket is bound to.
+  // Afterwards the file descriptor is owned (will be closed) by evio.
+  void listen(int fd, SocketAddress&& bind_addr)
+  {
+    DoutEntering(dc::evio, "listen(" << fd << ", " << bind_addr << ") [" << this << ']');
+    // The socket family of bind_addr must be specified.
+    // The ListenSocket must be closed before you can reuse it.
+    ASSERT(!bind_addr.is_unspecified() && (m_bind_addr.is_unspecified() || is_dead()));
+    m_bind_addr = std::move(bind_addr);
+    init(fd);
+    start_input_device();
+  }
 
   // Close the socket associated with this object.
   void close()
@@ -160,32 +119,15 @@ protected:
   // The default `listen_sockstream_dct::maybe_out_of_fds' returns
   // true when `socket()' fails.
   virtual bool maybe_out_of_fds();
-
-private:
-  //---------------------------------------------------------------------------
-  // Private methods:
-  //
-
-  // Do the actual listen stuff.
-  bool priv_listen(struct sockaddr* bind_addr, int backlog);
-
- protected:
-  ~ListenSocketDevice()
-  {
-    if (m_bind_addr)
-    {
-      if (m_bind_addr->sa_family == AF_UNIX)
-      {
-        char* tmp = ((struct sockaddr_un*)m_bind_addr)->sun_path;
-        if (*tmp)       // Can be made 0 in the debug daemon
-          unlink(tmp);
-      }
-      free(m_bind_addr);
-    }
-  }
 };
 
-template<typename SOCK_TYPE>
+//=============================================================================
+//
+// Class ListenSocket
+//
+// This class implements listen() for "server" sockets.
+//
+template<typename DECODER, typename OUTPUT>
 class ListenSocket : public ListenSocketDevice
 {
  public:
@@ -197,16 +139,28 @@ class ListenSocket : public ListenSocketDevice
 
  protected:
   // Called when a new connection is accepted.
-  virtual void new_connection(SOCK_TYPE& UNUSED_ARG(connection)) { }
+  virtual void new_connection(OUTPUT& UNUSED_ARG(connection)) { }
 };
 
-template<typename SOCK_TYPE>
-void ListenSocket<SOCK_TYPE>::spawn_accepted(int fd, struct sockaddr* addr)
+template<typename DECODER, typename OUTPUT>
+struct SpawnedSocket : public Socket
 {
-  SOCK_TYPE* sock = new SOCK_TYPE;
-  AllocTag1(sock);
-  sock->SocketDevice::init(fd, addr);
-  new_connection(*sock);
+  DECODER m_decoder;
+  OUTPUT m_output;
+
+  SpawnedSocket()
+  {
+    input(m_decoder);
+    output(m_output);
+  }
+};
+
+template<typename DECODER, typename OUTPUT>
+void ListenSocket<DECODER, OUTPUT>::spawn_accepted(int fd, struct sockaddr* addr)
+{
+  auto sock = create<SpawnedSocket<DECODER, OUTPUT>>();
+  sock->init(fd, addr);
+  new_connection(sock->m_output);
 }
 
 } // namespace evio

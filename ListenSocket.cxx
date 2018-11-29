@@ -23,102 +23,84 @@
 
 #include "sys.h"
 #include "ListenSocket.h"
+#include "utils/AIAlert.h"
 
 namespace evio {
 
-bool ListenSocketDevice::priv_listen(struct sockaddr* bind_addr, int backlog)
+void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
 {
-  if (is_open())
-    return false;
+  // Don't call listen() twice on a row. First close() the listen socket again.
+  ASSERT(!is_open());
 
-  Dout(dc::system|continued_cf, "socket(" << bind_addr->sa_family << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
-  int fd = socket(bind_addr->sa_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  Dout(dc::system|continued_cf, "socket(" << bind_addr.family() << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
+  int fd = socket(bind_addr.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+#ifdef CWDEBUG
+  int errn = errno;
   // Need to give the namespace inside templates for the cond_* due to bug in compiler.
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
+  errno = errn;
+#endif
   if (fd < 0)
-    return false;
+  {
+    THROW_ALERTE("socket([FAMILY], SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = [FD]",
+        AIArgs("[FAMILY]", bind_addr.family())("[FD]", fd));
+  }
 
 #ifdef SO_REUSEADDR
-  if (bind_addr->sa_family == AF_INET)
+  if (bind_addr.is_ip())
   {
     int opt = 1;
-#  ifdef CWDEBUG
     // Some OS need (optval_t)&opt, glibc doesn't (libc-5 does).
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-      Dout(dc::warning|error_cf, "listen_sock_dtct::listen: setsockopt(SO_REUSEADDR)");
-#  else
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#  endif
+    DEBUG_ONLY(int res =) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    Dout(dc::warning(res < 0)|error_cf, "ListenSocketDevice::listen: setsockopt(SO_REUSEADDR)");
   }
 #endif // SO_REUSEADDR
 
   for (;;)
   {
-    if (bind(fd, bind_addr, size_of_addr(bind_addr)) == 0)
+    if (::bind(fd, bind_addr, size_of_addr(bind_addr)) == 0)
     {
-      Dout(dc::system, "bind(" << fd << ", " << *bind_addr << ", " << size_of_addr(bind_addr) << ") = 0");
+      Dout(dc::system, "bind(" << fd << ", " << bind_addr << ", " << size_of_addr(bind_addr) << ") = 0");
       break;
     }
-    if (bind_addr->sa_family == AF_UNIX && errno == EADDRINUSE)
+    if (bind_addr.is_un() && errno == EADDRINUSE)
     {
-      int err = errno;
-      Dout(dc::system|continued_cf, "unlink(\"" << ((struct sockaddr_un*)bind_addr)->sun_path << "\") = ");
-      int res = unlink(((struct sockaddr_un*)bind_addr)->sun_path);
+      struct sockaddr_un const* un = reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(bind_addr));
+      Dout(dc::system|continued_cf, "unlink(\"" << un->sun_path << "\") = ");
+      int res = ::unlink(un->sun_path);
       Dout(dc::finish|cond_error_cf(res == -1), res);
       if (res == 0)
 	continue;
-      errno = err;
+      errno = EADDRINUSE;
     }
-    Dout(dc::warning|dc::system|error_cf, "bind(" << fd << ", " << *bind_addr << ", " << size_of_addr(bind_addr) << ") = -1");
+    int errn = errno;
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
     DEBUG_ONLY(int res =) ::close(fd);
     Dout(dc::finish|cond_error_cf(res == -1), res);
-    return false;
+    errno = errn;
+    THROW_ALERTE("bind([FD], [BIND_ADDR], [SIZE]) = -1",
+        AIArgs("[FD]", fd)("[BIND_ADDR]", bind_addr)("[SIZE]", size_of_addr(bind_addr)));
   }
-  set_bind_addr(bind_addr); // addr should only be set after a successful bind(2)
+  m_bind_addr = std::move(bind_addr);   // m_bind_addr should only be set after a successful bind(2).
 
-  Dout(dc::system|continued_cf, "listen(" << fd << ", " << backlog << ") = ");
   int res = ::listen(fd, backlog);
-  Dout(dc::finish|cond_error_cf(res == -1), res);
   if (res == -1)
   {
+    int errn = errno;
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
     DEBUG_ONLY(int res2 =) ::close(fd);
     Dout(dc::finish|cond_error_cf(res2 == -1), res2);
-    return false;
+    errno = errn;
+    THROW_ALERTE("listen([FD], [BACKLOG]) = -1", AIArgs("[FD]", fd)("[BACKLOG]", backlog));
   }
+  else
+    Dout(dc::system, "listen(" << fd << ", " << backlog << ") = " << res);
 
   init(fd);
-  Dout(dc::notice, "Added listen socket " << fd << " at " << *m_bind_addr);
-  start();
+  Dout(dc::notice, "Added listen socket " << fd << " at " << m_bind_addr);
 
-  return true;
-}
-
-void ListenSocketDevice::listen(unsigned short int port, int backlog)
-{
-  struct sockaddr_in* bind_addr = (struct sockaddr_in*)malloc(sizeof(struct sockaddr_in));
-  AllocTag(bind_addr, "struct sockaddr_in " << libcwd::type_info_of(*this).demangled_name() << "::addr");
-
-  bind_addr->sin_family = AF_INET;
-  bind_addr->sin_port = htons(port);
-  bind_addr->sin_addr.s_addr = INADDR_ANY;
-
-  if (!priv_listen((struct sockaddr*)bind_addr, backlog))
-    DoutFatal(dc::core, "ListenSocketDevice::listen(" << port << ", " << backlog << "): failure in setting up listen port!");
-}
-
-void ListenSocketDevice::listen(char const* path, int backlog)
-{
-  struct sockaddr_un* bind_addr;
-  bind_addr = (struct sockaddr_un*)malloc(sizeof(bind_addr->sun_family) + strlen(path) + 1);
-  AllocTag(bind_addr, "struct sockaddr_un ListenSocketDevice::m_bind_addr");
-
-  bind_addr->sun_family = AF_UNIX;
-  strcpy(bind_addr->sun_path, path);
-
-  if (!priv_listen((struct sockaddr*)bind_addr, backlog))
-    DoutFatal(dc::core, "ListenSocketDevice::listen(\"" << path << "\", " << backlog << "): failure in setting up UNIX listen socket!");
+  // input() does not need to be called here, because we override read_from_fd.
+  start_input_device();
 }
 
 void ListenSocketDevice::read_from_fd(int fd)
@@ -128,8 +110,8 @@ void ListenSocketDevice::read_from_fd(int fd)
   struct sockaddr* accept_addr = (struct sockaddr*)malloc(sizeof(struct sockaddr));
   AllocTag(accept_addr, "struct sockaddr*" << libcwd::type_info_of(*this).demangled_name() << "::accept_addr");
 
-  Dout(dc::system|continued_cf, "accept(" << fd << ", " << accept_addr << ", ");
-  if ((sock_fd = accept(fd, accept_addr, &addrlen)) == -1)
+  Dout(dc::system|continued_cf, "accept4(" << fd << ", " << accept_addr << ", ");
+  if ((sock_fd = accept4(fd, accept_addr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
   {
     int err = errno;
     Dout(dc::finish|error_cf, (void*)&addrlen << ") = " << sock_fd);
@@ -144,7 +126,7 @@ void ListenSocketDevice::read_from_fd(int fd)
     free(accept_addr);
     return;
   }
-  Dout(dc::finish, '{' << addrlen << "}) = " << sock_fd);
+  Dout(dc::finish, '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
   Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << *accept_addr);
 
   spawn_accepted(sock_fd, accept_addr);

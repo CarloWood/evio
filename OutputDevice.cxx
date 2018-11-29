@@ -29,6 +29,32 @@
 
 namespace evio {
 
+OutputDevice::OutputDevice() : m_output_stream(nullptr), m_obuffer(nullptr)
+{
+  DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
+  // Mark that OutputDevice is a derived class.
+  m_flags |= FDS_W;
+  // Give m_output_watcher known values; cause is_active() to return false.
+  ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, -1, EV_UNDEF);
+}
+
+// Destructor.
+OutputDevice::~OutputDevice()
+{
+  DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
+  // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
+  ASSERT(!is_active());
+  if (is_open_w())
+    close_output_device();    // This will not delete the object (again) because it isn't active.
+  if (m_obuffer)
+  {
+    // Delete the output buffer if it is no longer needed.
+    m_obuffer->release(this);
+  }
+  // Make sure we detect it if this watcher is used again.
+  Debug(m_output_watcher.data = nullptr);
+}
+
 void OutputDevice::init_output_device(int fd)
 {
   DoutEntering(dc::io, "OutputDevice::init_output_device(" << fd << ") [" << this << ']');
@@ -57,7 +83,7 @@ void OutputDevice::start_output_device()
   if (EventLoopThread::start_if_not_active(m_output_watcher))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    intrusive_ptr_add_ref(this);
+    inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
   }
 }
@@ -101,10 +127,16 @@ RefCountReleaser OutputDevice::close_output_device()
   int output_fd = m_output_watcher.fd;
   if (AI_LIKELY(is_open_w()))
   {
+    // FDS_SAME is set when this is both, an input device and an output device and is
+    // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
+    // for reading and writing is the same.
+    //
+    // Therefore, if FDS_R_OPEN is no longer set then that means that the file
+    // descriptor was closed as a result of a call to close_input_device().
     bool already_closed = (m_flags & (FDS_SAME | FDS_R_OPEN)) == FDS_SAME;
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(output_fd))
-      Dout(dc::warning, "Calling OutputDevice::close on output device with invalid fd = " << output_fd << ".");
+      Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << output_fd << ".");
 #endif
     releaser = stop_output_device();
     if (!already_closed && !dont_close())
@@ -120,6 +152,8 @@ RefCountReleaser OutputDevice::close_output_device()
       m_flags |= FDS_DEAD;
       releaser += closed();
     }
+    else if ((m_flags & FDS_SAME))
+      releaser += close_input_device();
   }
   return releaser;
 }

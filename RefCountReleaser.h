@@ -25,6 +25,7 @@
 
 #include "debug.h"
 #include "utils/AIRefCount.h"   // Needed for intrusive_ptr_release(AIRefCount*)
+#include "utils/macros.h"
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -45,7 +46,8 @@ struct RefCountReleaser
     if (m_ptr)
     {
       Dout(dc::io, "Decrementing ref count of device " << (void*)m_ptr << " to " << (m_ptr->ref_count() - 1));
-      intrusive_ptr_release(m_ptr);
+      // Cancel the call to inhibit_deletion().
+      m_ptr->allow_deletion();
     }
     m_ptr = nullptr;
   }
@@ -55,9 +57,19 @@ struct RefCountReleaser
   RefCountReleaser& operator=(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; return *this; }
   RefCountReleaser& operator+=(RefCountReleaser&& releaser)
   {
-    if (m_ptr && releaser.m_ptr) { ASSERT(m_ptr == releaser.m_ptr); execute(); }
-    m_ptr = releaser.m_ptr;
-    releaser.m_ptr = nullptr;
+    if (AI_LIKELY(releaser.m_ptr))
+    {
+      if (m_ptr)
+      {
+        ASSERT(m_ptr == releaser.m_ptr);
+        releaser.execute();
+      }
+      else
+      {
+        m_ptr = releaser.m_ptr;
+        releaser.m_ptr = nullptr;
+      }
+    }
     return *this;
   }
   void operator=(AIRefCount* ptr) { ASSERT(!m_ptr); m_ptr = ptr; }
