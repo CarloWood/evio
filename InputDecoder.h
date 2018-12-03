@@ -34,7 +34,7 @@ namespace evio {
 
 static constexpr size_t default_input_blocksize_c = 512;
 
-class InputDevicePtr
+class InputDeviceEventsHandler
 {
  protected:
   InputDevice* m_input_device;
@@ -56,7 +56,7 @@ class InputDevicePtr
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 
-class InputDecoder : public InputDevicePtr
+class InputDecoder : public InputDeviceEventsHandler
 {
  protected:
   InputBuffer* create_buffer(

@@ -37,7 +37,7 @@ namespace evio {
 class InputDecoder;
 class InputBuffer;
 class LinkBufferPlus;
-class InputDevicePtr;
+class InputDeviceEventsHandler;
 
 class InputDevice : public virtual FileDescriptor
 {
@@ -54,11 +54,11 @@ class InputDevice : public virtual FileDescriptor
   // The input buffer
   //
 
-  InputDecoder* m_input_decoder;        // The object that this device writes to.
+  InputDeviceEventsHandler* m_input_device_events_handler;   // The object that this device writes to.
   InputBuffer* m_ibuffer;               // A pointer to the input buffer.
 
  protected:
-  friend class InputDevicePtr;
+  friend class InputDeviceEventsHandler;
   void start_input_device();
   RefCountReleaser stop_input_device();
   void disable_input_device();
@@ -151,13 +151,13 @@ void InputDevice::input(InputDecoder& input_decoder, Args... input_buffer_argume
 {
   Dout(dc::evio, "InputDevice::input(" << (void*)&input_decoder << ", ...) [" << this << ']');
   m_ibuffer = input_decoder.create_buffer(this, input_buffer_arguments...);
-  m_input_decoder = &input_decoder;
+  m_input_device_events_handler = &input_decoder;
 }
 
 // Device-device link declarations.
 
-// A LinkBufferPlus plays the role of link buffer, InputDevicePtr and OutputDevicePtr all at once.
-class LinkBufferPlus : public LinkBuffer, public InputDevicePtr, OutputDevicePtr
+// A LinkBufferPlus plays the role of link buffer, InputDeviceEventsHandler and OutputDevicePtr all at once.
+class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, OutputDevicePtr
 {
  public:
   LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
@@ -171,7 +171,7 @@ void InputDevice::set_link_input(LinkBufferPlus* link_buffer)
 {
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
-  m_input_decoder = static_cast<InputDecoder*>(static_cast<InputDevicePtr*>(link_buffer));
+  m_input_device_events_handler = link_buffer;
 }
 
 } // namespace evio

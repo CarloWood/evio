@@ -29,7 +29,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_input_decoder(nullptr), m_ibuffer(nullptr)
+InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
@@ -239,8 +239,10 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
   DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << this << ']');
   RefCountReleaser releaser;
   size_t len;
-  while ((len = m_input_decoder->end_of_msg_finder(new_data, rlen)) > 0)
+  while ((len = m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
   {
+    // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
+    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_input_device_events_handler);
     // We seem to have a complete new message and need to call `decode'
     if (m_ibuffer->has_multiple_blocks())
     {
@@ -252,7 +254,7 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
       if (m_ibuffer->is_contiguous(msg_len))
       {
         MsgBlock msg_block(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node());
-        releaser += m_input_decoder->decode(msg_block);
+        releaser += input_decoder->decode(msg_block);
         m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -261,7 +263,7 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
         MsgBlock msg_block(memory_block->block_start(), msg_len, memory_block);
-        releaser += m_input_decoder->decode(msg_block);
+        releaser += input_decoder->decode(msg_block);
         memory_block->release();
       }
 
@@ -274,7 +276,7 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
       new_data += len;
-      if ((len = m_input_decoder->end_of_msg_finder(new_data, rlen)) == 0)
+      if ((len = input_decoder->end_of_msg_finder(new_data, rlen)) == 0)
         break; // The rest is not a complete message.
       // See if what is left in the buffer is a message too:
     }
@@ -285,7 +287,7 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
       char* start = m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
       MsgBlock msg_block(start, msg_len, m_ibuffer->get_get_area_block_node());
-      releaser += m_input_decoder->decode(msg_block);
+      releaser += input_decoder->decode(msg_block);
       m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(m_ibuffer->used_size() == rlen - len);
@@ -297,7 +299,7 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
       new_data += len;
-    } while ((len = m_input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
+    } while ((len = input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
     break;
   }
 }
