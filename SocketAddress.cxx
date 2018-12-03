@@ -419,9 +419,14 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
   if (AI_UNLIKELY(len != sockaddr_text.size()))
   {
     // Don't supply trailing characters.
-    THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
-        "\"[SOCKADDR_TEXT]\": trailing characters after port number",
-        AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
+    if (port == -1)
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": trailing characters after port number",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
+    else
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": trailing characters after address",
+          AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
   }
 
   // Copy the decoded data to the appropriate place.
