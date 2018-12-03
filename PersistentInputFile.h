@@ -28,14 +28,13 @@
 
 namespace evio {
 
-template<class INPUTDEVICE>
-class PersistentInputFile : public File<INPUTDEVICE>, private INotify
+class PersistentInputFile : public File, private INotify
 {
  public:
-  using File<INPUTDEVICE>::File;
+  using File::File;
 
  private:
-  // Override IOBase::closed() event to remove any inotify watch when it exists.
+  // Override FileDescriptor::closed() event to remove any inotify watch when it exists.
   RefCountReleaser closed() override;
 
   // Override InputDevice::read_returned_zero().
@@ -45,41 +44,8 @@ class PersistentInputFile : public File<INPUTDEVICE>, private INotify
   void event_occurred(inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
-      INPUTDEVICE::start_input_device();
+      start_input_device();
   }
 };
-
-template<class INPUTDEVICE>
-RefCountReleaser PersistentInputFile<INPUTDEVICE>::closed()
-{
-  RefCountReleaser releaser;
-  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::closed()");
-  if (is_watched())
-  {
-    rm_watch();
-    releaser = this;
-  }
-  return releaser;
-}
-
-// Read thread.
-template<class INPUTDEVICE>
-RefCountReleaser PersistentInputFile<INPUTDEVICE>::read_returned_zero()
-{
-  DoutEntering(dc::evio, "PersistentInputFile<" << type_info_of<INPUTDEVICE>().demangled_name() << ">::read_returned_zero()");
-  RefCountReleaser releaser = INPUTDEVICE::stop_input_device();
-  // Add an inotify watch for modification of the corresponding path (if not already watched).
-  if (!is_watched() && !FileDevice::open_filename().empty())
-  {
-    if (add_watch(FileDevice::open_filename().c_str(), IN_MODIFY))
-    {
-      if (releaser)
-        intrusive_ptr_add_ref(this);    // Keep this object alive because the above call registered m_inotify as callback object.
-      releaser.reset();
-      Dout(dc::io, "Incremented ref count (now " << IOBase::ref_count() << ") of this device [" << (void*)static_cast<IOBase*>(this) << ']');
-    }
-  }
-  return releaser;
-}
 
 } // namespace evio

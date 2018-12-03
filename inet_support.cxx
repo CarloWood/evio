@@ -149,6 +149,8 @@ ostream& operator<<(ostream& os, struct in_addr const& in)
   return os;
 }
 
+#if 0   // Use SocketAddress
+
 ostream& operator<<(ostream& os, struct sockaddr_in const& s)
 {
   os << s.sin_addr << " port " << ntohs(s.sin_port);
@@ -185,3 +187,5 @@ ostream& operator<<(ostream& os, struct sockaddr const& s)
   }
   return os;
 };
+
+#endif

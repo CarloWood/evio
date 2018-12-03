@@ -133,6 +133,13 @@ class FileDescriptor : public AIRefCount
   // If INTERNAL_FDS_DONT_CLOSE is set then the fd(s) weren't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
   virtual RefCountReleaser closed() { return RefCountReleaser(); }
+
+#if CWDEBUG
+  friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
+  {
+    return os << static_cast<void const*>(fdptr);
+  }
+#endif
 };
 
 // Convenience function to create devices.
@@ -141,7 +148,7 @@ boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
   DoutEntering(dc::evio, "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name() << ", ARGS...>(ARGS&&...)");
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
-  AllocTag2(device, "Created with evio::create.");
+  AllocTag2(device, "Created with evio::create");
   Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << device << "].");
   return device;
 }

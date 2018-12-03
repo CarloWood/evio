@@ -24,7 +24,6 @@
 #include "sys.h"
 #include "debug.h"
 #include "InputDevice.h"
-#include "InputDecoder.h"
 #include "StreamBuf.h"
 #include <libcwd/buf2str.h>
 
@@ -301,6 +300,14 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
     } while ((len = m_input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
     break;
   }
+}
+
+size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))
+{
+  DoutEntering(dc::io, "LinkBufferPlus::end_of_msg_finder");
+  // We're just hijacking InputDevice::data_received here.
+  start_output_device();
+  return 0;
 }
 
 } // namespace evio

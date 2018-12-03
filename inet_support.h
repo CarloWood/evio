@@ -43,6 +43,8 @@ char const* strherror(int herrno);
 } // namespace evio
 
 std::ostream& operator<<(std::ostream& os, struct in_addr const& in);
+#if 0 // Use SocketAddress
 std::ostream& operator<<(std::ostream& os, struct sockaddr_in const& s);
 std::ostream& operator<<(std::ostream& os, struct sockaddr_un const& s);
 std::ostream& operator<<(std::ostream& os, struct sockaddr const& s);
+#endif

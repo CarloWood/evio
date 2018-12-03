@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "INotify.h"
+#include "InputDevice.h"
 #include "threadsafe/aithreadsafe.h"
 #include "threadsafe/AIReadWriteSpinLock.h"
 #include "utils/macros.h"
@@ -36,6 +37,20 @@
 
 namespace evio {
 
+class INotifyDecoder : public InputDecoder
+{
+ private:
+  size_t m_len_so_far;
+  union { char m_buf[4]; int32_t m_name_len; };
+
+ public:
+  INotifyDecoder() : m_len_so_far(0) { m_name_len = -1; }
+
+ protected:
+  size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
+  RefCountReleaser decode(MsgBlock msg) override;
+};
+
 //=============================================================================
 //
 // class INotifyDevice
@@ -48,16 +63,16 @@ namespace evio {
 // and inotify_rm_watch(2) to watch path names for events.  See inotify(7) for
 // more details.
 
-class INotifyDevice : public ReadInputDeviceBase, public virtual IOBase
+class INotifyDevice : public InputDevice, public virtual FileDescriptor
 {
  private:
   // Disallow copy constructing.
   INotifyDevice(INotifyDevice const&) = delete;
 
-  size_t m_len_so_far;
-  union { char m_buf[4]; int32_t m_name_len; };
   std::mutex m_inotify_mutex;   // Mutex for the inotify fd.
+  INotifyDecoder m_decoder;
 
+  friend class INotifyDecoder;
   // Map watch descriptors to their corresponding INotify objects.
   using wd_to_inotify_map_type = std::vector<std::pair<int, INotify*>>;
   // Use AIReadWriteSpinLock because we'll be doing vastly more read locks than write locks.
@@ -66,13 +81,9 @@ class INotifyDevice : public ReadInputDeviceBase, public virtual IOBase
 
   static wd_to_inotify_map_type::const_iterator get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd);
 
- protected:
-  size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
-  RefCountReleaser decode(MsgBlock msg) override;
-
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
-  INotifyDevice(InputBuffer* ibuf) : ReadInputDeviceBase(ibuf), m_len_so_far(0) { m_name_len = -1; }
+  INotifyDevice() { input(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1)); }
 
   int add_watch(char const* pathname, uint32_t mask, INotify* obj);
   void rm_watch(int wd);
@@ -154,7 +165,7 @@ void INotifyDevice::rm_watch(int wd)
   }
 }
 
-size_t INotifyDevice::end_of_msg_finder(char const* new_data, size_t rlen)
+size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
 {
   m_len_so_far += rlen;
   // Fast track first.
@@ -191,7 +202,7 @@ size_t INotifyDevice::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-RefCountReleaser INotifyDevice::decode(MsgBlock msg)
+RefCountReleaser INotifyDecoder::decode(MsgBlock msg)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
@@ -200,7 +211,8 @@ RefCountReleaser INotifyDevice::decode(MsgBlock msg)
     DoutFatal(dc::core, "inotify: IN_Q_OVERFLOW happened!");
   if ((event->mask != IN_IGNORED))      // In the case of IN_IGNORED the wd was already removed from m_wd_to_inotify_map (and the INotify object destroyed).
   {
-    INotify* obj = get_inotify_obj(wd_to_inotify_map_ts::rat(m_wd_to_inotify_map), event->wd)->second;
+    INotifyDevice* device = static_cast<INotifyDevice*>(m_input_device);
+    INotify* obj = device->get_inotify_obj(INotifyDevice::wd_to_inotify_map_ts::rat(device->m_wd_to_inotify_map), event->wd)->second;
     obj->event_occurred(event);
   }
   return RefCountReleaser();
@@ -222,7 +234,13 @@ int INotify::add_watch(char const* pathname, uint32_t mask, INotify* inotify)
   {
     std::lock_guard<std::mutex> lock(inotify_device_ptr_initialization_mutex);
     if (inotify_device_ptr == nullptr)
-      inotify_device_ptr = new INotifyDevice(new InputBuffer(utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1)));
+    {
+      inotify_device_ptr = new INotifyDevice;
+      // INotifyDevice is derived from FileDescriptor. Fake inotify_device_ptr
+      // being a boost::intrusive_ptr or else an assert will fire when we try
+      // to start it.
+      intrusive_ptr_add_ref(inotify_device_ptr);
+    }
   }
   return inotify_device_ptr.load()->add_watch(pathname, mask, inotify);
 }

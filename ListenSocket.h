@@ -110,7 +110,7 @@ protected:
   void read_from_fd(int fd) override;
 
   // Called by read_from_fd() to actually spawn a SOCK_TYPE for the accepted fd.
-  virtual void spawn_accepted(int fd, struct sockaddr* addr) = 0;
+  virtual void spawn_accepted(int fd, SocketAddress const& remote_address) = 0;
 
   // This method is called when we are possibly out of filedescriptors.
   // It should return `true' when this is true, and can optionally take
@@ -135,12 +135,14 @@ class ListenSocket : public ListenSocketDevice
 
  private:
   // Called from ListenSocketDevice::read_from_fd() to spawn the new socket.
-  void spawn_accepted(int fd, struct sockaddr* addr) override;
+  void spawn_accepted(int fd, SocketAddress const& remote_address) override;
 
  protected:
   // Called when a new connection is accepted.
   virtual void new_connection(OUTPUT& UNUSED_ARG(connection)) { }
 };
+
+namespace {
 
 template<typename DECODER, typename OUTPUT>
 struct SpawnedSocket : public Socket
@@ -155,11 +157,13 @@ struct SpawnedSocket : public Socket
   }
 };
 
+} // namespace
+
 template<typename DECODER, typename OUTPUT>
-void ListenSocket<DECODER, OUTPUT>::spawn_accepted(int fd, struct sockaddr* addr)
+void ListenSocket<DECODER, OUTPUT>::spawn_accepted(int fd, SocketAddress const& remote_address)
 {
   auto sock = create<SpawnedSocket<DECODER, OUTPUT>>();
-  sock->init(fd, addr);
+  sock->init(fd, remote_address);
   new_connection(sock->m_output);
 }
 

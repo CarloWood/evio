@@ -107,10 +107,9 @@ void ListenSocketDevice::read_from_fd(int fd)
 {
   int sock_fd;
   socklen_t addrlen = sizeof(struct sockaddr);
-  struct sockaddr* accept_addr = (struct sockaddr*)malloc(sizeof(struct sockaddr));
-  AllocTag(accept_addr, "struct sockaddr*" << libcwd::type_info_of(*this).demangled_name() << "::accept_addr");
+  SocketAddress accept_addr;
 
-  Dout(dc::system|continued_cf, "accept4(" << fd << ", " << accept_addr << ", ");
+  Dout(dc::system|continued_cf, "accept4(" << fd << ", ");
   if ((sock_fd = accept4(fd, accept_addr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
   {
     int err = errno;
@@ -123,27 +122,12 @@ void ListenSocketDevice::read_from_fd(int fd)
     if (err != EWOULDBLOCK)
       Dout(dc::warning, libcwd::type_info_of(*this).demangled_name() << "::read_from_fd: Need to throw exception: accept failed");
 #endif
-    free(accept_addr);
     return;
   }
-  Dout(dc::finish, '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
-  Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << *accept_addr);
+  Dout(dc::finish, '{' << accept_addr << "}, " << '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
+  Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << accept_addr);
 
   spawn_accepted(sock_fd, accept_addr);
-
-#if 0   // FIXME Set socket buffer sizes.
-  if (accept_addr->sa_family == AF_INET)
-  {
-    input_ct* id = d;
-    output_ct* od = d;
-    if (!set_rcvsockbuf(sock_fd, d->get_rcvbuf_size(), id->rddbbuf()->minimum_block_size()) ||
-	!set_sndsockbuf(sock_fd, d->get_sndbuf_size(), od->rddbbuf()->minimum_block_size()))
-    {
-      d->del();
-      return;
-    }
-  }
-#endif
 }
 
 bool ListenSocketDevice::maybe_out_of_fds()

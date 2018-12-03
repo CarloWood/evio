@@ -49,8 +49,8 @@ class Socket : public InputDevice, public OutputDevice
   // Protected attributes
   //
 
-  // The connect point, nullptr when not yet initialized.
-  SocketAddress m_socket_address;
+  // The address of the remote socket; either what we connected to or the peer address of an accepted connection.
+  SocketAddress m_remote_address;
 
   // The receive socket buffer that we want to be set.
   // The actual size can be set to a larger value, see net/inet_support.cc
@@ -81,7 +81,7 @@ class Socket : public InputDevice, public OutputDevice
 
   // Returns the remote IP number and port that this socket connected with.
   // Only valid when `is_open' returns true.
-  SocketAddress address() const { return m_socket_address; }
+  SocketAddress address() const { return m_remote_address; }
 
   // Returns the local IP number and port of this socket (the bind address).
   // Only valid when `is_open' returns true.
@@ -96,16 +96,9 @@ class Socket : public InputDevice, public OutputDevice
   char const* get_path() const
   {
     // Don't call get_path for a non AF_UNIX socket.
-    assert(m_socket_address.is_un());
-    return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_socket_address))->sun_path;
+    assert(m_remote_address.is_un());
+    return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_remote_address))->sun_path;
   }
-
-#if CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, Socket const* sdptr)
-  {
-    return os << static_cast<void const*>(static_cast<FileDescriptor const*>(sdptr));
-  }
-#endif
 };
 
 } // namespace evio

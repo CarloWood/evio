@@ -21,16 +21,23 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#pragma once
+// OutputDevice must be included first.
+#include "OutputDevice.h"
+
+#ifndef EVIO_INPUT_DEVICE_H
+#define EVIO_INPUT_DEVICE_H
 
 #include "FileDescriptor.h"
 #include "EventLoopThread.h"
 #include "libev-4.24/ev.h"
+#include "StreamBuf.h"
 
 namespace evio {
 
 class InputDecoder;
 class InputBuffer;
+class LinkBufferPlus;
+class InputDevicePtr;
 
 class InputDevice : public virtual FileDescriptor
 {
@@ -51,7 +58,7 @@ class InputDevice : public virtual FileDescriptor
   InputBuffer* m_ibuffer;               // A pointer to the input buffer.
 
  protected:
-  friend class InputDecoder;
+  friend class InputDevicePtr;
   void start_input_device();
   RefCountReleaser stop_input_device();
   void disable_input_device();
@@ -67,13 +74,6 @@ class InputDevice : public virtual FileDescriptor
 
   // Disallow copy constructing.
   InputDevice(InputDevice const&) = delete;
-
-#if CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, InputDevice const* idptr)
-  {
-    return os << static_cast<void const*>(static_cast<FileDescriptor const*>(idptr));
-  }
-#endif
 
  public:
   //---------------------------------------------------------------------------
@@ -99,6 +99,12 @@ class InputDevice : public virtual FileDescriptor
   RefCountReleaser close_input_device() override;
 
  private:
+  // This function is called by OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
+  inline void set_link_input(LinkBufferPlus* link_buffer);
+  // Give access to the above function.
+  template<typename INPUT_DEVICE, typename... Args>
+  friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
+
   // Override base class member function.
   void init_input_device(int fd) override;
 
@@ -144,8 +150,30 @@ template<typename... Args>
 void InputDevice::input(InputDecoder& input_decoder, Args... input_buffer_arguments)
 {
   Dout(dc::evio, "InputDevice::input(" << (void*)&input_decoder << ", ...) [" << this << ']');
+  m_ibuffer = input_decoder.create_buffer(this, input_buffer_arguments...);
   m_input_decoder = &input_decoder;
-  m_ibuffer = m_input_decoder->create_buffer(this, input_buffer_arguments...);
+}
+
+// Device-device link declarations.
+
+// A LinkBufferPlus plays the role of link buffer, InputDevicePtr and OutputDevicePtr all at once.
+class LinkBufferPlus : public LinkBuffer, public InputDevicePtr, OutputDevicePtr
+{
+ public:
+  LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+    LinkBuffer(input_device, output_device, minimum_blocksize, buffer_full_watermark, max_alloc) { m_input_device = input_device; m_output_device = output_device; }
+
+ protected:
+  size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
+};
+
+void InputDevice::set_link_input(LinkBufferPlus* link_buffer)
+{
+  ASSERT(!m_ibuffer);
+  m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
+  m_input_decoder = static_cast<InputDecoder*>(static_cast<InputDevicePtr*>(link_buffer));
 }
 
 } // namespace evio
+
+#endif // EVIO_INPUT_DEVICE_H

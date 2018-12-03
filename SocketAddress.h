@@ -114,7 +114,7 @@ class SocketAddress
   void init(struct sockaddr const* sa_addr);
   void init(SocketAddress const& other)
       { init(other.is_un() ? reinterpret_cast<struct sockaddr const*>(other.m_sockaddr_un_ptr)
-                           : reinterpret_cast<struct sockaddr const*>(&other.m_sockaddr)); }
+                           : &other.m_sockaddr); }
   bool compare_with(SocketAddress const& sa, int val) const;
 };
 

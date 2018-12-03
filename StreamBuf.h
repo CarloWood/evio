@@ -419,7 +419,15 @@ class StreamBuf : public std::streambuf
   size_t new_block_size() const;
 
   // Returns true if the output buffer is full.
-  bool buffer_full() const { return (used_size() >= max_used_size); }
+  bool buffer_full() const
+  {
+    bool full = used_size() >= max_used_size;
+#ifdef CWDEBUG
+    if (full)
+      Dout(dc::warning, "StreamBuf::buffer_full: used_size() = " << used_size() << " >= max_used_size = " << max_used_size << " [" << this << ']');
+#endif
+    return full;
+  }
 
   // Returns true if output buffer is empty.
   bool buffer_empty() const { return igptr() == pptr(); }
@@ -686,7 +694,10 @@ class Buf2Dev : public StreamBuf
 class LinkBuffer : public Dev2Buf
 {
  public:
-  using Dev2Buf::Dev2Buf;
+  LinkBuffer(InputDevice* input_device, OutputDevice* output_device,
+      size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
+    Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc)
+    { set_input_device(input_device); set_output_device(output_device); }
 
   //-----------------------------------------------------------
   // DUPLICATE METHODS OF Buf2Dev.

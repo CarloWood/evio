@@ -30,7 +30,13 @@
 
 namespace evio {
 
-void FileDevice::open(char const* filename, int mode, int prot, int additional_posix_modes)
+void File::init(int fd, std::string const& filename)
+{
+  m_filename = filename;
+  FileDescriptor::init(fd);
+}
+
+void File::open(std::string const& filename, std::ios_base::openmode mode, int prot, int additional_posix_modes)
 {
   using std::ios_base;
 
@@ -39,8 +45,25 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   if ((mode & ios_base::app))
     mode |= ios_base::out;
 
-  // At least one of ios_base::in or ios_base::out must be specified.
-  ASSERT((mode & (ios_base::in|ios_base::out)) != 0);
+  // Call input() and/or output() before calling open().
+  ASSERT(m_ibuffer || m_obuffer);
+
+  if ((mode & (ios_base::in|ios_base::out)) == 0)
+  {
+    if (m_ibuffer)
+      mode |= ios_base::in;
+    if (m_obuffer)
+      mode |= ios_base::out;
+  }
+#ifdef CWDEBUG
+  else
+  {
+    // If at least one of ios_base::in or ios_base::out is specified, it
+    // must match the buffers that we have.
+    ASSERT((m_ibuffer == nullptr) == !(mode & ios_base::in));   // Call input() before calling open().
+    ASSERT((m_obuffer == nullptr) == !(mode & ios_base::out));  // Call output() before calling open().
+  }
+#endif
 
   if ((mode & (ios_base::in|ios_base::out)) == (ios_base::in|ios_base::out))
   {
@@ -51,7 +74,7 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   else
     posix_mode = O_RDONLY;
 
-  // Do not call open() on a device that is already initialized with a fd (see IOBase::init) or call close() first.
+  // Do not call open() on a device that is already initialized with a fd (see FileDescriptor::init) or call close() first.
   ASSERT(!is_open());
 
   // Meant to be used for things like O_CLOEXEC, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOATIME, O_NOFOLLOW, O_NONBLOCK, O_SYNC, O_TMPFILE, ...
@@ -65,7 +88,7 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
     posix_mode |= O_CREAT;
 
   Dout(dc::system|continued_cf, "open(\"" << filename << "\", " << NAMESPACE_DEBUG::PosixMode(posix_mode) << ", " << std::oct << prot << ") = ");
-  int fd = ::open(filename, posix_mode, prot);
+  int fd = ::open(filename.c_str(), posix_mode, prot);
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
 
   if (fd < 0)
@@ -83,9 +106,11 @@ void FileDevice::open(char const* filename, int mode, int prot, int additional_p
   }
 
   // Success.
-  m_filename = filename;
-  init(fd);
-  start();
+  init(fd, filename);
+  if (m_ibuffer)
+    start_input_device();
+  if (m_obuffer && !m_obuffer->buffer_empty())
+    start_output_device();
 }
 
 } // namespace evio

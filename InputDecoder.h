@@ -34,19 +34,31 @@ namespace evio {
 
 static constexpr size_t default_input_blocksize_c = 512;
 
-class InputDecoder
+class InputDevicePtr
 {
- private:
+ protected:
   InputDevice* m_input_device;
 
- protected:
-  // These may be called from decode().
   void start_input_device() { m_input_device->start_input_device(); }
   RefCountReleaser stop_input_device() { return m_input_device->stop_input_device(); }
 
- protected:
   friend class InputDevice;
+  InputBuffer* create_buffer(InputDevice* input_device)
+      { return create_buffer(input_device, default_input_blocksize_c, 8 * default_input_blocksize_c, std::numeric_limits<size_t>::max()); }
+  InputBuffer* create_buffer(InputDevice* input_device, size_t minimum_blocksize)
+      { return create_buffer(input_device, minimum_blocksize, 8 * minimum_blocksize, std::numeric_limits<size_t>::max()); }
+  InputBuffer* create_buffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark)
+      { return create_buffer(input_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
+  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t, size_t)
+      { /* Should never be called */ return nullptr; }
 
+  // Returns the size of the first message, or 0 if there is no complete message.
+  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
+};
+
+class InputDecoder : public InputDevicePtr
+{
+ protected:
   InputBuffer* create_buffer(
       InputDevice* input_device,
       size_t minimum_blocksize = default_input_blocksize_c,
@@ -59,13 +71,13 @@ class InputDecoder
     return input_buffer;
   }
 
-  // Returns the size of the first message, or 0 if there is no complete message.
-  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen)
+  size_t end_of_msg_finder(char const* new_data, size_t rlen) override
   {
     char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
     return newline ? newline - new_data + 1 : 0;
   }
 
+  friend class InputDevice;
   virtual RefCountReleaser decode(MsgBlock msg) = 0;
 };
 

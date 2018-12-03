@@ -35,20 +35,28 @@ namespace evio {
 
 static constexpr size_t default_output_blocksize_c = 2048;
 
-class OutputStream : public std::ostream
+class OutputDevicePtr
 {
- private:
+ protected:
   OutputDevice* m_output_device;
 
- protected:
-  friend class OutputDevice;
+  void start_output_device() { m_output_device->start_output_device(); }
 
-  OutputBuffer* create_buffer(
-      OutputDevice* output_device,
-      size_t minimum_blocksize = default_output_blocksize_c,
-      size_t buffer_full_watermark = std::numeric_limits<size_t>::max(),
-      size_t max_alloc = std::numeric_limits<size_t>::max()
-      )
+  friend class OutputDevice;
+  OutputBuffer* create_buffer(OutputDevice* output_device)
+      { return create_buffer(output_device, default_output_blocksize_c, 8 * default_output_blocksize_c, std::numeric_limits<size_t>::max()); }
+  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize)
+      { return create_buffer(output_device, minimum_blocksize, 8 * minimum_blocksize, std::numeric_limits<size_t>::max()); }
+  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark)
+      { return create_buffer(output_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
+  virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t, size_t)
+      { /* Should never be called */ return nullptr; }
+};
+
+class OutputStream : public std::ostream, public OutputDevicePtr
+{
+ protected:
+  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) override
   {
     m_output_device = output_device;
     OutputBuffer* output_buffer = new OutputBuffer(output_device, minimum_blocksize, buffer_full_watermark, max_alloc);

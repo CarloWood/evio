@@ -23,7 +23,13 @@ SOURCES = FileDescriptor.cxx \
 	  SocketAddress.cxx \
 	  SocketAddress.h \
 	  SocketAddressList.cxx \
-	  SocketAddressList.h
+	  SocketAddressList.h \
+	  File.cxx \
+	  File.h \
+	  PersistentInputFile.cxx \
+	  PersistentInputFile.h \
+	  INotify.cxx \
+	  INotify.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@

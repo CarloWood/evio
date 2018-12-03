@@ -30,7 +30,7 @@
 
 namespace evio {
 
-class OutputStream;
+class OutputDevicePtr;
 class OutputBuffer;
 
 class OutputDevice : public virtual FileDescriptor
@@ -48,24 +48,17 @@ class OutputDevice : public virtual FileDescriptor
   // The output buffer
   //
 
-  OutputStream* m_output_stream;        // The object that this device reads from.
+  OutputDevicePtr* m_output_device_ptr; // A pointer to an object that points back to us.
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
 
  protected:
-  void start_output_device();
+  void start_output_device();           friend class OutputDevicePtr;
   RefCountReleaser stop_output_device();
   void disable_output_device();
   void enable_output_device();
   int get_output_fd() const;
 
  protected:
-#if CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, OutputDevice const* odptr)
-  {
-    return os << static_cast<void const*>(static_cast<FileDescriptor const*>(odptr));
-  }
-#endif
-
   OutputDevice();
   ~OutputDevice();
 
@@ -113,9 +106,19 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void output(OutputStream& output_stream, Args... output_buffer_arguments);
+  void output(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments);
+
+  template<typename DEVICE, typename... Args>
+  void output(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
 
   RefCountReleaser close_output_device() override;
+
+ private:
+  // Called by the second output above.
+  void set_link_output(LinkBuffer* link_buffer)
+  {
+    m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
+  }
 
  protected:
   // Event: fd is writable.
@@ -141,15 +144,35 @@ class OutputDevice : public virtual FileDescriptor
 } // namespace evio
 
 #include "OutputStream.h"
+#include "InputDevice.h"
 
 namespace evio {
 
 template<typename... Args>
-void OutputDevice::output(OutputStream& output_stream, Args... output_buffer_arguments)
+void OutputDevice::output(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments)
 {
-  Dout(dc::evio, "OutputDevice::output(" << (void*)&output_stream << ", ...) [" << this << ']');
-  m_output_stream = &output_stream;
-  m_obuffer = m_output_stream->create_buffer(this, output_buffer_arguments...);
+  Dout(dc::evio, "OutputDevice::output(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
+  m_output_device_ptr = &output_device_ptr;
+  m_obuffer = m_output_device_ptr->create_buffer(this, output_buffer_arguments...);
+}
+
+template<typename INPUT_DEVICE, typename... Args>
+void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments)
+{
+  Dout(dc::evio, "OutputDevice::output([" << &*ptr << "]) [" << this << ']');
+
+  // We need to create a link buffer and use it to link the following two devices.
+  InputDevice* input_device = ptr.get();
+  OutputDevice* output_device = this;
+
+  // Create the link buffer.
+  LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, buffer_arguments...);
+
+  // Initialize the output device to read from the link buffer.
+  output_device->set_link_output(link_buffer);
+
+  // Initialize the input device to write to the link buffer.
+  input_device->set_link_input(link_buffer);
 }
 
 } // namespace evio

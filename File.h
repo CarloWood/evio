@@ -23,132 +23,61 @@
 
 #pragma once
 
-#include "Device.h"
+#include "InputDevice.h"
+#include "OutputDevice.h"
 #include <fcntl.h>
 
 namespace evio {
 
 //=============================================================================
 //
-// class FileDevice
-//
-// Base class for file Input and Output.
+// class File
 //
 // SYNOPSIS
 //
 // This class implements the common open() and close() of both, input and
 // output files.
 //
-// The reason that reading and writing is kept together until this point is
-// that both have a lot in common and the underlaying base classes all deal
-// with both input and output, down to the fd_dct which calls select(2)
-// (which takes a parameter for both, readable and writable filedescriptors).
-//
 
-class FileDevice : public virtual IOBase
+class File : public InputDevice, public OutputDevice
 {
- protected:
-  //---------------------------------------------------------------------------
-  // Constructors
-  //
-
-  // Default constructor. Use `open' or `IOBase::init' to associate
-  // the object with a filedescriptor.
-  FileDevice() { }
-
-  //---------------------------------------------------------------------------
-  // Public methods
-  //
-
-  // Associate this object with a new file `name'.
-  // Open this file with mode `mode' and protection `prot'.
-  //
-  // See `ifstream_dct::ifstream_dct' for a description of the
-  // possible values of `mode'.
-  void open(char const* filename, int mode, int prot = 0664, int additional_posix_modes = O_CLOEXEC);
-
-  // Call the `close' of the base class, which does the real work.
-  void close() { m_filename.clear(); close_fds(); }
-
  private:
   std::string m_filename;       // The name of the opened file.
 
  public:
+  //---------------------------------------------------------------------------
+  // Constructors
+  //
+
+  // Default constructor.
+  File() { DoutEntering(dc::evio, "File::File() [" << this << "]"); }
+
+  //---------------------------------------------------------------------------
+  // Public manipulators.
+  //
+
+  // Associate this object with an existing and open file `fd'.
+  void init(int fd, std::string const& filename);
+
+  // Associate this object with a new file `filename'.
+  // Open this file with mode `mode' and protection `prot'.
+  //
+  // See https://en.cppreference.com/w/cpp/io/ios_base/openmode
+  // for the possible values of `mode'.
+  void open(std::string const& filename, std::ios_base::openmode mode, int prot = 0664, int additional_posix_modes = O_CLOEXEC);
+
+  // Call the `close' of the base class, which does the real work.
+  void close() { m_filename.clear(); FileDescriptor::close(); }
+
+  //---------------------------------------------------------------------------
+  // Accessors.
+  //
+
   // Returns the currently open filename (empty if not open).
   std::string const& open_filename() const { return m_filename; }
 };
 
-//=============================================================================
-//
-// class file_dtct
-//
-// I/O-FILEBUFfers, base class for I/O-fstream_dct.
-//
-// SYNOPSIS
-//
-// Base class for I/O Files. Linkage with the
-// input (istream) / output (ostream) buffer.
-//
-
-template<class IO>
-class File : public FileDevice, public IO
-{
- public:
-  // Create a new `File<IO>' with a default buffer.
-  File() : IO(new typename IO::buffer_type(IO::default_blocksize_c))
-  {
-    DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
-  }
-
-  // Create a new `File<IO>' with a given buffer.
-  File(typename IO::buffer_type* buffer) : IO(buffer)
-  {
-    DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-  }
-
-  // Create a new `File<IO>' which uses the same buffer as `link_buffer'.
-  template<typename IO_with_buflink_type = IO>
-  File(typename IO_with_buflink_type::buflink_type& link_buffer) : IO(link_buffer->rddbbuf())
-  {
-    DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-  }
-
-  // Constructors that combine the above three two `open':
-
-  // Create a new `File<IO>' with a default buffer and open a file.
-  File(char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(new typename IO::buffer_type(IO::default_blocksize_c))
-  {
-    DoutEntering(dc::io, "File::File() [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot, additional_posix_modes);
-  }
-
-  // Create a new `File<IO>' with a given buffer and open a file.
-  File(typename IO::buffer_type* buffer, char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(buffer)
-  {
-    DoutEntering(dc::io, "File(" << (void*)static_cast<StreamBuf*>(buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot, additional_posix_modes);
-  }
-
-  // Create a new `File<IO>' which uses the same buffer as `link_buffer' and open a file.
-  template<typename IO_with_buflink_type = IO>
-  File(typename IO_with_buflink_type::buflink_type& link_buffer, char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) : IO(link_buffer->rddbbuf())
-  {
-    DoutEntering(dc::io, "File(@" << (void*)static_cast<StreamBuf*>(&link_buffer) << ") [" << (void*)static_cast<IOBase*>(this) << ']');
-    open(name, mode | IO::mode, prot, additional_posix_modes);
-  }
-
- public:
-  //---------------------------------------------------------------------------
-  // Public methods
-  //
-
-  // Call the `open' of the base class, which does the real work.
-  void open(char const* name, int mode = 0, int prot = 0664, int additional_posix_modes = O_CLOEXEC) { return FileDevice::open(name, mode | IO::mode, prot, additional_posix_modes); }
-
-  // Call `close` of the base class.
-  using FileDevice::close;
-};
-
+#if 0
 //=============================================================================
 //
 // class std_dtct
@@ -159,7 +88,6 @@ class File : public FileDevice, public IO
 //
 // Base class for standard I/O.
 //
-#if 0
 template<class IO>
 class stdio_dtct : public dbbuf_fd_dtct<IO>, virtual public fd_dct {
 private:

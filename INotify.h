@@ -23,14 +23,14 @@
 
 #pragma once
 
-#include "evio/Device.h"
+#include "debug.h"
 #include <vector>
 #include <utility>
 #include <sys/inotify.h>
 
 namespace evio {
 
-class INotifyDevice;
+class INotifyDecoder;
 
 //=============================================================================
 //
@@ -92,7 +92,7 @@ class INotify
   }
 
  protected:
-  friend INotifyDevice;
+  friend INotifyDecoder;
   virtual void event_occurred(inotify_event const* event) = 0;
 };
 
