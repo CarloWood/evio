@@ -65,12 +65,12 @@ bool Socket::connect(SocketAddress remote_address, size_t rcvbuf_size, size_t sn
   }
   Dout(dc::finish|cond_error_cf(ret < 0), ret);
 
-  init(fd, remote_address, rcvbuf_size, sndbuf_size);
+  init(fd, remote_address, rcvbuf_size, sndbuf_size, true);
 
   return true;
 }
 
-void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size)
+void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, bool signal_connected)
 {
 #ifdef CWDEBUG
   if (is_open())
@@ -88,6 +88,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
 
   m_rcvbuf_size = rcvbuf_size;
   m_sndbuf_size = sndbuf_size;
+  m_signal_connected = signal_connected;
 
   if (remote_address.is_ip())
   {
@@ -112,8 +113,29 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   FileDescriptor::init(fd);     // link in
   if (m_ibuffer)
     start_input_device();
-  if (m_obuffer && !m_obuffer->buffer_empty())
+  if (m_signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))
     start_output_device();
+}
+
+void Socket::write_to_fd(int fd)
+{
+  if (AI_UNLIKELY(m_signal_connected))
+  {
+    m_signal_connected = false;
+    connected();
+    if (!m_obuffer || m_obuffer->buffer_empty())
+    {
+      stop_output_device();
+      return;
+    }
+  }
+  OutputDevice::write_to_fd(fd);
+}
+
+void Socket::connected()
+{
+  DoutEntering(dc::evio, "Socket::connected()");
+  // Derive from Socket to implement this.
 }
 
 SocketAddress Socket::local_address() const

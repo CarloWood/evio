@@ -54,8 +54,8 @@ class InputDevice : public virtual FileDescriptor
   // The input buffer
   //
 
-  InputDeviceEventsHandler* m_input_device_events_handler;   // The object that this device writes to.
-  InputBuffer* m_ibuffer;               // A pointer to the input buffer.
+  InputDeviceEventsHandler* m_input_device_events_handler;      // The object that this device writes to.
+  InputBuffer* m_ibuffer;                                       // A pointer to the input buffer.
 
  protected:
   friend class InputDeviceEventsHandler;

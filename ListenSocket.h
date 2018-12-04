@@ -127,11 +127,12 @@ protected:
 //
 // This class implements listen() for "server" sockets.
 //
-template<typename DECODER, typename OUTPUT>
+template<typename ACCEPTED_SOCKET>
 class ListenSocket : public ListenSocketDevice
 {
  public:
   using ListenSocketDevice::ListenSocketDevice;
+  using accepted_socket_type = ACCEPTED_SOCKET;
 
  private:
   // Called from ListenSocketDevice::read_from_fd() to spawn the new socket.
@@ -139,32 +140,15 @@ class ListenSocket : public ListenSocketDevice
 
  protected:
   // Called when a new connection is accepted.
-  virtual void new_connection(OUTPUT& UNUSED_ARG(connection)) { }
+  virtual void new_connection(accepted_socket_type& UNUSED_ARG(accepted_socket)) { }
 };
 
-namespace {
-
-template<typename DECODER, typename OUTPUT>
-struct SpawnedSocket : public Socket
+template<typename ACCEPTED_SOCKET>
+void ListenSocket<ACCEPTED_SOCKET>::spawn_accepted(int fd, SocketAddress const& remote_address)
 {
-  DECODER m_decoder;
-  OUTPUT m_output;
-
-  SpawnedSocket()
-  {
-    input(m_decoder);
-    output(m_output);
-  }
-};
-
-} // namespace
-
-template<typename DECODER, typename OUTPUT>
-void ListenSocket<DECODER, OUTPUT>::spawn_accepted(int fd, SocketAddress const& remote_address)
-{
-  auto sock = create<SpawnedSocket<DECODER, OUTPUT>>();
+  auto sock = create<ACCEPTED_SOCKET>();
   sock->init(fd, remote_address);
-  new_connection(sock->m_output);
+  new_connection(*sock);
 }
 
 } // namespace evio

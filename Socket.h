@@ -33,6 +33,8 @@
 
 namespace evio {
 
+class Socket;
+
 //=============================================================================
 //
 // class Socket
@@ -61,6 +63,9 @@ class Socket : public InputDevice, public OutputDevice
   // Idem for the send socket buffer (except, output buffer).
   size_t m_sndbuf_size;
 
+  // When set, call connected() as soon as fd is writable.
+  bool m_signal_connected;
+
  public:
   //---------------------------------------------------------------------------
   // Constructor
@@ -69,7 +74,7 @@ class Socket : public InputDevice, public OutputDevice
   Socket() : m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
 
   // Associate this object with an existing and open socket `fd'.
-  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
+  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
 
   // Create a socket(2), bind it to if_addr, and call init().
   bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
@@ -99,6 +104,13 @@ class Socket : public InputDevice, public OutputDevice
     assert(m_remote_address.is_un());
     return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_remote_address))->sun_path;
   }
+
+ protected:
+  // Overridden to detect connects.
+  void write_to_fd(int fd) override;
+
+  // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
+  virtual void connected();
 };
 
 } // namespace evio
