@@ -103,8 +103,10 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   start_input_device();
 }
 
-void ListenSocketDevice::read_from_fd(int fd)
+void ListenSocketDevice::VT_impl::read_from_fd(InputDevice* _self, int fd)
 {
+  ListenSocketDevice* self = static_cast<ListenSocketDevice*>(_self);
+
   int sock_fd;
   socklen_t addrlen = sizeof(struct sockaddr);
   SocketAddress accept_addr;
@@ -114,23 +116,24 @@ void ListenSocketDevice::read_from_fd(int fd)
   {
     int err = errno;
     Dout(dc::finish|error_cf, (void*)&addrlen << ") = " << sock_fd);
-    if (err != EWOULDBLOCK && maybe_out_of_fds())
+    if (err != EWOULDBLOCK && self->maybe_out_of_fds())
       err = EMFILE;
 #ifdef CWDEBUG
     errno = err;
-    Dout(dc::warning|error_cf, libcwd::type_info_of(*this).demangled_name() << "::read_from_fd: accept");
+    Dout(dc::warning|error_cf, "ListenSocketDevice::VT_impl::read_from_fd: accept");
     if (err != EWOULDBLOCK)
-      Dout(dc::warning, libcwd::type_info_of(*this).demangled_name() << "::read_from_fd: Need to throw exception: accept failed");
+      Dout(dc::warning, "ListenSocketDevice::VT_impl::read_from_fd: Need to throw exception: accept failed");
 #endif
     return;
   }
   Dout(dc::finish, '{' << accept_addr << "}, " << '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
   Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << accept_addr);
 
-  spawn_accepted(sock_fd, accept_addr);
+  self->spawn_accepted(sock_fd, accept_addr);
 }
 
-bool ListenSocketDevice::maybe_out_of_fds()
+//static
+bool ListenSocketDevice::VT_impl::maybe_out_of_fds(ListenSocketDevice* UNUSED_ARG(self))
 {
   int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd >= 0)

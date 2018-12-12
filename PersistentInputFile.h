@@ -30,22 +30,39 @@ namespace evio {
 
 class PersistentInputFile : public File, private INotify
 {
- public:
-  using File::File;
-
  private:
   // Override FileDescriptor::closed() event to remove any inotify watch when it exists.
   RefCountReleaser closed() override;
 
-  // Override InputDevice::read_returned_zero().
-  RefCountReleaser read_returned_zero() override;
+ public:
+  using VT_type = File::VT_type;
 
+  struct VT_impl : File::VT_impl
+  {
+    // Override InputDevice::read_returned_zero().
+    static RefCountReleaser read_returned_zero(InputDevice* self);
+
+    // Virtual table of PersistentInputFile.
+    static constexpr File::VT_type VT{
+      read_from_fd,
+      read_returned_zero,
+      read_error,
+      data_received
+    };
+  };
+
+  utils::VTPtr<PersistentInputFile, File> VT_ptr;
+
+ protected:
   // Override method of INotify.
   void event_occurred(inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
       start_input_device();
   }
+
+ public:
+  PersistentInputFile() : VT_ptr(this) { }
 };
 
 } // namespace evio

@@ -46,18 +46,6 @@ class ListenSocketDevice : public InputDevice
 
  public:
   //---------------------------------------------------------------------------
-  // Constructors:
-  //
-
-  // Make a ListenSocketDevice for association with a new TCP/IP socket.
-  // You need to call `listen' before it will actually do anything.
-  ListenSocketDevice()
-  {
-    DoutEntering(dc::evio, "ListenSocketDevice() [" << this << ']');
-  }
-
-public:
-  //---------------------------------------------------------------------------
   // Public methods:
   //
 
@@ -99,26 +87,58 @@ public:
 
   struct sockaddr const* get_bind_addr() const { return m_bind_addr; }
 
+ public:
+  struct VT_type : InputDevice::VT_type
+  {
+    bool (*_maybe_out_of_fds)(ListenSocketDevice* self);
+    // Called by read_from_fd() to actually spawn a SOCK_TYPE for the accepted fd.
+    void (*_spawn_accepted)(ListenSocketDevice* self, int fd, SocketAddress const& remote_address);        // Pure virtual.
+  };
+
+  struct VT_impl : InputDevice::VT_impl
+  {
+    // Called when the listen socket is ready to accept a new client.
+    //
+    // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
+    static void read_from_fd(InputDevice* self, int fd);                        // override
+
+    // This method is called when we are possibly out of filedescriptors.
+    // It should return `true' when this is true, and can optionally take
+    // some action by overriding this function.
+    //
+    // The default `listen_sockstream_dct::maybe_out_of_fds' returns
+    // true when `socket()' fails.
+    static bool maybe_out_of_fds(ListenSocketDevice* self);			// New virtual function.
+
+    // Virtual table of ListenSocketDevice.
+    static constexpr VT_type VT{
+      read_from_fd,
+      read_returned_zero,
+      read_error,
+      data_received,
+      maybe_out_of_fds,
+      /*spawn_accepted*/ nullptr
+    };
+  };
+
+  utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
+
 protected:
   //---------------------------------------------------------------------------
   // Protected events:
   //
 
-  // Called when the listen socket is ready to accept a new client.
-  //
-  // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
-  void read_from_fd(int fd) override;
+  bool maybe_out_of_fds() { return VT_ptr->_maybe_out_of_fds(this); }
+  void spawn_accepted(int fd, SocketAddress const& remote_address) { VT_ptr->_spawn_accepted(this, fd, remote_address); }
 
-  // Called by read_from_fd() to actually spawn a SOCK_TYPE for the accepted fd.
-  virtual void spawn_accepted(int fd, SocketAddress const& remote_address) = 0;
-
-  // This method is called when we are possibly out of filedescriptors.
-  // It should return `true' when this is true, and can optionally take
-  // some action by overriding this function.
+ public:
+  //---------------------------------------------------------------------------
+  // Constructors:
   //
-  // The default `listen_sockstream_dct::maybe_out_of_fds' returns
-  // true when `socket()' fails.
-  virtual bool maybe_out_of_fds();
+
+  // Make a ListenSocketDevice for association with a new TCP/IP socket.
+  // You need to call `listen' before it will actually do anything.
+  ListenSocketDevice() : VT_ptr(this) { DoutEntering(dc::evio, "ListenSocketDevice() [" << this << ']'); }
 };
 
 //=============================================================================
@@ -131,24 +151,50 @@ template<typename ACCEPTED_SOCKET>
 class ListenSocket : public ListenSocketDevice
 {
  public:
-  using ListenSocketDevice::ListenSocketDevice;
   using accepted_socket_type = ACCEPTED_SOCKET;
 
- private:
-  // Called from ListenSocketDevice::read_from_fd() to spawn the new socket.
-  void spawn_accepted(int fd, SocketAddress const& remote_address) override;
+ public:
+  struct VT_type : ListenSocketDevice::VT_type
+  {
+    void (*_new_connection)(ListenSocket* self, accepted_socket_type& accepted_socket);
+  };
+
+  struct VT_impl : ListenSocketDevice::VT_impl
+  {
+    // Called from ListenSocketDevice::read_from_fd() to spawn the new socket.
+    static void spawn_accepted(ListenSocketDevice* self, int fd, SocketAddress const& remote_address);
+
+    // Called when a new connection is accepted.
+    static void new_connection(ListenSocket* UNUSED_ARG(self), accepted_socket_type& UNUSED_ARG(accepted_socket)) { }
+
+    // Virtual table of ListenSocket.
+    static constexpr VT_type VT{
+      read_from_fd,
+      read_returned_zero,
+      read_error,
+      data_received,
+      maybe_out_of_fds,
+      spawn_accepted,
+      new_connection
+    };
+  };
+
+  utils::VTPtr<ListenSocket, ListenSocketDevice> VT_ptr;
 
  protected:
-  // Called when a new connection is accepted.
-  virtual void new_connection(accepted_socket_type& UNUSED_ARG(accepted_socket)) { }
+  void new_connection(accepted_socket_type& accepted_socket) { VT_ptr->_new_connection(this, accepted_socket); }
+
+ public:
+  ListenSocket() : VT_ptr(this) { }
 };
 
 template<typename ACCEPTED_SOCKET>
-void ListenSocket<ACCEPTED_SOCKET>::spawn_accepted(int fd, SocketAddress const& remote_address)
+void ListenSocket<ACCEPTED_SOCKET>::VT_impl::spawn_accepted(ListenSocketDevice* _self, int fd, SocketAddress const& remote_address)
 {
+  ListenSocket<ACCEPTED_SOCKET>* self = static_cast<ListenSocket<ACCEPTED_SOCKET>*>(_self);
   auto sock = create<ACCEPTED_SOCKET>();
   sock->init(fd, remote_address);
-  new_connection(*sock);
+  self->new_connection(*sock);
 }
 
 } // namespace evio

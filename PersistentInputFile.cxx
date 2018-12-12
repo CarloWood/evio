@@ -39,19 +39,20 @@ RefCountReleaser PersistentInputFile::closed()
 }
 
 // Read thread.
-RefCountReleaser PersistentInputFile::read_returned_zero()
+RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _self)
 {
-  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero() [" << this << ']');
-  RefCountReleaser releaser = stop_input_device();
+  PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
+  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero() [" << self << ']');
+  RefCountReleaser releaser = self->stop_input_device();
   // Add an inotify watch for modification of the corresponding path (if not already watched).
-  if (!is_watched() && !open_filename().empty())
+  if (!self->is_watched() && !self->open_filename().empty())
   {
-    if (add_watch(open_filename().c_str(), IN_MODIFY))
+    if (self->add_watch(self->open_filename().c_str(), IN_MODIFY))
     {
       if (releaser)
-        inhibit_deletion();     // Keep this object alive because the above call registered m_inotify as callback object.
+        self->inhibit_deletion();     // Keep this object alive because the above call registered m_inotify as callback object.
       releaser.reset();
-      Dout(dc::io, "Incremented ref count (now " << FileDescriptor::ref_count() << ") of this device [" << this << ']');
+      Dout(dc::io, "Incremented ref count (now " << self->FileDescriptor::ref_count() << ") of this device [" << self << ']');
     }
   }
   return releaser;

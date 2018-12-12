@@ -29,7 +29,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
+InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr), VT_ptr(this)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
@@ -171,30 +171,30 @@ RefCountReleaser InputDevice::close_input_device()
 }
 
 // Read thread.
-void InputDevice::read_from_fd(int fd)
+void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 {
-  DoutEntering(dc::evio, "InputDevice::read_from_fd(" << fd << ") [" << this << ']');
-  ssize_t space = m_ibuffer->dev2buf_contiguous();
+  DoutEntering(dc::evio, "InputDevice::read_from_fd(" << fd << ") [" << self << ']');
+  ssize_t space = self->m_ibuffer->dev2buf_contiguous();
   for (;;)
   {
     // Allocate more space in the buffer if needed.
     if (space == 0 &&
-        (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
+        (space = self->m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
       // The buffer is full!
-      stop_input_device();              // Stop reading the filedescriptor.
+      self->stop_input_device();        // Stop reading the filedescriptor.
       return;                           // Next time better.
     }
 
     ssize_t rlen;
-    char* new_data = m_ibuffer->dev2buf_ptr();
+    char* new_data = self->m_ibuffer->dev2buf_ptr();
 //try_again_read1:
     rlen = ::read(fd, new_data, space);
 
     if (rlen == 0)                      // EOF reached ?
     {
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
-      read_returned_zero();
+      self->read_returned_zero();
       return;                           // Next time better.
     }
 
@@ -206,20 +206,20 @@ void InputDevice::read_from_fd(int fd)
       //if (err == EINTR && !SignalServer::caught(SIGPIPE))
       //  goto try_again_read1;
       if (err != EAGAIN && err != EWOULDBLOCK)
-        read_error(err);
+        self->read_error(err);
       return;                           // Next time better.
     }
 
-    m_ibuffer->dev2buf_bump(rlen);
+    self->m_ibuffer->dev2buf_bump(rlen);
 
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
 
-    data_received(new_data, rlen);
+    self->data_received(new_data, rlen);
 
-    if (m_ibuffer->buffer_full())
+    if (self->m_ibuffer->buffer_full())
     {
       Dout(dc::evio, "fd " << fd << ": Buffer full!");
-      stop_input_device();
+      self->stop_input_device();
       // FIXME: This hangs !?
       return;
     }
@@ -234,43 +234,43 @@ void InputDevice::read_from_fd(int fd)
 }
 
 // Read thread.
-void InputDevice::data_received(char const* new_data, size_t rlen)
+void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << this << ']');
+  DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
   RefCountReleaser releaser;
   size_t len;
-  while ((len = m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
+  while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
   {
     // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
-    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_input_device_events_handler);
+    InputDecoder* input_decoder = static_cast<InputDecoder*>(self->m_input_device_events_handler);
     // We seem to have a complete new message and need to call `decode'
-    if (m_ibuffer->has_multiple_blocks())
+    if (self->m_ibuffer->has_multiple_blocks())
     {
       // The new message must start at the beginning of the buffer,
       // so the total length of the new message is total size of
       // the buffer minus what was read on top of it.
-      size_t msg_len = m_ibuffer->used_size() - (rlen - len);
+      size_t msg_len = self->m_ibuffer->used_size() - (rlen - len);
 
-      if (m_ibuffer->is_contiguous(msg_len))
+      if (self->m_ibuffer->is_contiguous(msg_len))
       {
-        MsgBlock msg_block(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node());
+        MsgBlock msg_block(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node());
         releaser += input_decoder->decode(msg_block);
-        m_ibuffer->raw_gbump(msg_len);
+        self->m_ibuffer->raw_gbump(msg_len);
       }
       else
       {
         MemoryBlock* memory_block = MemoryBlock::create(msg_len);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
-        m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
+        self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
         MsgBlock msg_block(memory_block->block_start(), msg_len, memory_block);
         releaser += input_decoder->decode(msg_block);
         memory_block->release();
       }
 
-      ASSERT(m_ibuffer->used_size() == rlen - len);
+      ASSERT(self->m_ibuffer->used_size() == rlen - len);
 
-      m_ibuffer->reduce_buf_if_empty();
-      if (is_disabled())
+      self->m_ibuffer->reduce_buf_if_empty();
+      if (self->is_disabled())
         return;
       rlen -= len;
       if (rlen == 0)
@@ -284,16 +284,16 @@ void InputDevice::data_received(char const* new_data, size_t rlen)
     // The next loop eats up all complete messages in this last block.
     do
     {
-      char* start = m_ibuffer->raw_gptr();
+      char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      MsgBlock msg_block(start, msg_len, m_ibuffer->get_get_area_block_node());
+      MsgBlock msg_block(start, msg_len, self->m_ibuffer->get_get_area_block_node());
       releaser += input_decoder->decode(msg_block);
-      m_ibuffer->raw_gbump(msg_len);
+      self->m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(m_ibuffer->used_size() == rlen - len);
+      ASSERT(self->m_ibuffer->used_size() == rlen - len);
 
-      m_ibuffer->reduce_buf_if_empty();
-      if (is_disabled())
+      self->m_ibuffer->reduce_buf_if_empty();
+      if (self->is_disabled())
         return;
       rlen -= len;
       if (rlen == 0)
