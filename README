@@ -1,0 +1,21 @@
+                                              std::streambuf
+                                                    |
+                                                    V
+                                      __________StreamBuf___________
+                                     |                              |
+                                     V                              V
+                                  Dev2Buf______          . . . . Buf2Dev
+size_t dev2buf_contiguous() const    |          \       .           |    size_t buf2dev_contiguous()
+size_t dev2buf_contiguous_forced()   |           \     .            |    size_t buf2dev_contiguous_forced()
+char*  dev2buf_ptr() const           |            \   .             |    char*  buf2dev_ptr() const 
+void   dev2buf_bump(int n)           |             \ .              |    void   buf2dev_bump(int n)
+void   reduce_buf_if_empty()         |              |               |    void   flush()
+                                     V              |               V
+                                InputBuffer         |         OutputBuffer
+                                                    V
+                                                LinkBuffer
+
+A LinkBuffer behaves as if it is derived from both, Dev2Buf and Buf2Dev
+and StreamBuf is a virtual base class (but it isn't). It has the same
+interface as Dev2Buf and Buf2Dev combined and it can be passed to
+functions that take a Dev2Buf& or a Buf2Dev&.
