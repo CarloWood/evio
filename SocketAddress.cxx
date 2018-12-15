@@ -299,10 +299,10 @@ int decode_port(std::string_view const sv, in_port_t& in_port)
   uint16_t port;
   std::from_chars_result result = std::from_chars(sv.data(), sv.data() + sv.size(), port);
   // Note: sv must be numeric port (in string form). Not a service name.
-  // Throw if there wasn't any digit, or if the result doesn't fit in a in_port_t.
+  // Throw if there wasn't any digit, or if the result doesn't fit in a uint16_t.
   if (AI_UNLIKELY(result.ec != std::errc()))
     THROW_ALERTC(result.ec, "decode_port: \"[PORT]\"", AIArgs("[PORT]", sv));
-  in_port = ntohs(port);
+  in_port = htons(port);
   return result.ptr - sv.data();
 }
 
@@ -343,7 +343,7 @@ void SocketAddress::deinit()
 // ddd.ddd.ddd.ddd:ppppp (optional brackets around ddd.ddd.ddd.ddd, but not recommended).
 // [hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh]:ppppp
 // [::ffff:ddd.ddd.ddd.ddd]:ppppp (the brackets are optional in this case).
-void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t sa_family, int port)
+void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t sa_family, int port_h)
 {
   // Don't call this function with an empty sockaddr_text.
   ASSERT(!sockaddr_text.empty());
@@ -351,7 +351,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
   if (AI_UNLIKELY(sa_family == AF_UNIX || first == '/'))
   {
     // Don't pass a port or a family other than AF_UNIX with a unix socket.
-    ASSERT((sa_family == AF_UNIX || sa_family == AF_UNSPEC) && port == -1);
+    ASSERT((sa_family == AF_UNIX || sa_family == AF_UNSPEC) && port_h == -1);
     make_sockaddr_un(sockaddr_text);
     return;
   }
@@ -386,7 +386,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     ++len;
   }
   in_port_t in_port;
-  if (port == -1)
+  if (port_h == -1)
   {
     // The port number must be separated by a colon.
     if (AI_UNLIKELY(len == sockaddr_text.size()))
@@ -415,11 +415,11 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     }
   }
   else
-    in_port = ntohs(port);
+    in_port = ntohs(port_h);
   if (AI_UNLIKELY(len != sockaddr_text.size()))
   {
     // Don't supply trailing characters.
-    if (port == -1)
+    if (port_h == -1)
       THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": trailing characters after port number",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
@@ -490,6 +490,23 @@ void SocketAddress::init(struct sockaddr const* sa_addr)
     }
     default:
       DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX.");
+  }
+}
+
+void SocketAddress::init(struct sockaddr const* sa_addr, uint16_t port)
+{
+  switch (sa_addr->sa_family)
+  {
+    case AF_INET:
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr_in));
+      reinterpret_cast<struct sockaddr_in*>(&m_sockaddr)->sin_port = htons(port);
+      break;
+    case AF_INET6:
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr_in6));
+      reinterpret_cast<struct sockaddr_in6*>(&m_sockaddr)->sin6_port = htons(port);
+      break;
+    default:
+      DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*, uint16_t): sa_family is not AF_INET or AF_INET6.");
   }
 }
 

@@ -61,12 +61,14 @@ class SocketAddress
   SocketAddress(sa_family_t sa_family, std::string_view sockaddr_text) { decode_sockaddr(sockaddr_text, sa_family); }
   // Force AF_INET or AF_INET6 and provide the port number separately.
   // sin_addr_text must be the address portion (for example "::1", or "192.168.1.1").
-  SocketAddress(std::string_view sin_addr_text, in_port_t port) { decode_sockaddr(sin_addr_text, AF_UNSPEC, port); }
+  SocketAddress(std::string_view sin_addr_text, uint16_t port) { decode_sockaddr(sin_addr_text, AF_UNSPEC, port); }
   // Same as above but force to socket family.
-  SocketAddress(sa_family_t sin_family, std::string_view sin_addr_text, in_port_t port) { decode_sockaddr(sin_addr_text, sin_family, port); }
+  SocketAddress(sa_family_t sin_family, std::string_view sin_addr_text, uint16_t port) { decode_sockaddr(sin_addr_text, sin_family, port); }
   // Construct a SocketAddress from a fully initialized struct sockaddr_in (AF_INET),
   // struct sockaddr_in6 (AF_INET6) or struct sockaddr_un (AF_UNIX).
   SocketAddress(struct sockaddr const* sa_addr) { init(sa_addr); }
+  // Same, but ignore the port number in sa_addr and use port instead.
+  SocketAddress(struct sockaddr const* sa_addr, uint16_t port) { init(sa_addr, port); }
   // Move constructor (only useful for AF_UNIX sockets).
   SocketAddress(SocketAddress&& other) { move(std::move(other)); }
   // Copy constructor.
@@ -108,10 +110,11 @@ class SocketAddress
 
  private:
   void deinit();
-  void decode_sockaddr(std::string_view sin_addr_text, sa_family_t sa_family, int port = -1);
+  void decode_sockaddr(std::string_view sin_addr_text, sa_family_t sa_family, int port_h = -1);
   void make_sockaddr_un(std::string_view sockaddr_text);
   void move(SocketAddress&& other);
   void init(struct sockaddr const* sa_addr);
+  void init(struct sockaddr const* sa_addr, uint16_t port);
   void init(SocketAddress const& other)
       { init(other.is_un() ? reinterpret_cast<struct sockaddr const*>(other.m_sockaddr_un_ptr)
                            : &other.m_sockaddr); }
