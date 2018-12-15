@@ -29,7 +29,7 @@
 
 namespace evio {
 
-OutputDevice::OutputDevice() : m_output_device_ptr(nullptr), m_obuffer(nullptr)
+OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obuffer(nullptr)
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
@@ -159,36 +159,37 @@ RefCountReleaser OutputDevice::close_output_device()
 }
 
 // Write `m_obuffer' to fd.
-void OutputDevice::write_to_fd(int fd)
+void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
 {
-  DoutEntering(dc::io, "OutputDevice::write_to_fd(" << fd << ") [" << this << ']');
+  DoutEntering(dc::io, "OutputDevice::write_to_fd(" << fd << ") [" << self << ']');
+  OutputBuffer* const obuffer = self->m_obuffer;
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {
     size_t len; // Available number of characters in current block.
-    if (!(len = m_obuffer->buf2dev_contiguous())
-        && !(len = m_obuffer->buf2dev_contiguous_forced()))
+    if (!(len = obuffer->buf2dev_contiguous())
+        && !(len = obuffer->buf2dev_contiguous_forced()))
     {
       Dout(dc::evio, "(Buffer now empty)");
       // Note: A call to `m_obuffer->reduce_buffer_if_empty' is not necessary because
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
       // which calls `ishowmanyc' which calls `iunderflow' which reduces the buffer
       // if necessary.
-      stop_output_device();	// Buffer is empty; stop watching the fd.
+      self->stop_output_device();	// Buffer is empty; stop watching the fd.
       return;
     }
 #if EWOULDBLOCK != EAGAIN
     int nr_eagain_errors = 1;
 try_again_write1:
 #endif
-    size_t wlen = ::write(fd, m_obuffer->buf2dev_ptr(), len);
+    size_t wlen = ::write(fd, obuffer->buf2dev_ptr(), len);
     if (wlen == (size_t)-1)
     {
       int err = errno;
 #ifdef CWDEBUG
-      if (!is_debug_channel())
+      if (!self->is_debug_channel())
       {
         Dout(dc::warning|error_cf,
-            "write(" << fd << ", " << buf2str(m_obuffer->buf2dev_ptr(), m_obuffer->buf2dev_contiguous()) << ", " << len << ')');
+            "write(" << fd << ", " << buf2str(obuffer->buf2dev_ptr(), obuffer->buf2dev_contiguous()) << ", " << len << ')');
       }
       else
         std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(err) << std::endl;
@@ -206,11 +207,11 @@ try_again_write1:
         return;
       }
 #endif
-      write_error(err);
+      self->write_error(err);
       return;
     }
-    Dout(dc::system, "write(" << fd << ", \"" << buf2str(m_obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
-    m_obuffer->buf2dev_bump(wlen);
+    Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
+    obuffer->buf2dev_bump(wlen);
     Dout(dc::evio, "Wrote " << wlen << " bytes to fd " << fd << '.' );
     if (wlen < len)
     {

@@ -46,6 +46,32 @@ class Socket;
 
 class Socket : public InputDevice, public OutputDevice
 {
+ public:
+  struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
+  {
+    void (*_connected)(Socket*);
+  };
+
+  struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
+  {
+    // Overridden to detect connects.
+    static void write_to_fd(OutputDevice* self, int fd);
+    // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
+    static void connected(Socket* self);
+
+    static constexpr VT_type VT{
+      read_from_fd,
+      read_returned_zero,
+      read_error,
+      data_received,
+      write_to_fd,
+      write_error,
+      connected
+    };
+  };
+
+  utils::VTPtr<Socket, InputDevice, OutputDevice> VT_ptr;
+
  protected:
   //---------------------------------------------------------------------------
   // Protected attributes
@@ -65,19 +91,6 @@ class Socket : public InputDevice, public OutputDevice
 
   // When set, call connected() as soon as fd is writable.
   bool m_signal_connected;
-
- public:
-  //---------------------------------------------------------------------------
-  // Constructor
-  //
-
-  Socket() : m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
-
-  // Associate this object with an existing and open socket `fd'.
-  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
-
-  // Create a socket(2), bind it to if_addr, and call init().
-  bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
 
  public:
   //---------------------------------------------------------------------------
@@ -106,11 +119,20 @@ class Socket : public InputDevice, public OutputDevice
   }
 
  protected:
-  // Overridden to detect connects.
-  void write_to_fd(int fd) override;
+  void connected() { VT_ptr->_connected(this); }
 
-  // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
-  virtual void connected();
+ public:
+  //---------------------------------------------------------------------------
+  // Constructor
+  //
+
+  Socket() : VT_ptr(this), m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
+
+  // Associate this object with an existing and open socket `fd'.
+  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
+
+  // Create a socket(2), bind it to if_addr, and call init().
+  bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
 };
 
 } // namespace evio

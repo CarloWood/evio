@@ -42,6 +42,50 @@ class InputDeviceEventsHandler;
 
 class InputDevice : public virtual FileDescriptor
 {
+ public:
+  struct VT_type
+  {
+    void (*_read_from_fd)(InputDevice* self, int fd);
+    RefCountReleaser (*_read_returned_zero)(InputDevice* self);
+    RefCountReleaser (*_read_error)(InputDevice* self, int err);
+    void (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
+  };
+
+  struct VT_impl
+  {
+    // Event: 'fd' is readable.
+    //
+    // This default implementation reads data from the fd into the buffer until
+    // 1) read(2) reads less than the available buffer space, or
+    // 2) read(2) returns 0.
+    // 3) The buffer is full and max_alloc was reached.
+    // When the buffer is full or when read(2) returns 0, stop_input_device is called.
+    // When read(2) returns 0 then (after calling stop_input_device) the virtual function
+    // read_returned_zero is called.
+    // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
+    // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
+    static void read_from_fd(InputDevice* self, int fd);
+
+    // The default behaviour is to close() the filedescriptor.
+    static RefCountReleaser read_returned_zero(InputDevice* self) { return self->close_input_device(); }        // Read thread.
+
+    // The default behaviour is to close() the filedescriptor.
+    static RefCountReleaser read_error(InputDevice* self, int UNUSED_ARG(err)) { return self->close(); }        // Read thread.
+
+    // The default behavior is to do nothing.
+    static void data_received(InputDevice* self, char const* new_data, size_t rlen);
+
+    // Virtual table of InputDevice.
+    static constexpr VT_type VT{
+      read_from_fd,
+      read_returned_zero,
+      read_error,
+      data_received
+    };
+  };
+
+  utils::VTPtr<InputDevice> VT_ptr;
+
  private:
   //---------------------------------------------------------------------------
   // Inferface with libev.
@@ -116,45 +160,6 @@ class InputDevice : public virtual FileDescriptor
     auto release_lock = EventLoopThread::temporary_release(EV_A);
     static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);
   }
-
- public:
-  struct VT_type
-  {
-    void (*_read_from_fd)(InputDevice* self, int fd);
-    RefCountReleaser (*_read_returned_zero)(InputDevice* self);
-    RefCountReleaser (*_read_error)(InputDevice* self, int err);
-    void (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
-  };
-
-  struct VT_impl
-  {
-    // Event: 'fd' is readable.
-    //
-    // This default implementation reads data from the fd into the buffer until
-    // 1) read(2) reads less than the available buffer space, or
-    // 2) read(2) returns 0.
-    // 3) The buffer is full and max_alloc was reached.
-    // When the buffer is full or when read(2) returns 0, stop_input_device is called.
-    // When read(2) returns 0 then (after calling stop_input_device) the virtual function
-    // read_returned_zero is called.
-    // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
-    // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
-    static void read_from_fd(InputDevice* self, int fd);
-
-    // The default behaviour is to close() the filedescriptor.
-    static RefCountReleaser read_returned_zero(InputDevice* self) { return self->close_input_device(); }        // Read thread.
-
-    // The default behaviour is to close() the filedescriptor.
-    static RefCountReleaser read_error(InputDevice* self, int UNUSED_ARG(err)) { return self->close(); }        // Read thread.
-
-    // The default behavior is to do nothing.
-    static void data_received(InputDevice* self, char const* new_data, size_t rlen);
-
-    // Virtual table of InputDevice.
-    static constexpr VT_type VT{read_from_fd, read_returned_zero, read_error, data_received};
-  };
-
-  utils::VTPtr<InputDevice> VT_ptr;
 
  protected:
   void read_from_fd(int fd) { VT_ptr->_read_from_fd(this, fd); }

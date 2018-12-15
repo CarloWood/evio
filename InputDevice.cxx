@@ -29,7 +29,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr), VT_ptr(this)
+InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.

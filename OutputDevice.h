@@ -27,6 +27,7 @@
 #include "EventLoopThread.h"
 #include "libev-4.24/ev.h"
 #include "StreamBuf.h"
+#include "utils/VTPtr.h"
 
 namespace evio {
 
@@ -35,6 +36,39 @@ class OutputBuffer;
 
 class OutputDevice : public virtual FileDescriptor
 {
+ public:
+  struct VT_type
+  {
+    void (*_write_to_fd)(OutputDevice*, int);
+    void (*_write_error)(OutputDevice*, int);
+  };
+
+  struct VT_impl
+  {
+    // Event: fd is writable.
+    //
+    // This default implementation writes data from the buffer to the fd until
+    // 1) the buffer is empty, or
+    // 2) write(2) wrote less than the number of bytes passed to it, or
+    // 3) write(2) returned an error other than EAGAIN or EINTR, or
+    // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
+    // 5) write(2) returned EINTR caused by SIGPIPE.
+    // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
+    // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
+    static void write_to_fd(OutputDevice* self, int fd);
+
+    // This default implementation `close's the object (which removes it).
+    static void write_error(OutputDevice* self, int UNUSED_ARG(err)) { self->close(); }
+
+    // Virtual table of OutputDevice.
+    static constexpr VT_type VT{
+      write_to_fd,
+      write_error
+    };
+  };
+
+  utils::VTPtr<OutputDevice> VT_ptr;
+
  private:
   //---------------------------------------------------------------------------
   // Inferface with libev.
@@ -121,20 +155,8 @@ class OutputDevice : public virtual FileDescriptor
   }
 
  protected:
-  // Event: fd is writable.
-  //
-  // This default implementation writes data from the buffer to the fd until
-  // 1) the buffer is empty, or
-  // 2) write(2) wrote less than the number of bytes passed to it, or
-  // 3) write(2) returned an error other than EAGAIN or EINTR, or
-  // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
-  // 5) write(2) returned EINTR caused by SIGPIPE.
-  // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
-  // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-  virtual void write_to_fd(int fd);
-
-  // This default implementation `close's the object (which removes it).
-  virtual void write_error(int UNUSED_ARG(err)) { close(); }
+  void write_to_fd(int fd) { VT_ptr->_write_to_fd(this, fd); }
+  void write_error(int err) { VT_ptr->_write_error(this, err); }
 
   // Called from the streambuf associated with this device when pubsync() is called on it.
   friend class Buf2Dev;

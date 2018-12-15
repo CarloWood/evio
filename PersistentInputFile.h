@@ -47,7 +47,9 @@ class PersistentInputFile : public File, private INotify
       read_from_fd,
       read_returned_zero,
       read_error,
-      data_received
+      data_received,
+      write_to_fd,
+      write_error
     };
   };
 

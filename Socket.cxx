@@ -117,22 +117,24 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
     start_output_device();
 }
 
-void Socket::write_to_fd(int fd)
+void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 {
-  if (AI_UNLIKELY(m_signal_connected))
+  Socket* self = static_cast<Socket*>(_self);
+  if (AI_UNLIKELY(self->m_signal_connected))
   {
-    m_signal_connected = false;
-    connected();
-    if (!m_obuffer || m_obuffer->buffer_empty())
+    self->m_signal_connected = false;
+    self->connected();
+    if (!self->m_obuffer || self->m_obuffer->buffer_empty())
     {
-      stop_output_device();
+      self->stop_output_device();
       return;
     }
   }
-  OutputDevice::write_to_fd(fd);
+  // Call base class implementation.
+  OutputDevice::VT_impl::write_to_fd(_self, fd);
 }
 
-void Socket::connected()
+void Socket::VT_impl::connected(Socket* UNUSED_ARG(self))
 {
   DoutEntering(dc::evio, "Socket::connected()");
   // Derive from Socket to implement this.
