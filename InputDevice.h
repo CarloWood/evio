@@ -51,7 +51,7 @@ class InputDevice : public virtual FileDescriptor
     void (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
   };
 
-  struct VT_impl
+  struct VT_impl : virtual utils::VT_base
   {
     // Event: 'fd' is readable.
     //
@@ -82,6 +82,9 @@ class InputDevice : public virtual FileDescriptor
       read_error,
       data_received
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<InputDevice> VT_ptr;

@@ -57,6 +57,9 @@ class File : public InputDevice, public OutputDevice
       write_to_fd,
       write_error
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<File, InputDevice, OutputDevice> VT_ptr;

@@ -51,6 +51,9 @@ class PersistentInputFile : public File, private INotify
       write_to_fd,
       write_error
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<PersistentInputFile, File> VT_ptr;

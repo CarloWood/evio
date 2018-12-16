@@ -43,7 +43,7 @@ class OutputDevice : public virtual FileDescriptor
     void (*_write_error)(OutputDevice*, int);
   };
 
-  struct VT_impl
+  struct VT_impl : virtual utils::VT_base
   {
     // Event: fd is writable.
     //
@@ -65,6 +65,9 @@ class OutputDevice : public virtual FileDescriptor
       write_to_fd,
       write_error
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<OutputDevice> VT_ptr;

@@ -68,6 +68,9 @@ class Socket : public InputDevice, public OutputDevice
       write_error,
       connected
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<Socket, InputDevice, OutputDevice> VT_ptr;

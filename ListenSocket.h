@@ -119,6 +119,9 @@ class ListenSocketDevice : public InputDevice
       maybe_out_of_fds,
       /*spawn_accepted*/ nullptr
     };
+
+    // Allow copying this virtual table.
+    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
 
   utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
