@@ -45,13 +45,14 @@ class InputDevice : public virtual FileDescriptor
  public:
   struct VT_type
   {
+    void* _input_user_data;     // Only use this after cloning a virtual table.
     void (*_read_from_fd)(InputDevice* self, int fd);
     RefCountReleaser (*_read_returned_zero)(InputDevice* self);
     RefCountReleaser (*_read_error)(InputDevice* self, int err);
     void (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
   };
 
-  struct VT_impl : virtual utils::VT_base
+  struct VT_impl
   {
     // Event: 'fd' is readable.
     //
@@ -59,11 +60,10 @@ class InputDevice : public virtual FileDescriptor
     // 1) read(2) reads less than the available buffer space, or
     // 2) read(2) returns 0.
     // 3) The buffer is full and max_alloc was reached.
-    // When the buffer is full or when read(2) returns 0, stop_input_device is called.
-    // When read(2) returns 0 then (after calling stop_input_device) the virtual function
-    // read_returned_zero is called.
-    // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
-    // EAGAIN or EWOULDBLOCK it calls the virtual function read_error, see below.
+    // When the buffer is full stop_input_device is called.
+    // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
+    // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
+    // it calls the virtual function read_error, see below.
     static void read_from_fd(InputDevice* self, int fd);
 
     // The default behaviour is to close() the filedescriptor.
@@ -77,15 +77,17 @@ class InputDevice : public virtual FileDescriptor
 
     // Virtual table of InputDevice.
     static constexpr VT_type VT{
+      /*InputDevice*/
+      nullptr,
       read_from_fd,
       read_returned_zero,
       read_error,
       data_received
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
 
   utils::VTPtr<InputDevice> VT_ptr;
 

@@ -49,29 +49,44 @@ class Socket : public InputDevice, public OutputDevice
  public:
   struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
   {
-    void (*_connected)(Socket*);
+    void (*_connected)(Socket*, bool);
+    void (*_disconnected)(Socket*, bool success);
   };
 
   struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
   {
+    // Overridden to detect successful connections.
+    static void read_from_fd(InputDevice* _self, int fd);
+    // Overridden to detect connection termination.
+    static RefCountReleaser read_returned_zero(InputDevice* _self);
+    // Overridden to detect connect failures and connection abortions.
+    static RefCountReleaser read_error(InputDevice* _self, int err);
     // Overridden to detect connects.
-    static void write_to_fd(OutputDevice* self, int fd);
+    static void write_to_fd(OutputDevice* _self, int fd);
     // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
-    static void connected(Socket* self);
+    static void connected(Socket* self, bool success);
+    // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
+    static void disconnected(Socket* self, bool success);
 
     static constexpr VT_type VT{
-      read_from_fd,
-      read_returned_zero,
-      read_error,
-      data_received,
-      write_to_fd,
-      write_error,
-      connected
+      /*Socket*/
+        /*InputDevice*/
+        nullptr,
+        read_from_fd,
+        read_returned_zero,
+        read_error,
+        data_received,
+        /*OutputDevice*/
+        nullptr,
+        write_to_fd,
+        write_error,
+      connected,
+      disconnected
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
 
   utils::VTPtr<Socket, InputDevice, OutputDevice> VT_ptr;
 
@@ -93,7 +108,10 @@ class Socket : public InputDevice, public OutputDevice
   size_t m_sndbuf_size;
 
   // When set, call connected() as soon as fd is writable.
-  bool m_signal_connected;
+  int m_connected_flags;
+  static constexpr int signal_connected = 1;
+  static constexpr int is_connected = 2;
+  static constexpr int is_disconnected = 4;
 
  public:
   //---------------------------------------------------------------------------
@@ -122,7 +140,8 @@ class Socket : public InputDevice, public OutputDevice
   }
 
  protected:
-  void connected() { VT_ptr->_connected(this); }
+  void connected(bool success) { VT_ptr->_connected(this, success); }
+  void disconnected(bool success) { VT_ptr->_disconnected(this, success); }
 
  public:
   //---------------------------------------------------------------------------
@@ -135,7 +154,7 @@ class Socket : public InputDevice, public OutputDevice
   void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
 
   // Create a socket(2), bind it to if_addr, and call init().
-  bool connect(SocketAddress socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
+  bool connect(SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
 };
 
 } // namespace evio

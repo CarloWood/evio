@@ -50,17 +50,21 @@ class File : public InputDevice, public OutputDevice
   {
     // Virtual table of File.
     static constexpr VT_type VT{
+      /*InputDevice*/
+      nullptr,
       read_from_fd,
       read_returned_zero,
       read_error,
       data_received,
+      /*OutputDevice*/
+      nullptr,
       write_to_fd,
       write_error
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
 
   utils::VTPtr<File, InputDevice, OutputDevice> VT_ptr;
 

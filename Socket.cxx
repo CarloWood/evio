@@ -33,7 +33,7 @@
 
 namespace evio {
 
-bool Socket::connect(SocketAddress remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
+bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
 {
   if (is_open())
     return false;
@@ -50,7 +50,10 @@ bool Socket::connect(SocketAddress remote_address, size_t rcvbuf_size, size_t sn
   if (!if_addr.is_unspecified())
   {
     if (bind(fd, if_addr, size_of_addr(if_addr)) == -1)
-      DoutFatal(dc::fatal|error_cf, "bind: " << if_addr);
+    {
+      Dout(dc::warning|error_cf, "bind: " << if_addr);
+      return false;
+    }
   }
 
   Dout(dc::system|continued_cf, "connect(" << fd << ", " << remote_address << ", " << size_of_addr(remote_address) << ") = ");
@@ -88,7 +91,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
 
   m_rcvbuf_size = rcvbuf_size;
   m_sndbuf_size = sndbuf_size;
-  m_signal_connected = signal_connected;
+  m_connected_flags = signal_connected;
 
   if (remote_address.is_ip())
   {
@@ -113,31 +116,81 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   FileDescriptor::init(fd);     // link in
   if (m_ibuffer)
     start_input_device();
-  if (m_signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))
+  if (signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))
     start_output_device();
+}
+
+void Socket::VT_impl::read_from_fd(InputDevice* _self, int fd)
+{
+  Socket* self = static_cast<Socket*>(_self);
+  // This is false when signal_connected is set, because in that case we monitor
+  // this socket for writablity and use that to detect when it is connected.
+  // Otherwise it is only true at most once.
+  if (AI_UNLIKELY(!(self->m_connected_flags & (signal_connected|is_connected))))
+  {
+    self->m_connected_flags |= is_connected;
+  }
+  // Call base class implementation.
+  InputDevice::VT_impl::read_from_fd(_self, fd);
 }
 
 void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 {
   Socket* self = static_cast<Socket*>(_self);
-  if (AI_UNLIKELY(self->m_signal_connected))
+  if (AI_UNLIKELY(!(self->m_connected_flags & is_connected)))
   {
-    self->m_signal_connected = false;
-    self->connected();
-    if (!self->m_obuffer || self->m_obuffer->buffer_empty())
+    // As soon as we can write to a file descriptor, we are connected.
+    self->m_connected_flags |= is_connected;
+    if ((self->m_connected_flags & signal_connected))
     {
-      self->stop_output_device();
-      return;
+      self->connected(true);    // Signal successful connect.
+      // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
+      if (!self->m_obuffer || self->m_obuffer->buffer_empty())
+      {
+        self->stop_output_device();
+        return;
+      }
     }
   }
   // Call base class implementation.
   OutputDevice::VT_impl::write_to_fd(_self, fd);
 }
 
-void Socket::VT_impl::connected(Socket* UNUSED_ARG(self))
+void Socket::VT_impl::connected(Socket* DEBUG_ONLY(self), bool success)
 {
-  DoutEntering(dc::evio, "Socket::connected()");
+  DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
   // Derive from Socket to implement this.
+}
+
+RefCountReleaser Socket::VT_impl::read_returned_zero(InputDevice* _self)
+{
+  Socket* self = static_cast<Socket*>(_self);
+  DoutEntering(dc::evio, "Socket::read_returned_zero() [" << self << "]");
+  self->m_connected_flags |= is_disconnected;
+  RefCountReleaser releaser = self->close();
+  self->disconnected(true);     // Clean termination.
+  return releaser;
+}
+
+RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int err)
+{
+  Socket* self = static_cast<Socket*>(_self);
+  DoutEntering(dc::evio, "Socket::read_error(" << err << ") [" << self << "]");
+  RefCountReleaser releaser = self->close();
+  if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
+    self->connected(false);     // Signal connect failure.
+  if ((self->m_connected_flags & is_connected))
+  {
+    self->m_connected_flags |= is_disconnected;
+    self->disconnected(false);  // Unclean termination.
+  }
+  return releaser;
+}
+
+void Socket::VT_impl::disconnected(Socket* DEBUG_ONLY(self), bool success)
+{
+  DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
+  // Clone VT and override to implement this.
 }
 
 SocketAddress Socket::local_address() const

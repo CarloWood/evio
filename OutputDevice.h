@@ -39,11 +39,12 @@ class OutputDevice : public virtual FileDescriptor
  public:
   struct VT_type
   {
+    void* _output_user_data;    // Only use this after cloning a virtual table.
     void (*_write_to_fd)(OutputDevice*, int);
     void (*_write_error)(OutputDevice*, int);
   };
 
-  struct VT_impl : virtual utils::VT_base
+  struct VT_impl
   {
     // Event: fd is writable.
     //
@@ -62,13 +63,15 @@ class OutputDevice : public virtual FileDescriptor
 
     // Virtual table of OutputDevice.
     static constexpr VT_type VT{
+      /*OutputDevice*/
+      nullptr,
       write_to_fd,
       write_error
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
 
   utils::VTPtr<OutputDevice> VT_ptr;
 

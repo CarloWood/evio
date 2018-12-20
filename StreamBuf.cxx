@@ -123,6 +123,7 @@ void StreamBuf::printOn(ostream& os) const
 }
 #endif
 
+// Write thread.
 StreamBuf::int_type StreamBuf::overflow(int_type c)
 {
   DoutEntering(dc::evio, "StreamBuf::overflow(" << char2str(c) << ") [" << (void*)this << ']');
@@ -143,6 +144,7 @@ StreamBuf::int_type StreamBuf::overflow(int_type c)
   return 0;
 }
 
+// Read thread.
 int StreamBuf::iunderflow()
 {
   DoutEntering(dc::evio, "iunderflow() [" << (void*)this << ']');
@@ -197,6 +199,7 @@ int StreamBuf::iunderflow()
   return 0;
 }
 
+// Read thread.
 StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 {
   DoutEntering(dc::evio|continued_cf, "ipbackfail(" << c << ") [" << (void*)this << ']');
@@ -240,6 +243,7 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
   return 0;
 }
 
+// Read thread.
 std::streamsize StreamBuf::ishowmanyc()
 {
   if (get_area_block_node == put_area_block_node)
@@ -249,6 +253,7 @@ std::streamsize StreamBuf::ishowmanyc()
   return iegptr() - igptr();
 }
 
+// Read thread.
 streamsize StreamBuf::ixsgetn(char* s, streamsize n)
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::ixsgetn(s, " << n << ") [" << (void*)this << "]... ");
@@ -338,6 +343,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
   return len + left;
 }
 
+// Write thread.
 streamsize StreamBuf::xsputn(char const* s, streamsize n)
 {
   DoutEntering(dc::evio, "StreamBuf::xsputn(\"" << buf2str(s, n) << "\", " << n << ") [" << (void*)this << ']');
@@ -422,6 +428,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, siz
   m_odevice = nullptr;
 }
 
+// Read or write size.
 size_t StreamBuf::new_block_size() const
 {
   size_t nl = used_size();
@@ -436,6 +443,7 @@ size_t StreamBuf::new_block_size() const
   return nl - malloc_overhead_c - sizeof(MemoryBlock);
 }
 
+// Read thread.
 void StreamBuf::reduce_buffer()
 {
   size_t new_block_size = minimum_block_size();

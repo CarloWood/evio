@@ -112,17 +112,20 @@ class ListenSocketDevice : public InputDevice
 
     // Virtual table of ListenSocketDevice.
     static constexpr VT_type VT{
-      read_from_fd,
-      read_returned_zero,
-      read_error,
-      data_received,
+      /*ListenSocketDevice*/
+        /*InputDevice*/
+        nullptr,
+        read_from_fd,
+        read_returned_zero,
+        read_error,
+        data_received,
       maybe_out_of_fds,
-      /*spawn_accepted*/ nullptr
+      nullptr   // _spawn_accepted
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
 
   utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
 
@@ -172,12 +175,16 @@ class ListenSocket : public ListenSocketDevice
 
     // Virtual table of ListenSocket.
     static constexpr VT_type VT{
-      read_from_fd,
-      read_returned_zero,
-      read_error,
-      data_received,
-      maybe_out_of_fds,
-      spawn_accepted,
+      /*ListenSocket*/
+        /*ListenSocketDevice*/
+          /*InputDevice*/
+          nullptr,
+          read_from_fd,
+          read_returned_zero,
+          read_error,
+          data_received,
+        maybe_out_of_fds,
+        spawn_accepted,         // Overridden
       new_connection
     };
   };

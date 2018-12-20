@@ -78,7 +78,7 @@ int OutputDevice::get_output_fd() const
 void OutputDevice::start_output_device()
 {
   DoutEntering(dc::io, "OutputDevice::start_output_device() [" << this << ']');
-  // Call OutputDevice::init before calling OutputDevice::start.
+  // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(m_output_watcher.events != EV_UNDEF);
   if (EventLoopThread::start_if_not_active(m_output_watcher))
   {

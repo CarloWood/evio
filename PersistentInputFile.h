@@ -44,17 +44,22 @@ class PersistentInputFile : public File, private INotify
 
     // Virtual table of PersistentInputFile.
     static constexpr File::VT_type VT{
-      read_from_fd,
-      read_returned_zero,
-      read_error,
-      data_received,
-      write_to_fd,
-      write_error
+      /*File*/
+        /*InputDevice*/
+        nullptr,
+        read_from_fd,
+        read_returned_zero,
+        read_error,
+        data_received,
+        /*OutputDevice*/
+        nullptr,
+        write_to_fd,
+        write_error
     };
-
-    // Allow copying this virtual table.
-    std::shared_ptr<utils::VT_base> copy() const override { return copy_vt<VT_impl>(); }
   };
+
+  // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
 
   utils::VTPtr<PersistentInputFile, File> VT_ptr;
 
