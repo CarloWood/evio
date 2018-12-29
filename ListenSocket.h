@@ -189,6 +189,9 @@ class ListenSocket : public ListenSocketDevice
     };
   };
 
+  // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
+
   utils::VTPtr<ListenSocket, ListenSocketDevice> VT_ptr;
 
  protected:

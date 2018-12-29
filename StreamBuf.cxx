@@ -144,7 +144,7 @@ StreamBuf::int_type StreamBuf::overflow(int_type c)
   return 0;
 }
 
-// Read thread.
+// BRT
 int StreamBuf::iunderflow()
 {
   DoutEntering(dc::evio, "iunderflow() [" << (void*)this << ']');
@@ -163,6 +163,7 @@ int StreamBuf::iunderflow()
       Dout(dc::evio, "Returning EOF");
       return EOF;
     }
+    // Apparently the egptr wasn't up to date (underflow should only be called when gptr == egptr).
     isetg(ieback(), igptr(), pptr());
   }
   else
@@ -199,7 +200,7 @@ int StreamBuf::iunderflow()
   return 0;
 }
 
-// Read thread.
+// BRT.
 StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
 {
   DoutEntering(dc::evio|continued_cf, "ipbackfail(" << c << ") [" << (void*)this << ']');
@@ -243,7 +244,7 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
   return 0;
 }
 
-// Read thread.
+// BRT.
 std::streamsize StreamBuf::ishowmanyc()
 {
   if (get_area_block_node == put_area_block_node)
@@ -335,7 +336,7 @@ streamsize StreamBuf::ixsgetn(char* s, streamsize n)
   }
   memcpy(s, pbase(), left);
   isetg(pbase(), pbase(), pbase());	// Buffer empty, set pointers to start of single block.
-  pbump(-left);				//
+  setp(pbase(), epptr());		//
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
@@ -418,7 +419,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, siz
     log2_min_buf_size++;
     minimum_blocksize = minimum_blocksize >> 1;
   }
-  output_buffer.push_front((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
+  output_buffer.push_back((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
   get_area_block_node = put_area_block_node = output_buffer.front();
   input_streambuf = this;
   char* start = get_area_block_node->block_start();
@@ -428,7 +429,7 @@ StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, siz
   m_odevice = nullptr;
 }
 
-// Read or write size.
+// Calculate new block size for our output_buffer.
 size_t StreamBuf::new_block_size() const
 {
   size_t nl = used_size();
@@ -443,23 +444,14 @@ size_t StreamBuf::new_block_size() const
   return nl - malloc_overhead_c - sizeof(MemoryBlock);
 }
 
-// Read thread.
 void StreamBuf::reduce_buffer()
 {
   size_t new_block_size = minimum_block_size();
-  if (get_area_block_node->used() == 1)		// Only used by buffer
+  // There is only one block (get_area_block_node == put_area_block_node), see StreamBuf::iunderflow.
+  if (get_area_block_node->get_size() > new_block_size)
   {
-    // Reuse the same block (slightly faster then allocating a new block)
-    if (get_area_block_node->get_size() > new_block_size)
-      output_buffer.reduce_total_block_size(get_area_block_node->reduce_block(new_block_size));
-  }
-  else
-  {
-    // Release the current block
-    output_buffer.pop_front();
-    // Allocate a new block
-    output_buffer.push_back(new_block_size);
-    get_area_block_node = put_area_block_node = output_buffer.back();	// There is only a single block
+    output_buffer.reduce_single_block_size(new_block_size);
+    get_area_block_node = put_area_block_node = output_buffer.back();
   }
   char* start = get_area_block_node->block_start();
   isetg(start, start, start);

@@ -52,7 +52,8 @@ class InputDeviceEventsHandler
   virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t, size_t)
       { /* Should never be called */ return nullptr; }
 
-  // Returns the size of the first message, or 0 if there is no complete message.
+  // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
+  // BRT.
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 
@@ -71,6 +72,9 @@ class InputDecoder : public InputDeviceEventsHandler
     return input_buffer;
   }
 
+  // Given the char array new_data of size rlen, returns the length of the string (starting a new_data) up to and
+  // including the first newline, char if any. Otherwise returns 0.
+  // BRT.
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override
   {
     char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
@@ -78,7 +82,7 @@ class InputDecoder : public InputDeviceEventsHandler
   }
 
   friend class InputDevice;
-  virtual RefCountReleaser decode(MsgBlock msg) = 0;
+  virtual RefCountReleaser decode(MsgBlock&& msg) = 0;
 };
 
 } // namespace evio

@@ -116,7 +116,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   FileDescriptor::init(fd);     // link in
   if (m_ibuffer)
     start_input_device();
-  if (signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))
+  if (signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))  // Must be the same thread as the thread that created the buffer.
     start_output_device();
 }
 
@@ -134,6 +134,7 @@ void Socket::VT_impl::read_from_fd(InputDevice* _self, int fd)
   InputDevice::VT_impl::read_from_fd(_self, fd);
 }
 
+// Read thread.
 void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 {
   Socket* self = static_cast<Socket*>(_self);

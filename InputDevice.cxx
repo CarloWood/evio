@@ -170,7 +170,7 @@ RefCountReleaser InputDevice::close_input_device()
   return releaser;
 }
 
-// Read thread.
+// BWT.
 void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 {
   DoutEntering(dc::evio, "InputDevice::read_from_fd(" << fd << ") [" << self << ']');
@@ -214,6 +214,8 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
 
+    // The data is now in the buffer. This is where we becomes the reading thread.
+    // BRWT.
     self->data_received(new_data, rlen);
 
     if (self->m_ibuffer->buffer_full())
@@ -233,7 +235,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
   }
 }
 
-// Read thread.
+// BRWT.
 void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
@@ -253,8 +255,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
 
       if (self->m_ibuffer->is_contiguous(msg_len))
       {
-        MsgBlock msg_block(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node());
-        releaser += input_decoder->decode(msg_block);
+        releaser += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -262,14 +263,13 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
         MemoryBlock* memory_block = MemoryBlock::create(msg_len);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        MsgBlock msg_block(memory_block->block_start(), msg_len, memory_block);
-        releaser += input_decoder->decode(msg_block);
+        releaser += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
       ASSERT(self->m_ibuffer->used_size() == rlen - len);
 
-      self->m_ibuffer->reduce_buf_if_empty();
+      self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (self->is_disabled())
         return;
       rlen -= len;
@@ -286,13 +286,12 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      MsgBlock msg_block(start, msg_len, self->m_ibuffer->get_get_area_block_node());
-      releaser += input_decoder->decode(msg_block);
+      releaser += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
       self->m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(self->m_ibuffer->used_size() == rlen - len);
 
-      self->m_ibuffer->reduce_buf_if_empty();
+      self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (self->is_disabled())
         return;
       rlen -= len;

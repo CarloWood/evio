@@ -3,7 +3,7 @@
 //! @file
 //! @brief Declaration of namespace evio; class MemoryBlocksBuffer, MsgBlock, StreamBuf, InputBuffer, OutputBuffer and LinkBuffer.
 //
-// Copyright (C) 2004, 2018 Carlo Wood.
+// Copyright (C) 2018 Carlo Wood.
 //
 // RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
 // Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -25,12 +25,12 @@
 
 #include "sys.h"
 #include "debug.h"
-#include <deque>
-#include <cstdlib>              // Needed for malloc(2) etc.
-#include <streambuf>
-#include <new>
-#include <iostream>
-#include <unistd.h>             // Needed for read(2) and write(2)
+#include "utils/log2.h"
+#include "utils/malloc_size.h"
+#include "utils/is_power_of_two.h"
+#include "utils/nearest_power_of_two.h"
+#include <atomic>
+#include <mutex>
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -40,14 +40,6 @@ NAMESPACE_DEBUG_CHANNELS_END
 
 namespace evio {
 
-//!
-// @brief The memory overhead of a call to malloc() in bytes.
-//
-// Determined during configuration. When N bytes are allocated
-// with malloc(N) then it reality N + malloc_overhead_c bytes
-// are used.
-static constexpr int malloc_overhead_c = CW_MALLOC_OVERHEAD;
-
 // Forward declarations.
 class FileDescriptor;
 class InputDevice;
@@ -55,255 +47,305 @@ class OutputDevice;
 class MsgBlock;
 class StreamBuf;
 
+// The memory overhead of a call to malloc() in bytes.
+//
+// Determined during configuration. When N bytes are allocated with malloc(N) then in
+// reality N + malloc_overhead_c bytes are used.
+static constexpr size_t malloc_overhead_c = CW_MALLOC_OVERHEAD;
+
 //=============================================================================
 //
-// struct MemoryBlock
+// class MemoryBlock
 //
-// Dynamically allocated memory block
+// A reference counted memory block.
 //
+// The object is put at the beginning of a large(r) dynamically allocated
+// memory block.
+//
+// A MemoryBlock* points to a single contiguous memory block allocated with
+// malloc, where at the top a MemoryBlock object was created with placement new.
+//
+//                                             Allocated size with malloc().
+//                   ___________________      /
+// MemoryBlock* --> |                   |  ^  ^  ^  sizeof MemoryBlock.
+//                  |   A MemoryBlock   |  |  |  |__/
+//                  |                   |  |  |  v
+//                  +-------------------+  |  |---
+// block_start() -> |                   |  |  |  ^  m_block_size.
+//                  |         ^         |  |  |  |__/
+//                  |         |         |  |  |  |
+//                  |     char data     |  |  |  |
+//                  |         |         |  |  |  |
+//                  |         v         |  |  |  |
+//                  |                   |  |  |  |
+//                  |___________________|  |  v  v
+//                  | malloc_overhead_c |  |  \  \__ block_size
+//                  |___________________|  v   \____ alloc_size
+//                                          \_______ heap_size
+//
+// We want the data block to aligned as size_t, so sizeof(MemoryBlock) is
+// a multiple of sizeof(size_t).
 
-//
-// This object uses a somewhat dirty programming trick.
-// This object is put at the beginning of a large memory block that is
-// allocated with malloc.
-//
-
-struct MemoryBlock
+class MemoryBlock
 {
-  friend class MsgBlock;        // Needs access to used_cnt;
+  friend class MsgBlock;                // Needs access to create/add_reference/release.
+  friend class MemoryBlocksBuffer;      // Needs access to create/release.
+  friend class InputDevice;             // Needs access to create/release.
+
  private:
-  //---------------------------------------------------------------------------
-  // Attributes
-  //
+  mutable std::atomic<int> m_count;     // Reference counter.
+  size_t const m_block_size;            // Size of buffer area of this block in bytes.
+  std::atomic<MemoryBlock*> m_next;     // The next block in the list, or nullptr if this was the last.
 
-  size_t block_size;            // Size of allocated block in bytes
-  unsigned int used_cnt;        // Reference counter
+  MemoryBlock(size_t block_size) : m_count(1), m_block_size(block_size), m_next(nullptr) { }
+  MemoryBlock(MemoryBlock const&) = delete;
+  MemoryBlock& operator=(MemoryBlock const&) = delete;
 
- public:
-  //---------------------------------------------------------------------------
-  // Constructors/destructor/assigment
-  //
-
-  static MemoryBlock* create(size_t size)
+  // Create a new memory block with a reference count of 1 and a block size of block_size.
+  // This initial pointer is stored in the MemoryBlocksBuffer that this MemoryBlock belongs to.
+  // The returned MemoryBlock can be viewed as a list containing a single block.
+  static MemoryBlock* create(size_t block_size)
   {
-    MemoryBlock* memory_block = (MemoryBlock*)malloc(sizeof(MemoryBlock) + size);
-    AllocTag((char*)memory_block, "MemoryBlock (" << sizeof(MemoryBlock) << " bytes) + buffer allocation");
-    memory_block->block_size = size;
-    memory_block->used_cnt = 1;
+    // The caller is responsible to make this work.
+    ASSERT(utils::is_power_of_two(sizeof(MemoryBlock) + block_size + malloc_overhead_c) ||
+           (sizeof(MemoryBlock) + block_size + malloc_overhead_c) % 4096 == 0);
+    // No mutex locking is required while creating a new memory block.
+    MemoryBlock* memory_block = (MemoryBlock*)malloc(sizeof(MemoryBlock) + block_size);
+    AllocTag1(memory_block);
+    new (memory_block) MemoryBlock(block_size);
     return memory_block;
   }
 
-  void release()
+  // Increment reference count by one. Called for every MsgBlock object that is created.
+  void add_reference() const
   {
-    if (--used_cnt == 0)
-      free(this);
+    m_count.fetch_add(1, std::memory_order_relaxed);
   }
 
- private: // Don't use any of default stuff!
-  MemoryBlock() = delete;
-  MemoryBlock(MemoryBlock const&) = delete;
-  ~MemoryBlock() = delete;
-  MemoryBlock& operator=(MemoryBlock const&) = delete;
+  // Decrement reference count by one. Called when a MsgBlock is destructed and/or when
+  // this MemoryBlock is removed from its MemoryBlocksBuffer.
+  void release() const
+  {
+    if (m_count.fetch_sub(1, std::memory_order_release) == 1)
+    {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      // The object should be delinked before being released.
+      ASSERT(m_next == nullptr);
+      this->~MemoryBlock();
+      free(const_cast<MemoryBlock*>(this));
+    }
+  }
 
  public:
-  //---------------------------------------------------------------------------
-  // Public accessors
-  //
-
-  // Returns the start of the allocated memory block.
+  // Returns the start of the memory block for data.
+  // Note that this function should not be called when it is possible that the BRT resets the get/put area of an empty buffer.
   char* block_start() const { return const_cast<char*>(reinterpret_cast<char const*>(this) + sizeof(MemoryBlock)); }
 
   // Returns the current size of the allocated memory block.
-  size_t get_size() const { return block_size; }
+  size_t get_size() const { return m_block_size; }
+};
 
-  size_t used() const { return used_cnt; }
+// The minimum size ever of the data block, in bytes, is
+static constexpr size_t minimum_data_block_size = 64;
+
+// The corresponding (minimum) allocated memory for that size would be
+static constexpr size_t minimum_allocated_size = minimum_data_block_size + sizeof(MemoryBlock);
+
+// But we demand that the space on the heap is a power of two, hence
+static constexpr size_t minimum_heap_space = utils::nearest_power_of_two(minimum_allocated_size + malloc_overhead_c);
+
+// The smallest value passed to malloc() is therefore,
+static constexpr size_t minimum_malloc_size = minimum_heap_space - malloc_overhead_c;
+
+// m_block_size should be the last member in the object, so that
+static_assert(alignof(MemoryBlock) == alignof(size_t) && sizeof(MemoryBlock) % sizeof(size_t) == 0, "Unexpected alignment of the data block part.");
+
+class mystreambuf : private std::streambuf
+{
+  friend class MemoryBlocksBuffer;
 
  public:
-  //---------------------------------------------------------------------------
-  // Manipulator
-  //
+  using int_type = std::streambuf::int_type;
+  mystreambuf();
 
-  // Set memory block to the new block size.  Returns the reduced size in bytes.
-  // `new_block_size' must be equal or smaller then the current block size.
-  size_t reduce_block(size_t new_block_size)
-  {
-#ifdef DEBUGDBSTREAMBUF
-    ASSERT(block_size >= new_block_size);           // realloc should not relocate memory block
-#endif
-    size_t amount = block_size - new_block_size;
-    block_size = new_block_size;
-    void* unused __attribute__((unused)) = realloc(this, sizeof(MemoryBlock) + block_size);
-    return amount;
-  }
+ private:
+  auto eback() const { return std::streambuf::eback(); }
+  auto gptr() const { return std::streambuf::gptr(); }
+  auto egptr() const { return std::streambuf::egptr(); }
+
+  auto pbase() const { return std::streambuf::pbase(); }
+  auto pptr() const { return std::streambuf::pptr(); }
+  auto epptr() const { return std::streambuf::epptr(); }
+
+  void gbump(int n) { std::streambuf::gbump(n); }
+  void setg(char* eb, char* g, char* eg) { std::streambuf::setg(eb, g, eg); }
+  void pbump(int n) { std::streambuf::pbump(n); }
+  void setp(char* p, char* ep) { std::streambuf::setp(p, ep); }
+
+ public:
+  std::streambuf* get_sb() { return static_cast<std::streambuf*>(this); }
 };
 
 //=============================================================================
 //
 // class MemoryBlocksBuffer
 //
+// This class represents a singly linked list of MemoryBlocks.
+//
+// It keeps track of the total size of the buffer as the sum
+// of the block sizes of all its MemoryBlocks. When a new block
+// is appended, the size of that block is made equal to the
+// current buffer size (so the size is more or less doubled)
+// but rounding the required heap space off to the nearest
+// efficient value as determined by utils::malloc_size.
+
 class MemoryBlocksBuffer
 {
-  typedef std::deque<MemoryBlock*> container_type;
  private:
-  container_type memory_block_list;                     // List with dynamically allocated blocks
-  size_t total_block_size;                              // Total amount of currently allocated memory.
-  size_t max_alloc;                                     // Maximum allowed number of allocated bytes.
+  size_t const m_max_alloc;             // Maximum allowed number of allocated bytes.
+  std::mutex m_mutex;
+  size_t m_total_block_size;            // Total amount of available memory in the buffer.
+  size_t m_total_data_written;          // The number of bytes written to the buffer.
+  size_t m_total_data_read;             // The number of bytes read from the buffer.
+  MemoryBlock* m_get_area;              // Pointer to the first MemoryBlock (the front).
+  MemoryBlock* m_put_area;              // Pointer to the last MemoryBlock (the back).
 
  public:
-  typedef container_type::iterator iterator;
-  typedef container_type::const_iterator const_iterator;
-  typedef container_type::reference reference;
-  typedef container_type::const_reference const_reference;
-  typedef container_type::size_type size_type;
-  typedef container_type::difference_type difference_type;
-  typedef container_type::value_type value_type;
-  typedef container_type::reverse_iterator reverse_iterator;
-  typedef container_type::const_reverse_iterator const_reverse_iterator;
-
- public:
-  iterator begin() { return memory_block_list.begin(); }
-  const_iterator begin() const { return memory_block_list.begin(); }
-  iterator end() { return memory_block_list.end(); }
-  const_iterator end() const { return memory_block_list.end(); }
-  reverse_iterator rbegin() { return memory_block_list.rbegin(); }
-  const_reverse_iterator rbegin() const { return memory_block_list.rbegin(); }
-  reverse_iterator rend() { return memory_block_list.rend(); }
-  const_reverse_iterator rend() const { return memory_block_list.rend(); }
-  reference front() { return memory_block_list.front(); }
-  const_reference front() const { return memory_block_list.front(); }
-  reference back() { return memory_block_list.back(); }
-  const_reference back() const { return memory_block_list.back(); }
-
- public:
-  //---------------------------------------------------------------------------
-  // Constructors
-  // Use default copy constructor
-  // Use default destructor
-
   // Constructor, sets a maximum buffer size.
-  MemoryBlocksBuffer(size_t max_alloc_) : total_block_size(0), max_alloc(max_alloc_) { }
+  MemoryBlocksBuffer(size_t max_alloc) : m_max_alloc(max_alloc), m_total_block_size(0), m_total_data_written(0), m_total_data_read(0), m_get_area(nullptr), m_put_area(nullptr) { }
+  MemoryBlocksBuffer(MemoryBlocksBuffer const&) = delete;
+  MemoryBlocksBuffer& operator=(MemoryBlocksBuffer const&) = delete;
 
   ~MemoryBlocksBuffer()
   {
-    for (iterator i(begin()); i != end(); ++i)
-      (*i)->release();
+    // Release all remaining memory blocks.
+    while (m_get_area)
+      brt_pop_front();
   }
-
-  //---------------------------------------------------------------------------
-  // Assignment operator:
-  // Use default assignment operator.
 
   //---------------------------------------------------------------------------
   // Public accessors:
   //
 
-  // Accessor returning the current number of allocated blocks.
-  size_type size() const { return memory_block_list.size(); }
-
-  // size() of the largest possible container.
-  size_type max_size() const { return memory_block_list.max_size(); }
-
-  // Returns `true' if the container is empty.
-  bool empty() const { return memory_block_list.empty(); }
+#ifdef CWDEBUG
+  // Accessor for m_max_alloc.
+  size_t get_max_alloc() const { return m_max_alloc; }
 
   // Accessor that returns the total number of allocated bytes.
-  size_t get_total_block_size() const { return total_block_size; }
-
-  // Accessor for `max_alloc'.
-  size_t get_max_alloc() const { return max_alloc; }
+  size_t get_total_block_size() const { return m_total_block_size; }
+#endif
 
   //---------------------------------------------------------------------------
-  // Manipulator methods of `MemoryBlocksBuffer'
+  // Manipulator methods.
   //
 
-  bool push_front(size_t size)
+  auto eback(mystreambuf const* self) const { return self->eback(); }
+  auto gptr(mystreambuf const* self) const { return self->gptr(); }
+  auto egptr(mystreambuf const* self) const { return self->egptr(); }
+
+  auto pbase(mystreambuf const* self) const { return self->pbase(); }
+  auto pptr(mystreambuf const* self) const { return self->pptr(); }
+  auto epptr(mystreambuf const* self) const { return self->epptr(); }
+
+  void gbump(int n, mystreambuf* self) { self->gbump(n); }
+  void setg(char* eb, char* g, char* eg, mystreambuf* self) { self->setg(eb, g, eg); }
+  void pbump(int n, mystreambuf* self) { self->pbump(n); }
+  void setp(char* p, char* ep, mystreambuf* self) { self->setp(p, ep); }
+
+  // Add a new block to the end of the list.
+  // This function may only be called by the Buffer Write Thread (BWT).
+  bool bwt_push_back(size_t minimum_block_size)
   {
-    if ((total_block_size += size) <= max_alloc)
+    // Calculate the size of the next block.
+    size_t total_data_size = m_total_data_written - m_total_data_read;
+    size_t block_size = utils::malloc_size(std::max(minimum_block_size, total_data_size) + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+    bool buffer_full;
     {
-      memory_block_list.push_front(MemoryBlock::create(size));
+      std::lock_guard<std::mutex> lock(m_mutex);
+      buffer_full = m_total_block_size + block_size > m_max_alloc;
+    }
+    // By releasing the lock, buffer_full becomes fuzzy (it becomes 'buffer_recently_full') - but that is OK.
+    // Note that the only transition possible is from true to false, so we'll never allocate too much memory anyway.
+    if (!buffer_full)
+    {
+      MemoryBlock* new_block = MemoryBlock::create(block_size);
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_total_block_size += block_size;
+      m_put_area->m_next = new_block;
+      m_put_area = new_block;
       return true;
     }
-    total_block_size -= size;
     return false;
   }
 
-  bool push_back(size_t size)
+  // Remove the first MemoryBlock from the list.
+  // This function may only be called by the Buffer Read Thread (BRT).
+  void brt_pop_front()
   {
-    if ((total_block_size += size) <= max_alloc)
-    {
-      memory_block_list.push_back(MemoryBlock::create(size));
-      return true;
-    }
-    total_block_size -= size;
-    return false;
-  }
-
-  // Erase the first element.
-  void pop_front()
-  {
-    MemoryBlock* memory_block = memory_block_list.front();
-    total_block_size -= memory_block->get_size();
-    memory_block_list.pop_front();
+    MemoryBlock* memory_block = m_get_area;
+    // Do not call brt_pop_front() on an empty list. This assures that
+    // while we're here the BWT won't be accessing m_list concurrently.
+    ASSERT(memory_block);
+    // Delink the block.
+    m_get_area = memory_block->m_next;
+    m_total_block_size -= memory_block->get_size();
     memory_block->release();
   }
 
-  // Erase the last element.
-  void pop_back()
+  void reduce_single_block_size(size_t new_size)
   {
-    MemoryBlock* memory_block = memory_block_list.back();
-    total_block_size -= memory_block->get_size();
-    memory_block_list.pop_back();
+    MemoryBlock* memory_block = m_get_area;
+    ASSERT(memory_block && memory_block == m_put_area); // Exactly one block.
+    m_total_block_size -= memory_block->get_size() - new_size;
+    m_get_area = m_put_area = MemoryBlock::create(new_size);
     memory_block->release();
   }
-
- public:// FIXME make private and use friend later
-  void reduce_total_block_size(size_t amount) { total_block_size -= amount; }
-
- private:
-  // Don't use copy constructor
-  MemoryBlocksBuffer(MemoryBlocksBuffer const&) = delete;
 };
 
 //=============================================================================
 //
 // class MsgBlock
 //
+// MsgBlock is only passes as a temporary object to InputDevice::decode and as such
+// a particular instance is only used by the BRT (Buffer Reading Thread) which means
+// it is effectively single threaded with respect to the whole MemoryBlocksBuffer.
+//
 class MsgBlock
 {
  private:
-  char const* start;
-  size_t size;
-  MemoryBlock* memory_block;
+  char const* m_start;
+  size_t m_size;
+  MemoryBlock const* m_memory_block;
 
  public:
-  MsgBlock(char const* start_, size_t size_, MemoryBlock* memory_block_) : start(start_), size(size_), memory_block(memory_block_)
+  MsgBlock(char const* start, size_t size, MemoryBlock const* memory_block) : m_start(start), m_size(size), m_memory_block(memory_block)
   {
-    ASSERT(start >= memory_block->block_start() && start + size <= memory_block->block_start() + memory_block->get_size());
-    memory_block->used_cnt++;
+    ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
+    m_memory_block->add_reference();
   }
 
-  ~MsgBlock() { memory_block->release(); }
+  ~MsgBlock() { m_memory_block->release(); }
 
-  MsgBlock(MsgBlock const& msg_block) : start(msg_block.start), size(msg_block.size), memory_block(msg_block.memory_block)
+  MsgBlock(MsgBlock const& msg_block) : m_start(msg_block.m_start), m_size(msg_block.m_size), m_memory_block(msg_block.m_memory_block)
   {
-    memory_block->used_cnt++;
+    m_memory_block->add_reference();
   }
 
   MsgBlock& operator=(MsgBlock const& msg_block)
   {
     if (this == &msg_block)
       return *this;
-    memory_block->release();
-    start = msg_block.start;
-    size = msg_block.size;
-    memory_block = msg_block.memory_block;
-    ASSERT(start >= memory_block->block_start() && start + size <= memory_block->block_start() + memory_block->get_size());
-    memory_block->used_cnt++;
+    m_memory_block->release();
+    m_start = msg_block.m_start;
+    m_size = msg_block.m_size;
+    m_memory_block = msg_block.m_memory_block;
+    ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
+    m_memory_block->add_reference();
     return *this;
   }
 
-  char const* get_start() const { return start; }
-  size_t get_size() const { return size; }
+  char const* get_start() const { return m_start; }
+  size_t get_size() const { return m_size; }
 };
 
 //=============================================================================
@@ -349,7 +391,7 @@ class StreamBuf : public std::streambuf
   // Construct a `StreamBuf' object. The minimum number of allocated
   // bytes for one block of the output buffer is `minimum_blocksize'.
   // The maximum possible number of total allocated bytes of all blocks
-  // together is `max_alloc'. When this value is reached, `overflow' will
+  // together is max_alloc. When this value is reached, `overflow' will
   // return EOF.
   // The method `buffer_full' returns true when the number of buffered
   // bytes in the output buffer exceed `buffer_full_watermark'.
@@ -473,12 +515,14 @@ class StreamBuf : public std::streambuf
   //
 
   // Called when a block is full.
+  // BWT.
   int_type overflow(int_type c = EOF) override;
 
   // Called when a block is empty.
+  // BRT.
   int_type underflow() override { return input_streambuf->iunderflow(); }
 
-  // Called when a putback failed.
+  // Called when a putback failed. Manipulates the gptr so must be BRT.
   int_type pbackfail(int_type c) override { return input_streambuf->ipbackfail(c); }
 
   // Though ANSI C++, not implemented in libg++-2.7.1. Used by libcw.
@@ -486,6 +530,7 @@ class StreamBuf : public std::streambuf
   // beginning of the get area.
   // Note: libcw demands that this function does not return '0' unless
   // the buffer is empty (this is not explicitly demanded by ANSI).
+  // BRT.
   std::streamsize showmanyc() override { return input_streambuf->ishowmanyc(); }
 
  protected:
@@ -495,6 +540,7 @@ class StreamBuf : public std::streambuf
   //
 
   // Advance get pointer of input buffer `n' positions.
+  // BRT.
   void igbump(int n) { input_streambuf->gbump(n); }
 
   // (Re-)initialize the get area of the input buffer.
@@ -700,7 +746,7 @@ class LinkBuffer : public Dev2Buf
     { set_input_device(input_device); set_output_device(output_device); }
 
   //-----------------------------------------------------------
-  // DUPLICATE METHODS OF Buf2Dev.
+  // DUPLICATE METHODS OF Buf2Dev (maybe only be called by the BRT).
   size_t buf2dev_contiguous() { return next_contiguous_number_of_bytes(); }
   size_t buf2dev_contiguous_forced() { return force_next_contiguous_number_of_bytes(); }
   char* buf2dev_ptr() const { return igptr(); }
@@ -725,10 +771,15 @@ class InputBuffer : public Dev2Buf
   InputBuffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc) { set_input_device(input_device); }
 
+  // Stuff below reads from the input buffer and therefore should be BRT.
+
   // Raw binary access (instead of using istream):
-  char* raw_gptr() const { return igptr(); }                    // Get pointer to get area.
-  void raw_gbump(int n) { igbump(n); }                          // Bump pointer `n' bytes.
-  size_t raw_sgetn(char* s, size_t n) { return ixsgetn(s, n); } // Read `n' bytes and copy them to `s'.
+  char* raw_gptr() const { return igptr(); }                      // Get pointer to get area.
+  void raw_gbump(int n) { igbump(n); }                            // Bump pointer `n' bytes.
+  size_t raw_sgetn(char* s, size_t n) { return ixsgetn(s, n); }   // Read `n' bytes and copy them to `s'.
+
+  // Administration:
+  void raw_reduce_buffer_if_empty() { brt_reduce_buffer_if_empty(); }// Should be called to make sure that the buffer also decreases.
 };
 
 // Program writing to a device:
@@ -738,6 +789,8 @@ class OutputBuffer : public Buf2Dev
  public:
   OutputBuffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     Buf2Dev(minimum_blocksize, buffer_full_watermark, max_alloc) { set_output_device(output_device); }
+
+  // Stuff below writes to the output buffer and therefore should be BWT.
 
   // Raw binary access (instead of using ostream):
   char* raw_pptr() const { return pptr(); }                     // Get pointer to put area.
@@ -756,6 +809,7 @@ inline void StreamBuf::set_input_buffer(StreamBuf* b)
 // Returns true if a string with length `len' is contiguous
 // in the current get area of the output buffer.
 // Called by the kernel.
+// Read thread.
 inline bool StreamBuf::is_contiguous(size_t len) const
 {
 #ifdef DEBUGDBSTREAMBUF

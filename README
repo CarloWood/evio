@@ -19,3 +19,19 @@ A LinkBuffer behaves as if it is derived from both, Dev2Buf and Buf2Dev
 and StreamBuf is a virtual base class (but it isn't). It has the same
 interface as Dev2Buf and Buf2Dev combined and it can be passed to
 functions that take a Dev2Buf& or a Buf2Dev&.
+
+
+---
+
+MemoryBlocksBuffer
+  MemoryBlock* --> ...
+  MemoryBlock* --> [       ccccccxxx  ]
+       .           ^       ^     ^     ^
+       .
+       .
+
+
+- Writing thread        (exclusively writes to buffer memory)
+- Reading thread        (exclusively reads buffer memory)
+- Accessor threads      (does not access buffer memory)
+

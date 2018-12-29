@@ -159,6 +159,7 @@ RefCountReleaser OutputDevice::close_output_device()
 }
 
 // Write `m_obuffer' to fd.
+// BRT
 void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
 {
   DoutEntering(dc::io, "OutputDevice::write_to_fd(" << fd << ") [" << self << ']');
