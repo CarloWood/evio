@@ -98,9 +98,9 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
     try
     {
       if (m_ibuffer)
-        set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->minimum_block_size());
+        set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->m_minimum_block_size);
       if (m_obuffer)
-        set_sndsockbuf(fd, sndbuf_size, m_obuffer->minimum_block_size());
+        set_sndsockbuf(fd, sndbuf_size, m_obuffer->m_minimum_block_size);
     }
     catch (AIAlert::Error const& error)
     {
@@ -114,9 +114,12 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   }
 
   FileDescriptor::init(fd);     // link in
+  SingleThread type;
   if (m_ibuffer)
     start_input_device();
-  if (signal_connected || (m_obuffer && !m_obuffer->buffer_empty()))  // Must be the same thread as the thread that created the buffer.
+  StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
+  StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
+  if (signal_connected || (m_obuffer && !m_obuffer->buffer_empty(get_area_rat, put_area_rat)))  // Must be the same thread as the thread that created the buffer.
     start_output_device();
 }
 
@@ -137,6 +140,7 @@ void Socket::VT_impl::read_from_fd(InputDevice* _self, int fd)
 // Read thread.
 void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 {
+  GetThread type;
   Socket* self = static_cast<Socket*>(_self);
   if (AI_UNLIKELY(!(self->m_connected_flags & is_connected)))
   {
@@ -146,7 +150,19 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
     {
       self->connected(true);    // Signal successful connect.
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
-      if (!self->m_obuffer || self->m_obuffer->buffer_empty())
+      if (self->m_obuffer)
+      {
+        utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer, type]{
+            StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
+            return m_obuffer->buffer_empty(get_area_rat);
+        });
+        if (condition_empty_buffer.is_momentary_true())
+        {
+          self->stop_output_device(type, condition_empty_buffer);
+          return;
+        }
+      }
+      else
       {
         self->stop_output_device();
         return;

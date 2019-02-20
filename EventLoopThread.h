@@ -24,12 +24,40 @@
 #pragma once
 
 #include "evio.h"
+#include "StreamBuf-threads.h"
 #include "threadpool/AIThreadPool.h"
 #include "utils/Singleton.h"
+#include "utils/FuzzyBool.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <functional>
+
+namespace utils {
+
+class FuzzyCondition : public FuzzyBool
+{
+ private:
+  std::function<FuzzyBool()> m_condition_check;
+
+ public:
+  template<typename LAMBDA>
+  FuzzyCondition(LAMBDA condition_check) : FuzzyBool{condition_check()}, m_condition_check(std::move(condition_check)) { }
+
+  FuzzyBool operator()() const { return m_condition_check(); }
+
+  friend std::ostream& operator<<(std::ostream& os, FuzzyCondition const& fuzzy_condition)
+  {
+    return os << "{FuzzyCondition: before: " << static_cast<FuzzyBool const&>(fuzzy_condition) << ", after: " << fuzzy_condition() << "}";
+  }
+};
+
+} // namespace utils
+
+namespace evio {
+
+class FileDescriptor;
 
 class EventLoopThread : public Singleton<EventLoopThread>
 {
@@ -68,10 +96,44 @@ class EventLoopThread : public Singleton<EventLoopThread>
  public:
   void init(AIQueueHandle handler);
 
-  static void start(ev_timer& timeout_watcher);
-  static bool start_if_not_active(ev_io& io_watcher);
-  static bool stop_if_active(ev_io& watcher);
-  static void terminate();                      // Exit as soon as all watchers added by start() have finished.
+  template<class ThreadType>
+  utils::FuzzyBool is_active(ev_io const& io_watcher, ThreadType)
+  {
+    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
+    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
+    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
+                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
+
+    std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+    // Basically we need to following table to hold:
+    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
+    //       yes          True            WasTrue         True            WasTrue
+    //        no          False           WasFalse        WasFalse        False
+    //
+    // The choice in the last two columns follow from the following: assuming that
+    // ev_io_start() is only called by EventLoopThread::start_if, which in turn is
+    // only called by the thread that writes to a buffer, so a PutThread;
+    // while ev_io_stop() is only called by EventLoopThread::stop_if, which in turn
+    // is only called by the thread that reads from a buffer, so a GetThread.
+    //
+    // Hence the following possible transitions exist:
+    // GetThread: active --> not active.
+    // PutThread: not active -> active.
+    //
+    // Therefore, if this is not the put_thread then a volatile transition from false to true may happen, --------------.
+    // while if this is not the get_thread then a volatile transition from true to false may happen.                    |
+    //                                                                   |                                              |
+    //                                                                   v                                              v
+    return ev_is_active(&io_watcher) ? (get_thread ? fuzzy::True : fuzzy::WasTrue) : (put_thread ? fuzzy::False : fuzzy::WasFalse);
+  }
+
+  void start(ev_timer& timeout_watcher);
+  bool start(ev_io* io_watcher, evio::FileDescriptor* device);
+  bool stop(ev_io* io_watcher);
+  bool start_if(utils::FuzzyCondition const& condition, ev_io* io_watcher, evio::FileDescriptor* device);
+  bool stop_if(utils::FuzzyCondition const& condition, ev_io* io_watcher);
+  void terminate();                      // Exit as soon as all watchers added by start() have finished.
 
   void invoke_pending();
 
@@ -106,7 +168,11 @@ class EventLoopThread : public Singleton<EventLoopThread>
   }
 };
 
+} // namespace evio
+
+#ifdef CWDEBUG
 inline bool in_event_loop_thread()
 {
-  return EventLoopThread::instance().id() == std::this_thread::get_id();
+  return evio::EventLoopThread::instance().id() == std::this_thread::get_id();
 }
+#endif

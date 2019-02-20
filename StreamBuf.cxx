@@ -38,8 +38,6 @@ using namespace libcwd;
 #undef DEBUGDBSTREAMBUF
 #endif
 
-using namespace std;
-
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 channel_ct io("IO");
@@ -49,161 +47,134 @@ NAMESPACE_DEBUG_CHANNELS_END
 
 namespace evio {
 
+StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
+  m_minimum_block_size(minimum_block_size), m_buffer_full_watermark(buffer_full_watermark), m_max_allocated_block_size(max_allocated_block_size),
+  m_buffer_size_minus_unused_in_last_block(0), m_device_counter(0)
+{
+  DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
+  SingleThread type;
+  size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
 #ifdef CWDEBUG
-void StreamBuf::printOn(ostream& os) const
-{
-  os << "----------------------------------------------------------------------" << endl;
-  os << "max_alloc = " << get_max_alloc() << "; buffer_full_watermark = " << max_used_size;
-  os << "; current_number_of_blocks = " << output_buffer.size() << endl;
-  os << "Block nodes: " << endl;
-  unsigned int block_count = 0;
-  size_t total_size = 0;
-  os << "Start\t\tSize\n";
-  for (MemoryBlocksBuffer::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
-  {
-    MemoryBlock const* block(*i);
-    os << (void*)block->block_start() << '\t' << block->get_size() << endl;
-    total_size += block->get_size();
-    ++block_count;
-  }
-  if (block_count != output_buffer.size())
-    DoutFatal(dc::core, "Counted inconsistent number of blocks!");
-  os << "Total size: " << total_size << endl;
-  if (total_size != output_buffer.get_total_block_size())
-    DoutFatal(dc::core, "Inconsistent total allocated size!");
-  os << "get_area_block_node = " << (void*)get_area_block_node;
-  os << "; put_area_block_node = " << (void*)put_area_block_node << endl;
-  os << "get area: " << (void*)ieback() << " - " << (void*)igptr() << "(" << igptr() - ieback() << ")" << " - " << (void*)iegptr() << "(" << iegptr() - ieback() << ")";
-#if CWDEBUG_ALLOC
-  os << "\t[ " << find_alloc(ieback())->start() << " (" << find_alloc(ieback())->size() << ") ]";
+  if (block_size != m_minimum_block_size)
+    Dout(dc::warning, "Using a minimum block size of " << block_size << " bytes.");
+  // I just think this is a bit on the small side.
+  if (block_size < 64)
+    Dout(dc::warning, "StreamBuf with a block_size smaller than 64 !");
 #endif
-  os << endl;
-  os << "put area: " << (void*)pbase() << " - " << (void*)pptr() << "(" << pptr() - pbase() << ")" << " - " << (void*)epptr() << "(" << epptr() - pbase() << ")";
-#if CWDEBUG_ALLOC
-  os << "\t[ " << find_alloc(pbase())->start() << " (" << find_alloc(pbase())->size() << ") ]";
-#endif
-  os << endl;
-#if CWDEBUG_ALLOC
-  if ((char*)find_alloc(ieback())->start() + sizeof(MemoryBlock) != ieback())
-    DoutFatal(dc::core, "get area points to non-allocated block !");
-  if (igptr() != ieback() && (char*)find_alloc(igptr() - 1)->start() + sizeof(MemoryBlock) != ieback())
-    DoutFatal(dc::core, "get area get pointer points outside allocated block !");
-  if (iegptr() != ieback() && (char*)find_alloc(iegptr() - 1)->start() + sizeof(MemoryBlock) != ieback())
-    DoutFatal(dc::core, "end of get area points outside allocated block !");
-  if ((char*)find_alloc(pbase())->start() + sizeof(MemoryBlock) != pbase())
-    DoutFatal(dc::core, "put area points to non-allocated block !");
-  if (pptr() != pbase() && (char*)find_alloc(pptr() - 1)->start() + sizeof(MemoryBlock) != pbase())
-    DoutFatal(dc::core, "put area put pointer points outside allocated block !");
-  if (epptr() != pbase() && (char*)find_alloc(epptr() - 1)->start() + sizeof(MemoryBlock) != pbase())
-    DoutFatal(dc::core, "end of put area points outside allocated block !");
-#endif
-  os << "Total string length: " << total_size - (igptr() - ieback()) - (epptr() - pptr()) << endl;
-  for (MemoryBlocksBuffer::const_iterator i(output_buffer.begin()); i != output_buffer.end(); ++i)
-  {
-    MemoryBlock const* block2(*i);
-    os << "[" << (void*)block2 << "] ";
-    if (block2 == get_area_block_node && block2 == put_area_block_node)
-      os << "\"" << buf2str(igptr(), pptr() - igptr()) << "\"" << endl;     // Print from igptr() to pptr().
-    else if (block2 == get_area_block_node)
-      os << "\"" << buf2str(igptr(), block2->get_size() - (igptr() - ieback())) << endl;      // Print from igptr() to the end of the buffer.
-    else if (block2 == put_area_block_node)
-      os << buf2str(block2->block_start(), pptr() - pbase()) << "\"" << endl;   // Print from start of buffer to pptr().
-    else
-      os << buf2str(block2->block_start(), block2->get_size()) << endl;         // Print the whole buffer.
-  }
-  if (ieback() != get_area_block_node->block_start() ||
-      pbase() != put_area_block_node->block_start() ||
-      epptr() != pbase() + put_area_block_node->get_size() ||
-      (get_area_block_node == put_area_block_node && iegptr() > pptr()) ||
-      iegptr() > ieback() + get_area_block_node->get_size() ||
-      igptr() < ieback() || igptr() > iegptr() ||
-      pptr() < pbase() || pptr() > epptr())
-    DoutFatal(dc::core, "Pointers inconsistent");
-  os << "----------------------------------------------------------------------" << endl;
+  //===========================================================
+  // Create first MemoryBlock.
+  m_get_area_block_node = m_put_area_block_node = MemoryBlock::create(block_size);
+  char* const start = m_get_area_block_node->block_start();
+  setp(start, start + block_size, PutThreadLock::wat(put_area_lock(type)));
+  setg(start, start, start, GetThreadLock::wat(get_area_lock(type)));
+  m_buffer_size_minus_unused_in_first_block.store(block_size, std::memory_order_relaxed);
+  //===========================================================
+  m_idevice = nullptr;
+  m_odevice = nullptr;
 }
-#endif
 
-// Write thread.
-StreamBuf::int_type StreamBuf::overflow(int_type c)
+// Calculate new block size for our output_buffer.
+size_t StreamBuf::new_block_size(PutThread type) const
 {
-  DoutEntering(dc::evio, "StreamBuf::overflow(" << char2str(c) << ") [" << (void*)this << ']');
+  PutThreadLock::crat put_area_rat(put_area_lock(type));
+  return utils::malloc_size(get_data_size_upper_bound(put_area_rat) + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+}
+
+StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
+{
+  DoutEntering(dc::evio, "StreamBuf::overflow_a(" << char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
   if (c == static_cast<int_type>(EOF))
     return 0;
-  if (!output_buffer.push_back(new_block_size()))
-    return static_cast<int_type>(EOF);
-  put_area_block_node = output_buffer.back();
-  setp(put_area_block_node->block_start(), put_area_block_node->block_start() + put_area_block_node->get_size());
-  *pptr() = c;
-  pbump(1);
+  //===========================================================
+  // Create a new MemoryBlock.
+  size_t block_size = new_block_size(type);
+  // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
+  std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
+  if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
+  {
+    size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
+    if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
+    {
+      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
+      return static_cast<int_type>(EOF);
+    }
+    size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
+    m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
+    block_size = max_block_size;
+  }
+  MemoryBlock* new_block = MemoryBlock::create(block_size);
+  char* start = new_block->block_start();
+  *start = c;   // Write data before calling setp_pbump.
+  // Only after the next line, get_data_size_upper_bound(PutThread) will return the correct value again.
+  setp_pbump(start, start + block_size, 1, PutThreadLock::wat(put_area_lock(type)));
+  m_put_area_block_node.load(std::memory_order_relaxed)->m_next = new_block;    // The Get Thread is guaranteed not to read m_put_area_block_node->m_next.
+  m_put_area_block_node.store(new_block, std::memory_order_release);            // Now the Get Thread may read the previous value (and advance m_get_area_block_node to it).
+  //===========================================================
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
   return 0;
 }
 
-// BRT
-int StreamBuf::iunderflow()
+// Get thread.
+int StreamBuf::underflow_a(GetThread type)
 {
-  DoutEntering(dc::evio, "iunderflow() [" << (void*)this << ']');
+  DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  if (get_area_block_node == put_area_block_node)
+  int result = 0;
+  while (1)
   {
-    if (igptr() == pptr())
+    // True if egptr points to the end of m_get_area_block_node after returning from this function.
+    GetThreadLock::wat get_area_wat(get_area_lock(type));
+    bool reached_end = sync_next_egptr(m_get_area_block_node, get_area_wat);
+    if (gptr(get_area_wat) == egptr(get_area_wat))
     {
-      // The buffer is empty
-      reduce_buffer();
-#ifdef DEBUGDBSTREAMBUF
-      printOn(cerr);
-#endif
-      Dout(dc::evio, "Returning EOF");
-      return EOF;
-    }
-    // Apparently the egptr wasn't up to date (underflow should only be called when gptr == egptr).
-    isetg(ieback(), igptr(), pptr());
-  }
-  else
-  {
-    char* start = get_area_block_node->block_start();
-    if (igptr() == start + get_area_block_node->get_size())
-    {
-      output_buffer.pop_front();
-      get_area_block_node = output_buffer.front();
-      start = get_area_block_node->block_start();
-      if (get_area_block_node == put_area_block_node)
+      if (reached_end &&
+          m_put_area_block_node.load(std::memory_order_acquire) != m_get_area_block_node)
       {
-	if (pptr() == start)
-	{
-	  setp(pbase(), epptr());		// Buffer empty, set pointers
-	  isetg(start, start, start);		// at beginning of single block
-#ifdef DEBUGDBSTREAMBUF
-	  printOn(cerr);
-#endif
-          Dout(dc::evio, "Returning EOF");
-	  return EOF;
-	}
-	isetg(start, start, pptr());
+        // If at the moment of the load() m_put_area_block_node was already unequal m_get_area_block_node
+        // then that remains the case. Therefore we now can read m_get_area_block_node->m_next.
+        //===========================================================
+        // Advance get area to next MemoryBlock.
+        MemoryBlock* get_area_block_node = m_get_area_block_node;
+        m_get_area_block_node = m_get_area_block_node->m_next;
+        char* start = m_get_area_block_node->block_start();
+        setg(start, start, start, get_area_wat);
+        // m_buffer_size_minus_unused_in_first_block does not change.
+        get_area_block_node->release();
+        continue;
+        //===========================================================
       }
-      else
-	isetg(start, start, start + get_area_block_node->get_size());
+      // There is nothing to read anymore at the moment.
+      Dout(dc::evio, "Returning EOF");
+      // FIXME: Reduce the buffer? See remark in OutputDevice::VT_impl::write_to_fd.
+      result = EOF;
     }
-    else
-      isetg(ieback(), igptr(), start + get_area_block_node->get_size());
+    break;
   }
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  return 0;
+  return result;
 }
 
-// BRT.
-StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
+// Note: a putback is not really thread-safe when the character
+// that was previously read is already part of a complete message
+// that is being decoded; nor will the putback alter the previous
+// message when we get here (that is thread-safe, but different
+// from when we were not by coincidence on the edge of a block).
+//
+// The only safe way to use putback is therefore to read a single
+// character, decide we don't want it and put the character that
+// we just read back so it can be part of the *next* message.
+StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 {
-  DoutEntering(dc::evio|continued_cf, "ipbackfail(" << c << ") [" << (void*)this << ']');
+  DoutEntering(dc::evio|continued_cf, "pbackfail(" << c << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
@@ -215,28 +186,36 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
     Dout(dc::finish, "Returning 0");
     return 0;
   }
-  if (igptr() > get_area_block_node->block_start())
+  bool gptr_at_eback;
+  // Allocate a new MemoryBlock with minimal size before locking the get area,
+  // anticipating that gptr() is going to be equal eback().
+  size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+  MemoryBlock* get_area_block_node = MemoryBlock::create(block_size);
   {
-    igbump(-1);
-    *igptr() = c;
-#ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
-#endif
-    Dout(dc::finish, "Returning 0");
-    return 0;
+    GetThreadLock::wat get_area_wat(get_area_lock(type));
+    gptr_at_eback = gptr(get_area_wat) == eback(get_area_wat);
+    // Likely because that should be the reason one call pbackfail in the first place.
+    if (AI_LIKELY(gptr_at_eback))
+    {
+      //===========================================================
+      // Prepend a new MemoryBlock with minimal size.
+      char* const start = get_area_block_node->block_start();
+      setg(start, start + block_size - 1, start + block_size, get_area_wat);
+      get_area_block_node->m_next = m_get_area_block_node;
+      m_get_area_block_node = get_area_block_node;
+      //===========================================================
+    }
+    else
+      gbump(-1, get_area_wat);
+    // Relaxed because we don't need to be synchronized with anything. The only
+    // requirement is that the Put Thread "eventually" sees this change so it
+    // can keep track of a reasonable estimate.
+    m_buffer_size_minus_unused_in_first_block.fetch_add(1, std::memory_order_relaxed);
+    *gptr(get_area_wat) = c;
   }
-  if (!output_buffer.push_front(new_block_size()))
-  {
-#ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
-#endif
-    Dout(dc::finish, "Out of memory, returning EOF");
-    return static_cast<int_type>(EOF);
-  }
-  get_area_block_node = output_buffer.front();
-  char* start = get_area_block_node->block_start();
-  isetg(start, start + get_area_block_node->get_size() - 1, start + get_area_block_node->get_size());
-  *igptr() = c;
+  // Free the new MemoryBlock when it was unused.
+  if (AI_UNLIKELY(!gptr_at_eback))
+    get_area_block_node->release();
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
@@ -244,218 +223,192 @@ StreamBuf::int_type StreamBuf::ipbackfail(int_type c)
   return 0;
 }
 
-// BRT.
-std::streamsize StreamBuf::ishowmanyc()
+// Number of characters available for reading from this buffer (output_buffer).
+std::streamsize StreamBuf::showmanyc_a(GetThread type)
 {
-  if (get_area_block_node == put_area_block_node)
-    isetg(ieback(), igptr(), pptr());
-  else if (iegptr() < ieback() + get_area_block_node->get_size())
-    isetg(ieback(), igptr(), ieback() + get_area_block_node->get_size());
-  return iegptr() - igptr();
+  // showmanyc() is not supported because I don't think it is needed and it would cost extra CPU time to make it work.
+  ASSERT(false);        // m_buffer_size_minus_unused_in_last_block isn't updated at the moment.
+  GetThreadLock::crat get_area_rat(get_area_lock(type));
+  return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat);
 }
 
-// Read thread.
-streamsize StreamBuf::ixsgetn(char* s, streamsize n)
+//Get Thread.
+std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread type)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::ixsgetn(s, " << n << ") [" << (void*)this << "]... ");
+  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-
-  if (get_area_block_node == put_area_block_node)
+  std::streamsize remaining = n;
+  while (remaining > 0)
   {
-    char* _igptr = igptr();
-    char* _pptr = pptr();
-    streamsize len = _pptr - _igptr;
-    if (n <= len)
+    bool reached_end;
+    char* cur_gptr;
+    std::streamsize available;
     {
-      memcpy(s, _igptr, n);
-      isetg(ieback(), _igptr + n, _pptr);
-#ifdef DEBUGDBSTREAMBUF
-      printOn(cerr);
-#endif
-      Dout(dc::finish, "Returning " << n);
-      return n;
+      GetThreadLock::wat get_area_wat(get_area_lock(type));
+      reached_end = sync_next_egptr(m_get_area_block_node, get_area_wat);
+      cur_gptr = gptr(get_area_wat);
+      available = egptr(get_area_wat) - cur_gptr;
     }
-    memcpy(s, _igptr, len);
-    isetg(pbase(), pbase(), pbase());	// Buffer empty, set pointers to start of single block
-    setp(pbase(), epptr());		//
-#ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
-#endif
-    Dout(dc::finish, "Returning " << len);
-    return len;
-  }
-  streamsize len = ieback() + get_area_block_node->get_size() - igptr();
-  if (n <= len)
-  {
-    memcpy(s, igptr(), n);
-    isetg(ieback(), igptr() + n, ieback() + get_area_block_node->get_size());
-#ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
-#endif
-    Dout(dc::finish, "Returning " << n);
-    return n;
-  }
-  memcpy(s, igptr(), len);
-  n -= len;
-  s += len;
-  output_buffer.pop_front();
-  get_area_block_node = output_buffer.front();
-  while (get_area_block_node != put_area_block_node)
-  {
-    if ((size_t)n <= get_area_block_node->get_size())
+    std::streamsize len;
+    if (available > 0)
     {
-      char* start = get_area_block_node->block_start();
-      memcpy(s, start, n);
-      isetg(start, start + n, start + get_area_block_node->get_size());
-#ifdef DEBUGDBSTREAMBUF
-      printOn(cerr);
-#endif
-      Dout(dc::finish, "Returning " << (len + n));
-      return len + n;
+      len = std::min(available, remaining);
+      std::memcpy(s, cur_gptr, len);
+      gbump(len, GetThreadLock::wat(get_area_lock(type)));
+      s += len;
+      remaining -= len;
     }
-    size_t block_size = get_area_block_node->get_size();
-    memcpy(s, get_area_block_node->block_start(), block_size);
-    len += block_size;
-    n -= block_size;
-    s += block_size;
-    output_buffer.pop_front();
-    get_area_block_node = output_buffer.front();
+    if (!reached_end)           // Leave if egptr != block end.
+      break;
+    if (available == len &&     // gptr == egptr == block end?
+        m_put_area_block_node.load(std::memory_order_acquire) != m_get_area_block_node)
+    {
+      // If at the moment of the load() m_put_area_block_node was already unequal m_get_area_block_node
+      // then that remains the case. Therefore we now can read m_get_area_block_node->m_next.
+      //===========================================================
+      // Advance get area to next MemoryBlock.
+      MemoryBlock* get_area_block_node = m_get_area_block_node;
+      m_get_area_block_node = m_get_area_block_node->m_next;
+      char* start = m_get_area_block_node->block_start();
+      setg(start, start, start, get_area_lock(type));
+      get_area_block_node->release();
+      //===========================================================
+    }
   }
-  streamsize left = pptr() - pbase();
-  if (n <= left)
-  {
-    memcpy(s, pbase(), n);
-    isetg(pbase(), pbase() + n, pptr());
-#ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
-#endif
-    Dout(dc::finish, "Returning " << (len + n));
-    return len + n;
-  }
-  memcpy(s, pbase(), left);
-  isetg(pbase(), pbase(), pbase());	// Buffer empty, set pointers to start of single block.
-  setp(pbase(), epptr());		//
+  Dout(dc::finish, "Returning " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  Dout(dc::finish, "Returning " << (len + left));
-  return len + left;
+  m_buffer_size_minus_unused_in_first_block -= n - remaining;
+  return n - remaining;
 }
 
 // Write thread.
-streamsize StreamBuf::xsputn(char const* s, streamsize n)
+std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutThread type)
 {
-  DoutEntering(dc::evio, "StreamBuf::xsputn(\"" << buf2str(s, n) << "\", " << n << ") [" << (void*)this << ']');
+  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  char const* sp = s;
-  streamsize m = n;
-  streamsize left = epptr() - pptr();
-  if (m <= left)
+  std::streamsize remaining = n;
+  while (remaining > 0)
   {
-    memcpy(pptr(), sp, m);
-    pbump(m);
-  }
-  else
-  {
-    memcpy(pptr(), sp, left);
-    sp += left;
-    m -= left;
-    size_t block_size = new_block_size();
-    if (!output_buffer.push_back(block_size))
+    std::streamsize available;
+    char* cur_pptr;
     {
-#ifdef DEBUGDBSTREAMBUF
-      printOn(cerr);
-#endif
-      pbump(left);
-      Dout(dc::warning, "Buffer full, returning " << left);
-      return left;
+      PutThreadLock::rat put_area_rat(put_area_lock(type));
+      cur_pptr = pptr(put_area_rat);
+      available = epptr(put_area_rat) - cur_pptr;
     }
-    put_area_block_node = output_buffer.back();
-    while ((size_t)m > block_size)
+    std::streamsize len;
+    if (available > 0)
     {
-      memcpy(put_area_block_node->block_start(), sp, block_size);
-      sp += block_size;
-      m -= block_size;
-      if (!output_buffer.push_back(new_block_size()))
+      len = std::min(available, remaining);
+      std::memcpy(cur_pptr, s, len);            // Write to buffer before calling pbump.
+      pbump(len, PutThreadLock::wat(put_area_lock(type)));
+      s += len;
+      remaining -= len;
+    }
+    if (remaining > 0)                          // pptr == epptr == block end AND we still need to write more?
+    {
+      //===========================================================
+      // Create a new MemoryBlock.
+      size_t block_size = new_block_size(type);
+      // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
+      std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
+      if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
       {
-#ifdef DEBUGDBSTREAMBUF
-	printOn(cerr);
-#endif
-	pbump(block_size);
-	Dout(dc::warning, "Buffer full, returning" << (s - sp));
-	return s - sp;
+        size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
+        if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
+        {
+          m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
+          return static_cast<int_type>(EOF);
+        }
+        size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
+        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
+        block_size = max_block_size;
       }
-      put_area_block_node = output_buffer.back();
-      block_size = put_area_block_node->get_size();
+      MemoryBlock* new_block = MemoryBlock::create(block_size);
+      char* start = new_block->block_start();
+      // Only after the next line, get_data_size_upper_bound(PutThread) will return the correct value again.
+      setp(start, start + block_size, PutThreadLock::wat(put_area_lock(type)));
+      m_put_area_block_node.load(std::memory_order_relaxed)->m_next = new_block;    // The Get Thread is guaranteed not to read m_put_area_block_node->m_next.
+      m_put_area_block_node.store(new_block, std::memory_order_release);            // Now the Get Thread may read the previous value (and advance m_get_area_block_node to it).
+      //===========================================================
     }
-    memcpy(put_area_block_node->block_start(), sp, m);
-    setp(put_area_block_node->block_start(), put_area_block_node->block_start() + block_size);
-    pbump(m);
   }
+  Dout(dc::finish, "Returning " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(cerr);
 #endif
-  Dout(dc::evio, "Returning " << n);
-  return n;
+  return n - remaining;
 }
 
-StreamBuf::StreamBuf(size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
-    max_used_size(buffer_full_watermark), output_buffer(max_alloc), m_device_counter(0)
+//============================================================================
+// Redirect virtual methods of streambuf.
+
+// The virtual functions are from the point of view of the std::stream buf,
+// which mean that if they access the get area then they should access
+// our m_input_streambuf.
+
+std::streamsize streambuf::showmanyc()
 {
-  DoutEntering(dc::io, "StreamBuf(" << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << (void*)this << ']');
-#ifdef CWDEBUG
-  if (minimum_blocksize < 64)
-    Dout(dc::warning, "StreamBuf with a minimum_blocksize smaller then 64 !");
-  if (!utils::is_power_of_two(minimum_blocksize))
-    DoutFatal(dc::core, "Please use a minimum_blocksize that is a power of 2 for StreamBuf");
-#endif
-  log2_min_buf_size = 6; // log(64)/log(2)
-  while (minimum_blocksize > 64)
+  GetThread type;
+  return static_cast<StreamBuf*>(m_input_streambuf)->showmanyc_a(type);
+}
+
+std::streambuf::int_type streambuf::underflow()
+{
+  GetThread type;
+  return static_cast<StreamBuf*>(m_input_streambuf)->underflow_a(type);
+}
+
+std::streambuf::int_type streambuf::pbackfail(int_type c)
+{
+  GetThread type;
+  return static_cast<StreamBuf*>(m_input_streambuf)->pbackfail_a(c, type);
+}
+
+std::streamsize streambuf::xsgetn(char* s, std::streamsize n)
+{
+  GetThread type;
+  return static_cast<StreamBuf*>(m_input_streambuf)->xsgetn_a(s, n, type);
+}
+
+std::streambuf::int_type streambuf::overflow(int_type c)
+{
+  PutThread type;
+  return static_cast<StreamBuf*>(this)->overflow_a(c, type);
+}
+
+std::streamsize streambuf::xsputn(char const* s, std::streamsize n)
+{
+  PutThread type;
+  return static_cast<StreamBuf*>(this)->xsputn_a(s, n, type);
+}
+
+//============================================================================
+
+void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat)
+{
+  // The buffer if empty, so there is only one block (get_area_block_node == put_area_block_node).
+  if (m_get_area_block_node->get_size() > m_minimum_block_size)
   {
-    log2_min_buf_size++;
-    minimum_blocksize = minimum_blocksize >> 1;
+    //===========================================================
+    // Replace first and only MemoryBlock.
+    MemoryBlock* get_area_block_node = m_get_area_block_node;
+    m_get_area_block_node = MemoryBlock::create(m_minimum_block_size);
+    m_buffer_size_minus_unused_in_first_block.store(m_minimum_block_size, std::memory_order_relaxed);
+    m_put_area_block_node.store(m_get_area_block_node, std::memory_order_release);
+    get_area_block_node->release();
+    //===========================================================
   }
-  output_buffer.push_back((1 << log2_min_buf_size) - malloc_overhead_c - sizeof(MemoryBlock));
-  get_area_block_node = put_area_block_node = output_buffer.front();
-  input_streambuf = this;
-  char* start = get_area_block_node->block_start();
-  setp(start, start + put_area_block_node->get_size());
-  isetg(start, start, start);
-  m_idevice = nullptr;
-  m_odevice = nullptr;
-}
-
-// Calculate new block size for our output_buffer.
-size_t StreamBuf::new_block_size() const
-{
-  size_t nl = used_size();
-  size_t l2 = get_log2_min_buf_size();
-  long l = (nl < 2048 ? nl : 2048) + malloc_overhead_c - 1;
-
-  if (l >= 2047)
-    nl = (((nl - 1) >> 11) + 1) << 11;
-  else
-    for (nl = 1 << l2, l = l >> l2; l > 0; nl = nl << 1)
-      l = l >> 1;
-  return nl - malloc_overhead_c - sizeof(MemoryBlock);
-}
-
-void StreamBuf::reduce_buffer()
-{
-  size_t new_block_size = minimum_block_size();
-  // There is only one block (get_area_block_node == put_area_block_node), see StreamBuf::iunderflow.
-  if (get_area_block_node->get_size() > new_block_size)
-  {
-    output_buffer.reduce_single_block_size(new_block_size);
-    get_area_block_node = put_area_block_node = output_buffer.back();
-  }
-  char* start = get_area_block_node->block_start();
-  isetg(start, start, start);
-  setp(start, start + new_block_size);		// note: get_area_block_node == put_area_block_node (the buffer is empty)
+  // Reset the empty the buffer.
+  char* start = m_get_area_block_node->block_start();
+  setg(start, start, start, get_area_wat);
+  setp(start, start + m_minimum_block_size, put_area_wat);
 }
 
 int Buf2Dev::sync()
@@ -480,17 +433,8 @@ void LinkBuffer::flush()
 
 bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
 {
-#ifdef CWDEBUG
-  if (m_device_counter == 0)
-  {
-    // FIXME: this debug output is old, it doesn't work like this anymore.
-    DoutFatal(dc::core,
-	"\n\tCalling `StreamBuf::release' while `m_device_counter' equals 0."
-	"\n\tAlways allocate a `StreamBuf' with `new' and pass it" <<
-	"\n\tto either a `DEVICE<INPUT>', `DEVICE<OUTPUT>' or `DEVICE<INPUT, OUTPUT>'." <<
-	"\n\t(Where INPUT must be an `InputDevice' or `LinkDevice' and OUTPUT must be an `OutputDevice' or `LinkDevice').");
-  }
-#endif
+  // StreamBuf should always be used as base class of InputBuffer, OutputBuffer or LinkBuffer only.
+  ASSERT(m_device_counter > 0);
   if (--m_device_counter == 0)
   {
     delete this;
@@ -504,7 +448,7 @@ bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
 
-    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
+    Dout(dc::io, "this = " << this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
         m_device_counter << " output device left: " << m_odevice <<
         "; decrementing ref count of that device (now " << m_odevice->ref_count() << ").");
 
@@ -523,7 +467,7 @@ void StreamBuf::set_input_device(InputDevice* device)
   if (++m_device_counter == 2)
   {
     intrusive_ptr_add_ref(m_odevice);
-    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_input_device(" << device <<
+    Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_input_device(" << device <<
         "); incremented ref count of output device [" << m_odevice << "] (now " << m_odevice->ref_count() << ").");
   }
   m_idevice = device;
@@ -532,15 +476,110 @@ void StreamBuf::set_input_device(InputDevice* device)
 void StreamBuf::set_output_device(OutputDevice* device)
 {
   // Don't pass a StreamBuf to more than one device.
-  // Also note set_output_device should only be called from OutputDevice::output, don't call it directly.
+  // Also note set_output_device should only be called from the constructor of OutputBuffer or LinkBuffer. Don't call it directly.
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
   {
     intrusive_ptr_add_ref(device);
-    Dout(dc::io, "this = " << (void*)this << "; Calling StreamBuf::set_output_device(" << device <<
+    Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_output_device(" << device <<
         "); incremented ref count of output device [" << device << "] (now " << device->ref_count() << ").");
   }
   m_odevice = device;
 }
+
+#ifdef CWDEBUG
+void StreamBuf::printOn(std::ostream& os) const
+{
+  os << "----------------------------------------------------------------------" << std::endl;
+  os << "max_allocated_block_size = " << m_max_allocated_block_size << "; buffer_full_watermark = " << m_buffer_full_watermark;
+  int current_number_of_blocks = 0;
+  for (MemoryBlock* block_node = m_get_area_block_node; block_node; block_node = block_node->m_next)
+    ++current_number_of_blocks;
+  os << "; current_number_of_blocks = " << current_number_of_blocks << std::endl;
+  os << "Block nodes: " << std::endl;
+  unsigned int block_count = 0;
+  size_t total_size = 0;
+  os << "Start\t\tSize\n";
+  for (MemoryBlock* block_node = m_get_area_block_node; block_node; block_node = block_node->m_next)
+  {
+    os << (void*)block_node->block_start() << '\t' << block_node->get_size() << std::endl;
+    total_size += block_node->get_size();
+    ++block_count;
+  }
+  os << "Total size: " << total_size << std::endl;
+//  if (total_size != output_buffer.get_total_block_size())
+//    DoutFatal(dc::core, "Inconsistent total allocated size!");
+  // Get a get- and put- area snapshot.
+  GetThread get_type;
+  PutThread put_type;
+  char* cur_eback;
+  char* cur_gptr;
+  char* cur_egptr;
+  char* cur_pbase;
+  char* cur_pptr;
+  char* cur_epptr;
+  {
+    GetThreadLock::crat get_area_rat(get_area_lock(get_type));
+    PutThreadLock::crat put_area_rat(put_area_lock(put_type));
+    cur_eback = eback(get_area_rat);
+    cur_gptr = gptr(get_area_rat);
+    cur_egptr = egptr(get_area_rat);
+    cur_pbase = pbase(put_area_rat);
+    cur_pptr = pptr(put_area_rat);
+    cur_epptr = epptr(put_area_rat);
+  }
+  MemoryBlock* put_area_block_node = m_put_area_block_node.load();
+  os << "get_area_block_node = " << (void*)m_get_area_block_node;
+  os << "; put_area_block_node = " << (void*)put_area_block_node << std::endl;
+  os << "get area: " << (void*)cur_eback << " - " << (void*)cur_gptr << "(" << cur_gptr - cur_eback << ")" <<
+    " - " << (void*)cur_egptr << "(" << cur_egptr - cur_eback << ")";
+#if CWDEBUG_ALLOC
+  os << "\t[ " << find_alloc(cur_eback)->start() << " (" << find_alloc(cur_eback)->size() << ") ]";
+#endif
+  os << std::endl;
+  os << "put area: " << (void*)cur_pbase << " - " << (void*)cur_pptr << "(" << cur_pptr - cur_pbase << ")" <<
+    " - " << (void*)cur_epptr << "(" << cur_epptr - cur_pbase << ")";
+#if CWDEBUG_ALLOC
+  os << "\t[ " << find_alloc(cur_pbase)->start() << " (" << find_alloc(cur_pbase)->size() << ") ]";
+#endif
+  os << std::endl;
+#if CWDEBUG_ALLOC
+  if ((char*)find_alloc(cur_eback)->start() + sizeof(MemoryBlock) != cur_eback)
+    DoutFatal(dc::core, "get area points to non-allocated block !");
+  if (cur_gptr != cur_eback && (char*)find_alloc(cur_gptr - 1)->start() + sizeof(MemoryBlock) != cur_eback)
+    DoutFatal(dc::core, "get area get pointer points outside allocated block !");
+  if (cur_egptr != cur_eback && (char*)find_alloc(cur_egptr - 1)->start() + sizeof(MemoryBlock) != cur_eback)
+    DoutFatal(dc::core, "end of get area points outside allocated block !");
+  if ((char*)find_alloc(cur_pbase)->start() + sizeof(MemoryBlock) != cur_pbase)
+    DoutFatal(dc::core, "put area points to non-allocated block !");
+  if (cur_pptr != cur_pbase && (char*)find_alloc(cur_pptr - 1)->start() + sizeof(MemoryBlock) != cur_pbase)
+    DoutFatal(dc::core, "put area put pointer points outside allocated block !");
+  if (cur_epptr != cur_pbase && (char*)find_alloc(cur_epptr - 1)->start() + sizeof(MemoryBlock) != cur_pbase)
+    DoutFatal(dc::core, "end of put area points outside allocated block !");
+#endif
+  os << "Total string length: " << total_size - (cur_gptr - cur_eback) - (cur_epptr - cur_pptr) << std::endl;
+  for (MemoryBlock* block_node = m_get_area_block_node; block_node; block_node = block_node->m_next)
+  {
+    os << "[" << (void*)block_node << "] ";
+    if (block_node == m_get_area_block_node && block_node == put_area_block_node)
+      os << "\"" << buf2str(cur_gptr, cur_pptr - cur_gptr) << "\"" << std::endl;     // Print from gptr() to pptr().
+    else if (block_node == m_get_area_block_node)
+      os << "\"" << buf2str(cur_gptr, block_node->get_size() - (cur_gptr - cur_eback)) << std::endl;      // Print from igptr() to the end of the buffer.
+    else if (block_node == put_area_block_node)
+      os << buf2str(block_node->block_start(), cur_pptr - cur_pbase) << "\"" << std::endl;   // Print from start of buffer to pptr().
+    else
+      os << buf2str(block_node->block_start(), block_node->get_size()) << std::endl;         // Print the whole buffer.
+  }
+  if (cur_eback != m_get_area_block_node->block_start() ||
+      cur_pbase != put_area_block_node->block_start() ||
+      cur_epptr != cur_pbase + put_area_block_node->get_size() ||
+      (m_get_area_block_node == put_area_block_node && cur_egptr > cur_pptr) ||
+      cur_egptr > cur_eback + m_get_area_block_node->get_size() ||
+      cur_gptr < cur_eback || cur_gptr > cur_egptr ||
+      cur_pptr < cur_pbase || cur_pptr > cur_epptr)
+    DoutFatal(dc::core, "Pointers inconsistent");
+  os << "----------------------------------------------------------------------" << std::endl;
+}
+#endif
 
 } // namespace evio

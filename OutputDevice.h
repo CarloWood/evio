@@ -92,7 +92,19 @@ class OutputDevice : public virtual FileDescriptor
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
 
  protected:
-  void start_output_device();           friend class OutputDevicePtr;
+  // The default condition just checks if the output device is not already active.
+  // When that is used, you are responsible to not call start_output_device when
+  // (in the current thread) the device is already active, also in the case of
+  // races (aka, there are no possible races allowed). Passing PutThread here
+  // should take care of that in most cases, think "only the put thread will start
+  // an output device (automatically)". However, of course that means that either
+  // the caller *is* the put thread, or you are certain the device is stopped and
+  // no put thread is running -- aka nobody is writing to the device -- when this
+  // function is being called.
+  friend class OutputDevicePtr;
+  void start_output_device(PutThread, utils::FuzzyCondition const& condition);
+  void start_output_device();
+  RefCountReleaser stop_output_device(GetThread type, utils::FuzzyCondition const& condition);
   RefCountReleaser stop_output_device();
   void disable_output_device();
   void enable_output_device();
@@ -128,15 +140,15 @@ class OutputDevice : public virtual FileDescriptor
 #endif
 
   // Returns true if our watcher is linked in with libev.
-  bool is_active() const { return ev_is_active(&m_output_watcher); }
+  template<typename ThreadType>
+  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active(m_output_watcher, type); }
 
-  // FIXME: make this thread-safe.
   void restart_if_non_active()
   {
+    AnyThread type;
     // This function should be called only from Buf2Dev::flush, and therefore be an output device.
     ASSERT(writable_type());
-    //FIXME: this looks like a race condition. Two different threads can call this function.
-    if (is_writable() && !is_active())
+    if (is_writable() && is_active(type).is_momentary_false())
       start_output_device();
   }
 

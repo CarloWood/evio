@@ -41,8 +41,8 @@ InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr
 InputDevice::~InputDevice()
 {
   DoutEntering(dc::evio, "InputDevice::~InputDevice() [" << this << ']');
-  // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
-  ASSERT(!is_active());
+  // Don't delete a device?! At most close() it and delete all boost::intrusive_ptr's to it.
+  ASSERT(!is_active(SingleThread()));
   if (is_open_r())
     close_input_device();     // This will not delete the object (again) because it isn't active.
   if (m_ibuffer)
@@ -58,7 +58,7 @@ void InputDevice::init_input_device(int fd)
 {
   DoutEntering(dc::evio, "InputDevice::init_input_device(" << fd << ") [" << this << ']');
   // Don't call init() while the InputDevice is already active.
-  ASSERT(!is_active());
+  ASSERT(!is_active(SingleThread()));
   ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, fd, EV_READ);
   m_input_watcher.data = this;
   // init() should be called immediately after opening a file descriptor.
@@ -87,8 +87,7 @@ void InputDevice::start_input_device()
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!is_destructed());
-  // If the device is already active then some other thread already called start_input_device().
-  if (EventLoopThread::start_if_not_active(m_input_watcher))
+  if (EventLoopThread::instance().start(&m_input_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
     inhibit_deletion();
@@ -105,8 +104,9 @@ RefCountReleaser InputDevice::stop_input_device()
   // true.
   // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
   // therefore only print that we enter this function when we're actually still active.
-  DoutEntering(dc::evio(is_active()), "InputDevice::stop_input_device() [" << this << ']');
-  if (EventLoopThread::stop_if_active(m_input_watcher))
+  bool currently_active = is_active(AnyThread()).is_momentary_true();
+  DoutEntering(dc::evio(currently_active), "InputDevice::stop_input_device() [" << this << ']');
+  if (currently_active && EventLoopThread::instance().stop(&m_input_watcher))
   {
     Dout(dc::evio, "Passing device " << this << " to RefCountReleaser.");
     need_release = this;
@@ -126,7 +126,7 @@ void InputDevice::enable_input_device()
 {
   m_flags &= ~FDS_R_DISABLED;
   if (is_readable())
-  start_input_device();
+    start_input_device();
   m_disable_release.execute();
 }
 
@@ -218,14 +218,6 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
     // BRWT.
     self->data_received(new_data, rlen);
 
-    if (self->m_ibuffer->buffer_full())
-    {
-      Dout(dc::evio, "fd " << fd << ": Buffer full!");
-      self->stop_input_device();
-      // FIXME: This hangs !?
-      return;
-    }
-
     // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
     // read so far). Perhaps we should just try to continue to read until EAGAIN.
     if (rlen < space)   // Did we read everything, or process at least
@@ -239,6 +231,15 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
+  // This function is both the Get Thread and the Put Thread; meaning that no other
+  // thread should be accessing this buffer by either reading from it or writing to
+  // it while we're here, or the program is ill-formed.
+  GetThread get_type;
+  PutThread put_type;
+  // Therefore we might as well obtain locks here.
+  StreamBuf::GetThreadLock::wat get_area_wat(self->m_ibuffer->get_area_lock(get_type));
+  StreamBuf::PutThreadLock::wat put_area_wat(self->m_ibuffer->put_area_lock(put_type));
+
   RefCountReleaser releaser;
   size_t len;
   while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
@@ -246,16 +247,16 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
     InputDecoder* input_decoder = static_cast<InputDecoder*>(self->m_input_device_events_handler);
     // We seem to have a complete new message and need to call `decode'
-    if (self->m_ibuffer->has_multiple_blocks())
+    if (self->m_ibuffer->has_multiple_blocks(get_type, put_type))
     {
       // The new message must start at the beginning of the buffer,
       // so the total length of the new message is total size of
       // the buffer minus what was read on top of it.
-      size_t msg_len = self->m_ibuffer->used_size() - (rlen - len);
+      size_t msg_len = self->m_ibuffer->get_data_size(get_type, put_area_wat) - (rlen - len);
 
-      if (self->m_ibuffer->is_contiguous(msg_len))
+      if (self->m_ibuffer->is_contiguous(msg_len, get_area_wat))
       {
-        releaser += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
+        releaser += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -267,9 +268,9 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
         memory_block->release();
       }
 
-      ASSERT(self->m_ibuffer->used_size() == rlen - len);
+      ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty();
+      self->m_ibuffer->raw_reduce_buffer_if_empty(get_type, put_type);
       if (self->is_disabled())
         return;
       rlen -= len;
@@ -286,12 +287,12 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      releaser += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
+      releaser += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
       self->m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(self->m_ibuffer->used_size() == rlen - len);
+      ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty();
+      self->m_ibuffer->raw_reduce_buffer_if_empty(get_type, put_type);
       if (self->is_disabled())
         return;
       rlen -= len;
@@ -307,7 +308,8 @@ size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_
 {
   DoutEntering(dc::io, "LinkBufferPlus::end_of_msg_finder");
   // We're just hijacking InputDevice::data_received here.
-  start_output_device();
+  // We're both, get and put thread; start_output_device requires PutThread.
+  start_output_device(PutThread());
   return 0;
 }
 

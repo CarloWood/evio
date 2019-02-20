@@ -43,7 +43,7 @@ OutputDevice::~OutputDevice()
 {
   DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
   // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
-  ASSERT(!is_active());
+  ASSERT(!is_active(SingleThread()));
   if (is_open_w())
     close_output_device();    // This will not delete the object (again) because it isn't active.
   if (m_obuffer)
@@ -59,7 +59,7 @@ void OutputDevice::init_output_device(int fd)
 {
   DoutEntering(dc::io, "OutputDevice::init_output_device(" << fd << ") [" << this << ']');
   // Don't call init() while the OutputDevice is already active.
-  ASSERT(!is_active());
+  ASSERT(!is_active(SingleThread()));
   ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, fd, EV_WRITE);
   m_output_watcher.data = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
@@ -80,7 +80,20 @@ void OutputDevice::start_output_device()
   DoutEntering(dc::io, "OutputDevice::start_output_device() [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(m_output_watcher.events != EV_UNDEF);
-  if (EventLoopThread::start_if_not_active(m_output_watcher))
+  if (EventLoopThread::instance().start(&m_output_watcher, this))
+  {
+    // Increment ref count to stop this object from being deleted while being active.
+    inhibit_deletion();
+    Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
+  }
+}
+
+void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& condition)
+{
+  DoutEntering(dc::io, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
+  // Call OutputDevice::init before calling OutputDevice::start_output_device.
+  ASSERT(m_output_watcher.events != EV_UNDEF);
+  if (EventLoopThread::instance().start_if(condition, &m_output_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
     inhibit_deletion();
@@ -92,11 +105,24 @@ void OutputDevice::start_output_device()
 // This function is thread-safe.
 RefCountReleaser OutputDevice::stop_output_device()
 {
+  DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << this << ']');
   RefCountReleaser need_release;
-  // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
-  // therefore only print that we enter this function when we're actually still active.
-  DoutEntering(dc::io(is_active()), "OutputDevice::stop_output_device() [" << this << ']');
-  if (EventLoopThread::stop_if_active(m_output_watcher))
+  if (EventLoopThread::instance().stop(&m_output_watcher))
+  {
+    Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
+    need_release = this;
+  }
+  // The filedescriptor, when open, is still considered to be open:
+  // A subsequent call to start_output_device() will resume handling it.
+  return need_release;
+}
+
+// GetThread only.
+RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyCondition const& condition)
+{
+  DoutEntering(dc::io, "OutputDevice::stop_output_device(" << condition << ") [" << this << ']');
+  RefCountReleaser need_release;
+  if (EventLoopThread::instance().stop_if(condition, &m_output_watcher))
   {
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
     need_release = this;
@@ -115,8 +141,7 @@ void OutputDevice::disable_output_device()
 void OutputDevice::enable_output_device()
 {
   m_flags &= ~FDS_W_DISABLED;
-  if (is_writable())
-    start_output_device();
+  restart_if_non_active();
   m_disable_release.execute();
 }
 
@@ -173,8 +198,8 @@ void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
       Dout(dc::evio, "(Buffer now empty)");
       // Note: A call to `m_obuffer->reduce_buffer_if_empty' is not necessary because
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
-      // which calls `ishowmanyc' which calls `iunderflow' which reduces the buffer
-      // if necessary.
+      // which only returns 0 when `underflow_a' returned EOF in which case that already
+      // reduced the buffer if necessary.
       self->stop_output_device();	// Buffer is empty; stop watching the fd.
       return;
     }
@@ -225,15 +250,20 @@ try_again_write1:
 int OutputDevice::sync()
 {
   DoutEntering(dc::io, "OutputDevice::sync() [" << this << ']');
+  PutThread type;
   if (AI_UNLIKELY(!is_writable()))
   {
     Dout(dc::warning, "The device is not writable!");
     return -1;
   }
-  if (!m_obuffer->buffer_empty() && !is_active())
-  {
-    start_output_device();
-  }
+  // Advance m_next_egptr, if necessary; making any data written so far available to the Get Thread.
+  m_obuffer->sync_egptr(StreamBuf::PutThreadLock::rat(m_obuffer->put_area_lock(type)));
+  utils::FuzzyCondition condition_not_empty([this, type]{
+        StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
+        return !m_obuffer->buffer_empty(put_area_rat);
+      });
+  if ((condition_not_empty && !is_active(type)).is_momentary_true())
+    start_output_device(type, condition_not_empty);
   return 0;
 }
 

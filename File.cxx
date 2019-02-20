@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "File.h"
+#include "utils/AIAlert.h"
 #include <ios>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -92,16 +93,15 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
 
   if (fd < 0)
-    // FIXME: throw exception
-    return;
+    THROW_ALERTE("open([FILENAME], [POSIX_MODE], [PROT]) = -1", AIArgs("[FILENAME]", filename)("[POSIX_MODE]", posix_mode)("[PROT]", prot));
 
   if ((mode & (ios_base::ate|ios_base::app)))
   {
     if (lseek(fd, 0, SEEK_END) == (off_t)-1)
     {
+      int errn = errno;
       ::close(fd);
-      // FIXME: throw exception
-      return;
+      THROW_ALERTC(errn, "lseek([FD], 0, SEEK_END) = -1", AIArgs("[FD]", fd));
     }
   }
 
@@ -109,8 +109,20 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   init(fd, filename);
   if (m_ibuffer)
     start_input_device();
-  if (m_obuffer && !m_obuffer->buffer_empty())
-    start_output_device();
+  if (m_obuffer)
+  {
+    // This condition assume we are the PutThread (no other thread is writing
+    // to this buffer). This is correct since we only started the input device
+    // and no other thread even know about this device/buffer yet, as we just
+    // initialized it.
+    PutThread type;
+    utils::FuzzyCondition condition_not_empty([this, type]{
+          StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
+          return !m_obuffer->buffer_empty(put_area_rat);
+        });
+    if (condition_not_empty.is_momentary_true())
+      start_output_device(type, condition_not_empty);
+  }
 }
 
 } // namespace evio

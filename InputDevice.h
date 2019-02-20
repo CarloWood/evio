@@ -136,7 +136,8 @@ class InputDevice : public virtual FileDescriptor
 #endif
 
   // Returns true if our watcher is linked in with libev.
-  bool is_active() const { return ev_is_active(&m_input_watcher); }
+  template<typename ThreadType>
+  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active(m_input_watcher, type); }
 
  public:
   //---------------------------------------------------------------------------

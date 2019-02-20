@@ -115,7 +115,11 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       THROW_FALERTE("inotify_add_watch([FD], \"[PATHNAME]\", [MASK])",
           AIArgs("[FD]", fd)("[PATHNAME]", pathname)("[MASK]", mask));
   }
-  wd_to_inotify_map_ts::wat(m_wd_to_inotify_map)->push_back(std::make_pair(wd, obj));
+  wd_to_inotify_map_ts::wat wd_to_inotify_map_w(m_wd_to_inotify_map);
+  auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
+  if (iter != wd_to_inotify_map_w->end())
+    THROW_FALERT("Attempt to add a watch for \"[PATHNAME]\" which already is being watched.", AIArgs("[PATHNAME]", pathname));
+  wd_to_inotify_map_w->push_back(std::make_pair(wd, obj));
   return wd;
 }
 

@@ -47,13 +47,11 @@ RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _
   // Add an inotify watch for modification of the corresponding path (if not already watched).
   if (!self->is_watched() && !self->open_filename().empty())
   {
-    if (self->add_watch(self->open_filename().c_str(), IN_MODIFY))
-    {
-      if (releaser)
-        self->inhibit_deletion();     // Keep this object alive because the above call registered m_inotify as callback object.
-      releaser.reset();
-      Dout(dc::io, "Incremented ref count (now " << self->FileDescriptor::ref_count() << ") of this device [" << self << ']');
-    }
+    self->add_watch(self->open_filename().c_str(), IN_MODIFY);
+    if (releaser)
+      self->inhibit_deletion();     // Keep this object alive because the above call registered m_inotify as callback object.
+    releaser.reset();
+    Dout(dc::io, "Incremented ref count (now " << self->FileDescriptor::ref_count() << ") of this device [" << self << ']');
   }
   return releaser;
 }

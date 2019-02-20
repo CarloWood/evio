@@ -49,7 +49,7 @@ class INotify
   // Constructors
   //
 
-  // Default constructor. Use `watch' to associate the object with a file.
+  // Default constructor. Use `add_watch' to associate the object with a file.
   INotify() : m_wd(-1) { }
 
  private:
@@ -67,13 +67,11 @@ class INotify
   //
   // Returns true when a pointer to this object was added to INotifyDevice::m_wd_to_inotify_map.
   //
-  bool add_watch(char const* pathname, uint32_t mask)
+  void add_watch(char const* pathname, uint32_t mask)
   {
+    // Call rm_watch() before calling add_watch() again.
+    ASSERT(m_wd == -1);
     m_wd = add_watch(pathname, mask, this);
-    //FIXME: should not return true here when nothing was added to m_wd_to_inotify_map.
-    // Maybe the same wd is returned for the same path? In that case we shouldn't
-    // add something new to the m_wd_to_inotify_map vector (aka, as if the vector is a map<wd, INotify*>).
-    return m_wd != -1;
   }
 
   // Disassociate this object from its pathname, if any.

@@ -40,7 +40,11 @@ class OutputDevicePtr
  protected:
   OutputDevice* m_output_device;
 
-  void start_output_device() { m_output_device->start_output_device(); }
+  void start_output_device(PutThread type)
+  {
+    if (m_output_device->is_active(type).is_momentary_false())
+      m_output_device->start_output_device();
+  }
 
   friend class OutputDevice;
   OutputBuffer* create_buffer(OutputDevice* output_device)

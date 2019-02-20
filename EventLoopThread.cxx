@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "evio/EventLoopThread.h"
+#include "evio/FileDescriptor.h"
 #include "threadpool/AIThreadPool.h"
 #include "debug.h"
 #include <chrono>
@@ -32,6 +33,8 @@ NAMESPACE_DEBUG_CHANNELS_START
 extern channel_ct evio;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
+
+namespace evio {
 
 //static
 void EventLoopThread::acquire_cb(EV_P) EV_THROW
@@ -201,21 +204,19 @@ void EventLoopThread::bump_terminate()
     ev_async_send(EV_A_ &m_async_w);    // Wake up the event loop (again) if we are terminating.
 }
 
-//static
 void EventLoopThread::terminate()
 {
   DoutEntering(dc::evio, "EventLoopThread::terminate()");
-  EventLoopThread& self(instance());
   {
-    std::lock_guard<std::mutex> lock(self.m_loop_mutex);
-    self.m_terminate = true;
+    std::lock_guard<std::mutex> lock(m_loop_mutex);
+    m_terminate = true;
     ev_unref(EV_A);             // Cause ev_run to exit when only m_async_w is left.
-    ev_async_send(EV_A_ &self.m_async_w);
+    ev_async_send(EV_A_ &m_async_w);
   }
-  if (self.m_event_thread.joinable())
+  if (m_event_thread.joinable())
   {
     Dout(dc::evio|continued_cf, "Joining m_event_thread... ");
-    self.m_event_thread.join();
+    m_event_thread.join();
     Dout(dc::finish, "joined");
   }
 }
@@ -234,38 +235,137 @@ EventLoopThread::~EventLoopThread()
   }
 }
 
-//static
 void EventLoopThread::start(ev_timer& timeout_watcher)
 {
-  EventLoopThread& self(instance());
-  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
   ev_timer_start(EV_A_ &timeout_watcher);
-  ev_async_send(EV_A_ &self.m_async_w);
+  ev_async_send(EV_A_ &m_async_w);
 }
 
-//static
-bool EventLoopThread::start_if_not_active(ev_io& io_watcher)
+bool EventLoopThread::start(ev_io* io_watcher, FileDescriptor* device)
 {
-  EventLoopThread& self(instance());
-  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
-  if (ev_is_active(&io_watcher))
+  // Don't start a device that is disabled.
+  if (device->is_disabled())
+  {
+    Dout(dc::warning, "Calling EventLoopThread::start(" << (void*)io_watcher << ") for a device that is disabled.");
     return false;
-  ev_io_start(EV_A_ &io_watcher);
-  ev_async_send(EV_A_ &self.m_async_w);
+  }
+
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+  // Don't start a device that is already active.
+  if (ev_is_active(io_watcher))
+    return false;
+
+  ev_io_start(EV_A_ io_watcher);
+  ev_async_send(EV_A_ &m_async_w);
   return true;
 }
 
-//static
-bool EventLoopThread::stop_if_active(ev_io& io_watcher)
+bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io_watcher, FileDescriptor* device)
 {
-  EventLoopThread& self(instance());
-  std::lock_guard<std::mutex> lock(self.m_loop_mutex);
-  if (!ev_is_active(&io_watcher))
+  // Unlikely because you shouldn't call this function if this is the case, see below.
+  if (AI_UNLIKELY(condition.is_false()))
+  {
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << (void*)io_watcher << ")");
     return false;
-  ev_io_stop(EV_A_ &io_watcher);
+  }
+
+  // Don't start a device that is disabled.
+  if (AI_UNLIKELY(device->is_disabled()))
+  {
+    Dout(dc::warning, "Calling EventLoopThread::start(" << condition << ", " << (void*)io_watcher << ") for a device that is disabled.");
+    return false;
+  }
+
+  // This should never happen. First of all, for speed up reasons you should only call
+  // this function when condition.is_momentary_true(), secondly if the condition would
+  // be transitory_false it is nonsense to check the condition again here (we really
+  // only want to call ev_io_start when the condition is true while m_loop_mutex is
+  // locked) because if the condition changed from false to true due to another thread
+  // then another thread either called this function or wrote to an empty buffer, both
+  // of the cases means that it is a put thread; that should never happen since WE are
+  // the put thread (only the put thread is expected to call this function).
+  //
+  // Another case where this assert might fail is when you call (for example)
+  // start_output_device() from  a random thread without guaranteeing (by other means)
+  // that the device is really stopped. For example, you should not call enable_output_device()
+  // without first calling disable_output_device().
+  ASSERT(!condition.is_transitory_false());
+
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+  // Don't start a device that is already active.
+  if (ev_is_active(io_watcher))
+    return false;
+
+  // This is likely because otherwise we shouldn't be using a construction with
+  // FuzzyBool / FuzzyCondition in the first place.
+  if (AI_LIKELY(condition.is_transitory_true()))
+  {
+    // Re-test condition in critical area.
+    if (!condition())
+      return false;
+  }
+#ifdef CWDEBUG
+  else
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << (void*)io_watcher << ")");
+#endif
+
+  ev_io_start(EV_A_ io_watcher);
+  ev_async_send(EV_A_ &m_async_w);
+  return true;
+}
+
+bool EventLoopThread::stop(ev_io* io_watcher)
+{
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+  // Don't stop a device that is already non-active.
+  if (!ev_is_active(io_watcher))
+    return false;
+
+  ev_io_stop(EV_A_ io_watcher);
+  return true;
+}
+
+bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_watcher)
+{
+  // Unlikely because you shouldn't call this function if this is the case, see below.
+  if (AI_UNLIKELY(condition.is_false()))
+  {
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << (void*)io_watcher << ")");
+    return false;
+  }
+
+  // See start_if.
+  ASSERT(!condition.is_transitory_false());
+
+  std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+  // Don't stop a device that is already non-active.
+  if (!ev_is_active(io_watcher))
+    return false;
+
+  // This is likely because otherwise we shouldn't be using a construction with
+  // FuzzyBool / FuzzyCondition in the first place.
+  if (AI_LIKELY(condition.is_transitory_true()))
+  {
+    // Re-test condition in critical area.
+    if (!condition())
+      return false;
+  }
+#ifdef CWDEBUG
+  else
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << (void*)io_watcher << ")");
+#endif
+
+  ev_io_stop(EV_A_ io_watcher);
   return true;
 }
 
 namespace {
 SingletonInstance<EventLoopThread> dummy __attribute__ ((__unused__));
 } // namespace
+
+} // namespace evio
