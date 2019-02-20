@@ -135,8 +135,6 @@ class MemoryBlock
     if (m_count.fetch_sub(1, std::memory_order_release) == 1)
     {
       std::atomic_thread_fence(std::memory_order_acquire);
-      // The object should be delinked before being released.
-      ASSERT(m_next == nullptr);
       this->~MemoryBlock();
       free(const_cast<MemoryBlock*>(this));
     }

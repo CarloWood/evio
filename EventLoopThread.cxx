@@ -304,7 +304,7 @@ bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io
   if (AI_LIKELY(condition.is_transitory_true()))
   {
     // Re-test condition in critical area.
-    if (!condition())
+    if (condition().is_momentary_false())
       return false;
   }
 #ifdef CWDEBUG
@@ -352,7 +352,7 @@ bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_
   if (AI_LIKELY(condition.is_transitory_true()))
   {
     // Re-test condition in critical area.
-    if (!condition())
+    if (condition().is_momentary_false())
       return false;
   }
 #ifdef CWDEBUG

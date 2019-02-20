@@ -129,8 +129,8 @@ int StreamBuf::underflow_a(GetThread type)
   int result = 0;
   while (1)
   {
-    // True if egptr points to the end of m_get_area_block_node after returning from this function.
     GetThreadLock::wat get_area_wat(get_area_lock(type));
+    // True if egptr points to the end of m_get_area_block_node after returning from this function.
     bool reached_end = sync_next_egptr(m_get_area_block_node, get_area_wat);
     if (gptr(get_area_wat) == egptr(get_area_wat))
     {
