@@ -87,17 +87,19 @@ char const* strherror(int herrno)
   return "Value of `herror' out of range";
 }
 
-void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
+void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size)
 {
   int opt = rcvbuf_size;
   if (opt == 0)
   {
     // FIXME: this heuristic makes little sense.
     // See http://www.masterraghu.com/subjects/np/introduction/unix_network_programming_v1.3/ch02lev1sec11.html for information about this subject.
-    opt = utils::nearest_power_of_two(2 * minimum_size + 256);
+    opt = utils::nearest_power_of_two(2 * minimum_block_size + 256);
     if (opt < 8192)
       opt = 8192;
   }
+  // Because the kernel allocates double the requested value, ask for half the value...
+  opt >>= 1;
   Dout(dc::warning(!utils::is_power_of_two(opt)), "set_rcvsockbuf: socket receive buffer is not a power of two!");
   Dout(dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (optval_t)&opt, sizeof(opt)) < 0)
@@ -107,15 +109,17 @@ void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_size)
   }
 }
 
-void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_size)
+void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size)
 {
   int opt = sndbuf_size;
   if (opt == 0)
   {
-    opt = utils::nearest_power_of_two(minimum_size);
+    opt = utils::nearest_power_of_two(minimum_block_size);
     if (opt < 8192)
       opt = 8192;
   }
+  // Because the kernel allocates double the requested value, ask for half the value...
+  opt >>= 1;
   Dout(dc::warning(!utils::is_power_of_two(opt)), "set_sndsockbuf: socket send buffer is not a power of two!");
   Dout(dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes.");
   if (setsockopt(sock_fd, SOL_SOCKET, SO_SNDBUF, (optval_t)&opt, sizeof(opt)) < 0)
