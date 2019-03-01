@@ -71,22 +71,6 @@ int print_hostent_on(struct hostent const* h, ostream& o)
   return 0;
 }
 
-char const* strherror(int herrno)
-{
-  switch(herrno)
-  {
-    case HOST_NOT_FOUND:
-      return "Unknown host";
-    case TRY_AGAIN:
-      return "Host name lookup failure";
-    case NO_RECOVERY:
-      return "Unknown server error";
-    case NO_DATA:
-      return "No address associated with name";
-  }
-  return "Value of `herror' out of range";
-}
-
 void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size)
 {
   int opt = rcvbuf_size;

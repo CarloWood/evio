@@ -142,7 +142,7 @@ void SocketAddress::ptr_qname(arpa_buf_t& arpa_out_buf) const
       break;
     }
     default:
-      DoutFatal(dc::fatal, "SocketAddress::ptr_qname called for " << *this << ", which isn't an IP address.");
+      DoutFatal(dc::fatal|flush_cf, "SocketAddress::ptr_qname called for " << *this << ", which isn't an IP address.");
   }
 }
 
@@ -196,6 +196,7 @@ int decode_ip_address(std::string_view ip_number_str, sa_family_t& family, uint8
   }
   char const* p = ip_number_str.data();
   char const* const end = ip_number_str.data() + ip_number_str.size();
+  int saw_non_zero = -1;
   int i = 0;                                    // Index into addr.
   while (p < end && *p != ']')
   {
@@ -230,13 +231,14 @@ PRAGMA_DIAGNOSTIC_POP
       i -= 2;
       if (saw_colon)    // IPv6?
       {
-        if (AI_UNLIKELY(!(saw_double_colon == 0 && i == 2 && addr[0] == 0xff && addr[1] == 0xff)))
+        if (AI_UNLIKELY(saw_non_zero == 1))
         {
-          THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": IPv4 mapping only allowed after \"::ffff:\".",
+          THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": IPv4 mapping only allowed after \"::\" or \"::ffff:\".",
               AIArgs("[IP_NUMBER_STR]", orig_ip_number_str));
         }
-        ip_number_str.remove_prefix(5);      // Skip over the 'ffff:'.
-        len += 5;
+        int cur = p - ip_number_str.data();
+        ip_number_str.remove_prefix(cur);      // Skip to start of IPv4 address.
+        len += cur;
       }
       else if (family == AF_INET6)
       {
@@ -259,6 +261,13 @@ PRAGMA_DIAGNOSTIC_POP
       i += 4;
       break;
     }
+    if (hextet > 0)
+    {
+      if (saw_non_zero == -1 && hextet == 0xffff)
+        saw_non_zero = 0;
+      else
+        saw_non_zero = 1;
+    }
     p = result.ptr;
     if (AI_UNLIKELY(*p != ':'))
       THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": expected ':' at \"[PTR]\"",
@@ -268,7 +277,12 @@ PRAGMA_DIAGNOSTIC_POP
     ++p;
     if (AI_UNLIKELY(*p == ':'))
     {
+      if (saw_double_colon != -1)
+        THROW_ALERT("decode_ip_address: \"[IP_NUMBER_STR]\": a double colon is only allowed once.",
+            AIArgs("[IP_NUMBER_STR]", orig_ip_number_str));
       saw_double_colon = i;
+      if (saw_non_zero == 0)
+        saw_non_zero = 1;
       ++p;
     }
   }
@@ -488,8 +502,14 @@ void SocketAddress::init(struct sockaddr const* sa_addr)
       make_sockaddr_un(std::string_view(sun->sun_path, strlen(sun->sun_path)));
       break;
     }
+    case AF_UNSPEC:
+      // AF_UNSPEC should mean 'uninitialized', see the default constructor of SocketAddress.
+      // And it is a bit suspicious when someone is trying to make a copy of something uninitialized.
+      Dout(dc::warning, "Initializing a SocketAddress with an 'uninitialized' (default constructed) SocketAddress!");
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr));
+      break;
     default:
-      DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX.");
+      DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX or AF_UNSPEC.");
   }
 }
 
@@ -531,6 +551,9 @@ bool SocketAddress::compare_with(SocketAddress const& sa, int val) const
         break;
       case AF_UNIX:
         res = strcmp(m_sockaddr_un_ptr->sun_path, sa.m_sockaddr_un_ptr->sun_path);
+        break;
+      case AF_UNSPEC:
+        res = 0;
         break;
       default:
         return false;

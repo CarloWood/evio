@@ -38,7 +38,6 @@ int print_hostent_on(struct hostent const* h, std::ostream& o);
 void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size);
 void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size);
 size_t size_of_addr(struct sockaddr const* addr);
-char const* strherror(int herrno);
 
 } // namespace evio
 
