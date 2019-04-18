@@ -137,6 +137,13 @@ ostream& operator<<(ostream& os, struct in_addr const& in)
   return os;
 }
 
+std::ostream& operator<<(std::ostream& os, struct in6_addr const& in6)
+{
+  char buf[INET6_ADDRSTRLEN];
+  os << inet_ntop(AF_INET6, &in6, buf, sizeof(buf));
+  return os;
+}
+
 #if 0   // Use SocketAddress
 
 ostream& operator<<(ostream& os, struct sockaddr_in const& s)

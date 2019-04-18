@@ -69,10 +69,10 @@ class FileDescriptor : public AIRefCount
   bool readable_type() const { return m_flags & FDS_R; }
 
   // Returns true if this object is a writable device.
-  bool is_writable() const { return (m_flags & (FDS_W|FDS_W_DISABLED|FDS_DEAD)) == FDS_W; }
+  bool is_writable() const { return (m_flags & (FDS_W|FDS_W_DISABLED|FDS_W_OPEN|FDS_DEAD)) == (FDS_W|FDS_W_OPEN); }
 
   // Returns true if this object is a readable device.
-  bool is_readable() const { return (m_flags & (FDS_R|FDS_R_DISABLED|FDS_DEAD)) == FDS_R; }
+  bool is_readable() const { return (m_flags & (FDS_R|FDS_R_DISABLED|FDS_R_OPEN|FDS_DEAD)) == (FDS_R|FDS_R_OPEN); }
 
   // Return true if this object is marked that it should not close its fd.
   bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
@@ -122,10 +122,10 @@ class FileDescriptor : public AIRefCount
 
   RefCountReleaser close()
   {
-    RefCountReleaser releaser;
-    releaser = close_input_device();
-    releaser += close_output_device();
-    return releaser;
+    RefCountReleaser need_allow_deletion;
+    need_allow_deletion = close_input_device();
+    need_allow_deletion += close_output_device();
+    return need_allow_deletion;
   }
 
   // Events.

@@ -189,16 +189,16 @@ RefCountReleaser Socket::VT_impl::read_returned_zero(InputDevice* _self)
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_returned_zero() [" << self << "]");
   self->m_connected_flags |= is_disconnected;
-  RefCountReleaser releaser = self->close();
+  RefCountReleaser need_allow_deletion = self->close();
   self->disconnected(true);     // Clean termination.
-  return releaser;
+  return need_allow_deletion;
 }
 
 RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int err)
 {
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_error(" << err << ") [" << self << "]");
-  RefCountReleaser releaser = self->close();
+  RefCountReleaser need_allow_deletion = self->close();
   if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
     self->connected(false);     // Signal connect failure.
   if ((self->m_connected_flags & is_connected))
@@ -206,7 +206,7 @@ RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int err)
     self->m_connected_flags |= is_disconnected;
     self->disconnected(false);  // Unclean termination.
   }
-  return releaser;
+  return need_allow_deletion;
 }
 
 void Socket::VT_impl::disconnected(Socket* DEBUG_ONLY(self), bool success)

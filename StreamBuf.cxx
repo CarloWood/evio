@@ -448,12 +448,19 @@ bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
 
+#ifdef CWDEBUG
+    m_odevice->inhibit_deletion();      // Allow Debug output below to still use this object.
+    int count =
+#endif
+    m_odevice->allow_deletion();
+
     Dout(dc::io, "this = " << this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
         m_device_counter << " output device left: " << m_odevice <<
-        "; decrementing ref count of that device (now " << m_odevice->ref_count() << ").");
+        "; decrementing ref count of that device (now " << (count - 2) << ").");
 
-    // Decrease the ref count of the output device again.
-    intrusive_ptr_release(m_odevice);
+#ifdef CWDEBUG
+    m_odevice->allow_deletion();
+#endif
 
     return false;
   }
@@ -466,9 +473,9 @@ void StreamBuf::set_input_device(InputDevice* device)
   ASSERT(!m_idevice);
   if (++m_device_counter == 2)
   {
-    intrusive_ptr_add_ref(m_odevice);
+    DEBUG_ONLY(int count =) m_odevice->inhibit_deletion();
     Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_input_device(" << device <<
-        "); incremented ref count of output device [" << m_odevice << "] (now " << m_odevice->ref_count() << ").");
+        "); incremented ref count of output device [" << m_odevice << "] (now " << (count + 1) << ").");
   }
   m_idevice = device;
 }
@@ -480,9 +487,9 @@ void StreamBuf::set_output_device(OutputDevice* device)
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
   {
-    intrusive_ptr_add_ref(device);
+    DEBUG_ONLY(int count =) device->inhibit_deletion();
     Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_output_device(" << device <<
-        "); incremented ref count of output device [" << device << "] (now " << device->ref_count() << ").");
+        "); incremented ref count of output device [" << device << "] (now " << (count + 1) << ").");
   }
   m_odevice = device;
 }

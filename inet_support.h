@@ -29,19 +29,19 @@
 struct hostent;
 struct sockaddr;
 struct in_addr;
-struct sockaddr_in;
-struct sockaddr_un;
+struct in6_addr;
 
 namespace evio {
 
-int print_hostent_on(struct hostent const* h, std::ostream& o);
-void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size);
-void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size);
-size_t size_of_addr(struct sockaddr const* addr);
+int print_hostent_on(struct hostent const* h, std::ostream& o);                         // Testsuite: test_print_hostent_on.h
+void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size);        // Testsuite: test_set_XXXsockbuf.h
+void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size);        // Testsuite: test_set_XXXsockbuf.h
+size_t size_of_addr(struct sockaddr const* addr);                                       // Testsuite: test_size_of_addr.h
 
 } // namespace evio
 
-std::ostream& operator<<(std::ostream& os, struct in_addr const& in);
+std::ostream& operator<<(std::ostream& os, struct in_addr const& in);                   // Wrapper around inet_ntop(3).
+std::ostream& operator<<(std::ostream& os, struct in6_addr const& in6);                 // Wrapper around inet_ntop(3).
 #if 0 // Use SocketAddress
 std::ostream& operator<<(std::ostream& os, struct sockaddr_in const& s);
 std::ostream& operator<<(std::ostream& os, struct sockaddr_un const& s);

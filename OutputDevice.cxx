@@ -83,8 +83,10 @@ void OutputDevice::start_output_device()
   if (EventLoopThread::instance().start(&m_output_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    inhibit_deletion();
-    Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
+    // Object is kept alive until the destruction of the RefCountReleaser returned
+    // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
+    DEBUG_ONLY(int count =) inhibit_deletion();
+    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
 
@@ -96,8 +98,10 @@ void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& c
   if (EventLoopThread::instance().start_if(condition, &m_output_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    inhibit_deletion();
-    Dout(dc::io, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
+    // Object is kept alive until the destruction of the RefCountReleaser returned
+    // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
+    DEBUG_ONLY(int count =) inhibit_deletion();
+    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
 
@@ -106,30 +110,30 @@ void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& c
 RefCountReleaser OutputDevice::stop_output_device()
 {
   DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << this << ']');
-  RefCountReleaser need_release;
+  RefCountReleaser need_allow_deletion;
   if (EventLoopThread::instance().stop(&m_output_watcher))
   {
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
-    need_release = this;
+    need_allow_deletion = this;
   }
   // The filedescriptor, when open, is still considered to be open:
   // A subsequent call to start_output_device() will resume handling it.
-  return need_release;
+  return need_allow_deletion;
 }
 
 // GetThread only.
 RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::io, "OutputDevice::stop_output_device(" << condition << ") [" << this << ']');
-  RefCountReleaser need_release;
+  RefCountReleaser need_allow_deletion;
   if (EventLoopThread::instance().stop_if(condition, &m_output_watcher))
   {
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
-    need_release = this;
+    need_allow_deletion = this;
   }
   // The filedescriptor, when open, is still considered to be open:
   // A subsequent call to start_output_device() will resume handling it.
-  return need_release;
+  return need_allow_deletion;
 }
 
 void OutputDevice::disable_output_device()
@@ -148,7 +152,7 @@ void OutputDevice::enable_output_device()
 RefCountReleaser OutputDevice::close_output_device()
 {
   DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
-  RefCountReleaser releaser;
+  RefCountReleaser need_allow_deletion;
   int output_fd = m_output_watcher.fd;
   if (AI_LIKELY(is_open_w()))
   {
@@ -163,7 +167,7 @@ RefCountReleaser OutputDevice::close_output_device()
     if (!already_closed && !is_valid(output_fd))
       Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << output_fd << ".");
 #endif
-    releaser = stop_output_device();
+    need_allow_deletion = stop_output_device();
     if (!already_closed && !dont_close())
     {
       Dout(dc::io|continued_cf, "close(" << output_fd << ") = ");
@@ -175,12 +179,12 @@ RefCountReleaser OutputDevice::close_output_device()
     if (!is_open())
     {
       m_flags |= FDS_DEAD;
-      releaser += closed();
+      need_allow_deletion += closed();
     }
     else if ((m_flags & FDS_SAME))
-      releaser += close_input_device();
+      need_allow_deletion += close_input_device();
   }
-  return releaser;
+  return need_allow_deletion;
 }
 
 // Write `m_obuffer' to fd.

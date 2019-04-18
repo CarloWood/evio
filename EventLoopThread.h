@@ -106,7 +106,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
     std::lock_guard<std::mutex> lock(m_loop_mutex);
 
-    // Basically we need to following table to hold:
+    // Basically we need the following table to hold:
     //  Currently active  SingleThread    AnyThread       GetThread       PutThread
     //       yes          True            WasTrue         True            WasTrue
     //        no          False           WasFalse        WasFalse        False

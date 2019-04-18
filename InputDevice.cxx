@@ -90,14 +90,16 @@ void InputDevice::start_input_device()
   if (EventLoopThread::instance().start(&m_input_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    inhibit_deletion();
-    Dout(dc::evio, "Incremented ref count (now " << ref_count() << ") [" << this << ']');
+    // Object is kept alive until the destruction of the RefCountReleaser returned
+    // by InputDevice::stop_input_device() after that called `need_allow_deletion = this`.
+    DEBUG_ONLY(int count =) inhibit_deletion();
+    Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
 
 RefCountReleaser InputDevice::stop_input_device()
 {
-  RefCountReleaser need_release;
+  RefCountReleaser need_allow_deletion;
   // We assume that stop_input_device can be called from another thread (than start_output_device)
   // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
   // the destruction of the lock object in that function) at which point is_active() will return
@@ -109,24 +111,33 @@ RefCountReleaser InputDevice::stop_input_device()
   if (currently_active && EventLoopThread::instance().stop(&m_input_watcher))
   {
     Dout(dc::evio, "Passing device " << this << " to RefCountReleaser.");
-    need_release = this;
+    need_allow_deletion = this;
   }
   // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
-  return need_release;
+  return need_allow_deletion;
 }
 
 void InputDevice::disable_input_device()
 {
+  DoutEntering(dc::evio, "InputDevice::disable_input_device()");
+  // Don't call disable_input_device() twice; call disable_input_device and enable_input_device() strictly alternating.
+  ASSERT((m_flags & FDS_R_DISABLED) == 0);
   m_flags |= FDS_R_DISABLED;
+  // Keep a disabled device alive (assuming it was started).
   m_disable_release = stop_input_device();
 }
 
 void InputDevice::enable_input_device()
 {
+  DoutEntering(dc::evio, "InputDevice::enable_input_device()");
+  // Call disable_input_device before calling enable_input_device and call disable_input_device and enable_input_device() strictly alternating.
+  ASSERT((m_flags & FDS_R_DISABLED) != 0);
   m_flags &= ~FDS_R_DISABLED;
+  // If the device was started when it was disabled, restart it now.
   if (is_readable())
     start_input_device();
+  // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
   m_disable_release.execute();
 }
 
@@ -134,7 +145,7 @@ void InputDevice::enable_input_device()
 RefCountReleaser InputDevice::close_input_device()
 {
   DoutEntering(dc::evio, "InputDevice::close_input_device() [" << this << ']');
-  RefCountReleaser releaser;
+  RefCountReleaser need_allow_deletion;
   int input_fd = m_input_watcher.fd;
   if (AI_LIKELY(is_open_r()))
   {
@@ -149,7 +160,7 @@ RefCountReleaser InputDevice::close_input_device()
     if (!already_closed && !is_valid(input_fd))
       Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << input_fd << ".");
 #endif
-    releaser = stop_input_device();
+    need_allow_deletion = stop_input_device();
     if (!already_closed && !dont_close())
     {
       Dout(dc::evio|continued_cf, "close(" << input_fd << ") = ");
@@ -162,12 +173,12 @@ RefCountReleaser InputDevice::close_input_device()
     if (!is_open())
     {
       m_flags |= FDS_DEAD;
-      releaser += closed();
+      need_allow_deletion += closed();
     }
     else if ((m_flags & FDS_SAME))
-      releaser += close_output_device();
+      need_allow_deletion += close_output_device();
   }
-  return releaser;
+  return need_allow_deletion;
 }
 
 // BWT.
@@ -240,7 +251,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
   StreamBuf::GetThreadLock::wat get_area_wat(self->m_ibuffer->get_area_lock(get_type));
   StreamBuf::PutThreadLock::wat put_area_wat(self->m_ibuffer->put_area_lock(put_type));
 
-  RefCountReleaser releaser;
+  RefCountReleaser need_allow_deletion;
   size_t len;
   while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
   {
@@ -256,7 +267,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
 
       if (self->m_ibuffer->is_contiguous(msg_len, get_area_wat))
       {
-        releaser += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
+        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -264,7 +275,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
         MemoryBlock* memory_block = MemoryBlock::create(msg_len);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        releaser += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        need_allow_deletion += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
@@ -287,7 +298,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      releaser += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
+      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
       self->m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);

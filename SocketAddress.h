@@ -40,7 +40,7 @@ namespace evio {
 // This class represent socket addresses, like IPv4 and IPv6 end points
 // and UNIX sockets.
 
-class SocketAddress
+class SocketAddress             // TestSuite: test_SocketAddress.h
 {
   union {
     struct {

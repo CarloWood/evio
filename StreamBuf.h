@@ -273,6 +273,13 @@ class MsgBlock
 class streambuf : private std::streambuf
 {
  public:
+  // Standard member types.
+  using char_type = std::streambuf::char_type;
+  using traits_type = std::streambuf::traits_type;
+  using int_type = std::streambuf::int_type;
+  using pos_type = std::streambuf::pos_type;
+  using off_type = std::streambuf::off_type;
+
   using GetThreadLock = aithreadsafe::Wrapper<GetThread, aithreadsafe::policy::Primitive<std::mutex>>;
   using PutThreadLock = aithreadsafe::Wrapper<PutThread, aithreadsafe::policy::Primitive<std::mutex>>;
 

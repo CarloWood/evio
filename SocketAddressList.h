@@ -33,7 +33,7 @@ namespace evio {
 //
 // class SocketAddressList
 //
-// This class represent a list (one or more) of SocketAddress objects.
+// This class represent a list (zero or more) of SocketAddress objects.
 
 class SocketAddressList
 {
@@ -48,10 +48,11 @@ class SocketAddressList
   SocketAddressList& operator=(SocketAddressList&& socket_address_list) { mList = std::move(socket_address_list.mList); return *this; }
   SocketAddressList& operator=(SocketAddressList const& socket_address_list) { mList = socket_address_list.mList; return *this; }
 
+  SocketAddressList& operator+=(SocketAddress&& sockaddr) { mList.push_back(std::move(sockaddr)); return *this; }
+  SocketAddressList& operator+=(SocketAddress const& sockaddr) { mList.push_back(sockaddr); return *this; }
+
   SocketAddressList& operator=(struct addrinfo const* info_list);
   SocketAddressList(struct addrinfo const* info_list) { *this = info_list; }
-
-  SocketAddressList& operator+=(SocketAddress sockaddr) { mList.emplace_back(sockaddr); return *this; }
 
   void clear() { mList.clear(); }
   size_t size() const { return mList.size(); }

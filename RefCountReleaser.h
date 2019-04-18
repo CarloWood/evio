@@ -24,7 +24,7 @@
 #pragma once
 
 #include "debug.h"
-#include "utils/AIRefCount.h"   // Needed for intrusive_ptr_release(AIRefCount*)
+#include "utils/AIRefCount.h"
 #include "utils/macros.h"
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -35,7 +35,7 @@ NAMESPACE_DEBUG_CHANNELS_END
 
 namespace evio {
 
-struct RefCountReleaser
+struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
 {
  private:
   AIRefCount* m_ptr;
@@ -45,15 +45,15 @@ struct RefCountReleaser
   {
     if (m_ptr)
     {
-      Dout(dc::io, "Decrementing ref count of device " << (void*)m_ptr << " to " << (m_ptr->ref_count() - 1));
       // Cancel the call to inhibit_deletion().
-      m_ptr->allow_deletion();
+      DEBUG_ONLY(int count =) m_ptr->allow_deletion();
+      Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
     }
     m_ptr = nullptr;
   }
   RefCountReleaser() : m_ptr(nullptr) { }
   ~RefCountReleaser() { execute(); }
-  RefCountReleaser(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; }
+  RefCountReleaser(RefCountReleaser&& releaser) : m_ptr(releaser.m_ptr) { releaser.m_ptr = nullptr; }
   RefCountReleaser& operator=(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; return *this; }
   RefCountReleaser& operator+=(RefCountReleaser&& releaser)
   {
@@ -62,10 +62,14 @@ struct RefCountReleaser
       if (m_ptr)
       {
         ASSERT(m_ptr == releaser.m_ptr);
+        ASSERT(m_ptr->unique().is_momentary_false()); // If momentary false than fuzzy::False because neither this nor releaser will call execute() before the next line.
+        // It is safe to call this because it won't delete the underlaying object (m_ptr);
+        // it is from now on kept alive by this RefCountReleaser.
         releaser.execute();
       }
       else
       {
+        // Move releaser to *this.
         m_ptr = releaser.m_ptr;
         releaser.m_ptr = nullptr;
       }
