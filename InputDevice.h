@@ -113,7 +113,7 @@ class InputDevice : public virtual FileDescriptor
   RefCountReleaser stop_input_device();
   void disable_input_device();
   void enable_input_device();
-  int get_input_fd() const;
+  int get_input_fd() const override;
 
  protected:
   // Constructor.
