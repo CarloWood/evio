@@ -116,15 +116,15 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   FileDescriptor::init(fd);     // link in
   SingleThread type;
   if (m_ibuffer)
-    start_input_device();
+    start_input_device(type);
   if (signal_connected)
-    start_output_device();
+    start_output_device(type);
   else if (m_obuffer)
   {
     StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
     StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
     if (!m_obuffer->buffer_empty(get_area_rat, put_area_rat))   // Must be the same thread as the thread that created the buffer.
-      start_output_device();
+      start_output_device(type);
   }
 }
 

@@ -42,7 +42,7 @@ InputDevice::~InputDevice()
 {
   DoutEntering(dc::evio, "InputDevice::~InputDevice() [" << this << ']');
   // Don't delete a device?! At most close() it and delete all boost::intrusive_ptr's to it.
-  ASSERT(!is_active(SingleThread()));
+  ASSERT(is_active(SingleThread()).is_false());
   if (is_open_r())
     close_input_device();     // This will not delete the object (again) because it isn't active.
   if (m_ibuffer)
@@ -58,7 +58,7 @@ void InputDevice::init_input_device(int fd)
 {
   DoutEntering(dc::evio, "InputDevice::init_input_device(" << fd << ") [" << this << ']');
   // Don't call init() while the InputDevice is already active.
-  ASSERT(!is_active(SingleThread()));
+  ASSERT(is_active(SingleThread()).is_momentary_false());
   ev_io_init(&m_input_watcher, InputDevice::s_evio_cb, fd, EV_READ);
   m_input_watcher.data = this;
   // init() should be called immediately after opening a file descriptor.
@@ -76,7 +76,7 @@ int InputDevice::get_input_fd() const
   return m_input_watcher.fd;
 }
 
-void InputDevice::start_input_device()
+void InputDevice::start_input_device(GetThread)
 {
   DoutEntering(dc::evio, "InputDevice::start_input_device() [" << this << ']');
   // Call InputDevice::init before calling InputDevice::start.
@@ -87,6 +87,8 @@ void InputDevice::start_input_device()
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!is_destructed());
+  // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
+  // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
   if (EventLoopThread::instance().start(&m_input_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
@@ -121,24 +123,28 @@ RefCountReleaser InputDevice::stop_input_device()
 void InputDevice::disable_input_device()
 {
   DoutEntering(dc::evio, "InputDevice::disable_input_device()");
-  // Don't call disable_input_device() twice; call disable_input_device and enable_input_device() strictly alternating.
-  ASSERT((m_flags & FDS_R_DISABLED) == 0);
-  m_flags |= FDS_R_DISABLED;
-  // Keep a disabled device alive (assuming it was started).
-  m_disable_release = stop_input_device();
+  flags_t flags = m_flags.fetch_or(FDS_R_DISABLED);
+  if ((flags & FDS_R_DISABLED) == 0)
+  {
+    // Keep a disabled device alive (assuming it was started).
+    disable_release_t::wat disable_release_w(m_disable_release);
+    *disable_release_w = stop_input_device();
+  }
 }
 
-void InputDevice::enable_input_device()
+void InputDevice::enable_input_device(GetThread type)
 {
   DoutEntering(dc::evio, "InputDevice::enable_input_device()");
-  // Call disable_input_device before calling enable_input_device and call disable_input_device and enable_input_device() strictly alternating.
-  ASSERT((m_flags & FDS_R_DISABLED) != 0);
-  m_flags &= ~FDS_R_DISABLED;
-  // If the device was started when it was disabled, restart it now.
-  if (is_readable())
-    start_input_device();
-  // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
-  m_disable_release.execute();
+  int flags = m_flags.fetch_and(~FDS_R_DISABLED);
+  if ((flags & FDS_R_DISABLED) != 0)
+  {
+    // If the device was started when it was disabled, restart it now.
+    if (is_readable())
+      start_input_device(type);
+    // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
+    disable_release_t::wat disable_release_w(m_disable_release);
+    disable_release_w->execute();
+  }
 }
 
 // FIXME: make this thread-safe
@@ -169,6 +175,9 @@ RefCountReleaser InputDevice::close_input_device()
       Dout(dc::finish, err);
     }
     m_flags &= ~FDS_R_OPEN;
+    // Remove any pending disable, if any (see the code in enable_input_device).
+    if ((m_flags.fetch_and(~FDS_R_DISABLED) & FDS_R_DISABLED) != 0)
+      disable_release_t::wat(m_disable_release)->execute();
     // Mark the device as dead when it has no longer any open file descriptor.
     if (!is_open())
     {
@@ -267,7 +276,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
 
       if (self->m_ibuffer->is_contiguous(msg_len, get_area_wat))
       {
-        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
+        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -275,7 +284,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
         MemoryBlock* memory_block = MemoryBlock::create(msg_len);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        need_allow_deletion += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        need_allow_deletion += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block), get_type);
         memory_block->release();
       }
 
@@ -298,7 +307,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)));
+      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
       self->m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);
@@ -321,6 +330,9 @@ size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_
   // We're just hijacking InputDevice::data_received here.
   // We're both, get and put thread; start_output_device requires PutThread.
   start_output_device(PutThread());
+  // This function MUST return 0 (returning a value larger than 0 is only allowed
+  // by InputDecoder::end_of_msg_finder() or classes derived from InputDecoder).
+  // See the cast to InputDecoder in InputDevice::VT_impl::data_received.
   return 0;
 }
 

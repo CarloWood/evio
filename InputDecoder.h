@@ -34,12 +34,15 @@ namespace evio {
 
 static constexpr size_t default_input_blocksize_c = 512;
 
+// This class is used as the base class of InputDecoder or LinkBufferPlus.
+// Any class that is not (an) InputDecoder that derives from this class
+// must define a end_of_msg_finder that returns 0.
 class InputDeviceEventsHandler
 {
  protected:
   InputDevice* m_input_device;
 
-  void start_input_device() { m_input_device->start_input_device(); }
+  void start_input_device(GetThread type) { m_input_device->start_input_device(type); }
   RefCountReleaser stop_input_device() { return m_input_device->stop_input_device(); }
 
   friend class InputDevice;
@@ -82,7 +85,7 @@ class InputDecoder : public InputDeviceEventsHandler
   }
 
   friend class InputDevice;
-  virtual RefCountReleaser decode(MsgBlock&& msg) = 0;
+  virtual RefCountReleaser decode(MsgBlock&& msg, GetThread type) = 0;
 };
 
 } // namespace evio

@@ -97,7 +97,8 @@ class InputDevice : public virtual FileDescriptor
   //
 
   ev_io m_input_watcher;                // The watcher.
-  RefCountReleaser m_disable_release;
+  using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
+  disable_release_t m_disable_release;
 
  protected:
   //---------------------------------------------------------------------------
@@ -109,10 +110,10 @@ class InputDevice : public virtual FileDescriptor
 
  protected:
   friend class InputDeviceEventsHandler;
-  void start_input_device();
+  void start_input_device(GetThread);
   RefCountReleaser stop_input_device();
   void disable_input_device();
-  void enable_input_device();
+  void enable_input_device(GetThread type);
   int get_input_fd() const override;
 
  protected:
@@ -137,7 +138,7 @@ class InputDevice : public virtual FileDescriptor
 
   // Returns true if our watcher is linked in with libev.
   template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active(m_input_watcher, type); }
+  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active_input_device(m_input_watcher, type); }
 
  public:
   //---------------------------------------------------------------------------

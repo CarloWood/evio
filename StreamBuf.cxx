@@ -421,14 +421,16 @@ int Buf2Dev::sync()
 void Buf2Dev::flush()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
-  m_odevice->restart_if_non_active();
+  PutThread type;
+  m_odevice->restart_if_non_active(type);
 }
 
 // Read thread of linked device.
 void LinkBuffer::flush()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
-  m_odevice->restart_if_non_active();
+  PutThread type;
+  m_odevice->restart_if_non_active(type);
 }
 
 bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))

@@ -81,7 +81,8 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   ev_io m_output_watcher;               // The watcher.
-  RefCountReleaser m_disable_release;
+  using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
+  disable_release_t m_disable_release;
 
  protected:
   //---------------------------------------------------------------------------
@@ -103,11 +104,11 @@ class OutputDevice : public virtual FileDescriptor
   // function is being called.
   friend class OutputDevicePtr;
   void start_output_device(PutThread, utils::FuzzyCondition const& condition);
-  void start_output_device();
+  void start_output_device(PutThread);
   RefCountReleaser stop_output_device(GetThread type, utils::FuzzyCondition const& condition);
   RefCountReleaser stop_output_device();
   void disable_output_device();
-  void enable_output_device();
+  void enable_output_device(PutThread type);
   int get_output_fd() const;
 
  protected:
@@ -141,15 +142,14 @@ class OutputDevice : public virtual FileDescriptor
 
   // Returns true if our watcher is linked in with libev.
   template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active(m_output_watcher, type); }
+  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active_output_device(m_output_watcher, type); }
 
-  void restart_if_non_active()
+  void restart_if_non_active(PutThread type)
   {
-    AnyThread type;
     // This function should be called only from Buf2Dev::flush, and therefore be an output device.
     ASSERT(writable_type());
-    if (is_writable() && is_active(type).is_momentary_false())
-      start_output_device();
+    if (is_writable() && is_active(type).is_false())
+      start_output_device(type);
   }
 
  public:

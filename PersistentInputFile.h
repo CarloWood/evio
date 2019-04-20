@@ -65,10 +65,10 @@ class PersistentInputFile : public File, private INotify
 
  protected:
   // Override method of INotify.
-  void event_occurred(inotify_event const* event) override
+  void event_occurred(GetThread type, inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
-      start_input_device();
+      start_input_device(type);
   }
 
  public:

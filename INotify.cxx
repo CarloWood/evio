@@ -48,7 +48,7 @@ class INotifyDecoder : public InputDecoder
 
  protected:
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
-  RefCountReleaser decode(MsgBlock&& msg) override;
+  RefCountReleaser decode(MsgBlock&& msg, GetThread type) override;
 };
 
 //=============================================================================
@@ -101,9 +101,10 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       if (fd == -1)
         THROW_FALERTE("with pathname = \"[PATHNAME]\"; inotify_init1");
       init(fd);
+      SingleThread type;
       // Call input() before calling add_watch(). The library should have done this!
       ASSERT(m_input_device_events_handler && m_ibuffer);
-      start_input_device();
+      start_input_device(type);
       // Exit ev_run when this device is still running.
       ev_unref(EV_A);
     }
@@ -207,7 +208,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-RefCountReleaser INotifyDecoder::decode(MsgBlock&& msg)
+RefCountReleaser INotifyDecoder::decode(MsgBlock&& msg, GetThread type)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
@@ -218,7 +219,7 @@ RefCountReleaser INotifyDecoder::decode(MsgBlock&& msg)
   {
     INotifyDevice* device = static_cast<INotifyDevice*>(m_input_device);
     INotify* obj = device->get_inotify_obj(INotifyDevice::wd_to_inotify_map_ts::rat(device->m_wd_to_inotify_map), event->wd)->second;
-    obj->event_occurred(event);
+    obj->event_occurred(type, event);
   }
   return RefCountReleaser();
 }

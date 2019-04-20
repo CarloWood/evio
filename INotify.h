@@ -31,6 +31,7 @@
 namespace evio {
 
 class INotifyDecoder;
+class GetThread;
 
 //=============================================================================
 //
@@ -91,7 +92,7 @@ class INotify
 
  protected:
   friend INotifyDecoder;
-  virtual void event_occurred(inotify_event const* event) = 0;
+  virtual void event_occurred(GetThread type, inotify_event const* event) = 0;
 };
 
 } // namespace evio

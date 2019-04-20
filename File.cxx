@@ -107,15 +107,15 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
 
   // Success.
   init(fd, filename);
+  SingleThread type;
   if (m_ibuffer)
-    start_input_device();
+    start_input_device(type);
   if (m_obuffer)
   {
-    // This condition assume we are the PutThread (no other thread is writing
+    // This condition assumes we are the PutThread (no other thread is writing
     // to this buffer). This is correct since we only started the input device
-    // and no other thread even know about this device/buffer yet, as we just
-    // initialized it.
-    PutThread type;
+    // and no other thread but the EventLoopThread even knows about this
+    // device/buffer yet, as we just initialized it.
     utils::FuzzyCondition condition_not_empty([this, type]{
           StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
           return !m_obuffer->buffer_empty(put_area_rat);

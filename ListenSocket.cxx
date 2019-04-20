@@ -100,7 +100,8 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   Dout(dc::notice, "Added listen socket " << fd << " at " << m_bind_addr);
 
   // input() does not need to be called here, because we override read_from_fd.
-  start_input_device();
+  SingleThread type;
+  start_input_device(type);
 }
 
 void ListenSocketDevice::VT_impl::read_from_fd(InputDevice* _self, int fd)

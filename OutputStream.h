@@ -42,8 +42,8 @@ class OutputDevicePtr
 
   void start_output_device(PutThread type)
   {
-    if (m_output_device->is_active(type).is_momentary_false())
-      m_output_device->start_output_device();
+    if (m_output_device->is_active(type).is_false())
+      m_output_device->start_output_device(type);
   }
 
   friend class OutputDevice;

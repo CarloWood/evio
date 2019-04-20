@@ -719,7 +719,6 @@ class LinkBuffer : public Dev2Buf
   size_t buf2dev_contiguous_forced() { GetThread type; return force_next_contiguous_number_of_bytes(type); }
   char* buf2dev_ptr() const { GetThread type; return gptr(GetThreadLock::crat(get_area_lock(type))); }
   void buf2dev_bump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); m_buffer_size_minus_unused_in_first_block -= n; }
-  // Called by Put Thread.
   void flush();
   //-----------------------------------------------------------
 
@@ -744,6 +743,9 @@ inline void StreamBuf::reduce_buffer_if_empty(GetThread get_type, PutThread put_
 
 // Program reading from a device:
 
+// This class may NOT define any variables; it is merely an interface.
+// A Dev2Buf can and is cast to an InputBuffer to obtain this interface, even though
+// originally it wasn't created as a LinkBuffer, see InputDevice::set_link_input.
 class InputBuffer : public Dev2Buf
 {
  public:

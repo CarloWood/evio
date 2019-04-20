@@ -97,7 +97,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void init(AIQueueHandle handler);
 
   template<class ThreadType>
-  utils::FuzzyBool is_active(ev_io const& io_watcher, ThreadType)
+  utils::FuzzyBool is_active_input_device(ev_io const& io_watcher, ThreadType)
   {
     constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
     constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
@@ -108,24 +108,28 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
     // Basically we need the following table to hold:
     //  Currently active  SingleThread    AnyThread       GetThread       PutThread
-    //       yes          True            WasTrue         True            WasTrue
+    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
+    //        no          False           WasFalse        False           WasFalse
+    //
+    return ev_is_active(&io_watcher) ? fuzzy::WasTrue : (get_thread ? fuzzy::False : fuzzy::WasFalse);
+  }
+
+  template<class ThreadType>
+  utils::FuzzyBool is_active_output_device(ev_io const& io_watcher, ThreadType)
+  {
+    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
+    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
+    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
+                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
+
+    std::lock_guard<std::mutex> lock(m_loop_mutex);
+
+    // Basically we need the following table to hold:
+    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
+    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
     //        no          False           WasFalse        WasFalse        False
     //
-    // The choice in the last two columns follow from the following: assuming that
-    // ev_io_start() is only called by EventLoopThread::start_if, which in turn is
-    // only called by the thread that writes to a buffer, so a PutThread;
-    // while ev_io_stop() is only called by EventLoopThread::stop_if, which in turn
-    // is only called by the thread that reads from a buffer, so a GetThread.
-    //
-    // Hence the following possible transitions exist:
-    // GetThread: active --> not active.
-    // PutThread: not active -> active.
-    //
-    // Therefore, if this is not the put_thread then a volatile transition from false to true may happen, --------------.
-    // while if this is not the get_thread then a volatile transition from true to false may happen.                    |
-    //                                                                   |                                              |
-    //                                                                   v                                              v
-    return ev_is_active(&io_watcher) ? (get_thread ? fuzzy::True : fuzzy::WasTrue) : (put_thread ? fuzzy::False : fuzzy::WasFalse);
+    return ev_is_active(&io_watcher) ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
   }
 
   void start(ev_timer& timeout_watcher);

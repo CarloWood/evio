@@ -72,7 +72,8 @@ class ListenSocketDevice : public InputDevice
     ASSERT(!bind_addr.is_unspecified() && (m_bind_addr.is_unspecified() || is_dead()));
     m_bind_addr = std::move(bind_addr);
     init(fd);
-    start_input_device();
+    evio::SingleThread type;
+    start_input_device(type);
   }
 
   // Close the socket associated with this object.

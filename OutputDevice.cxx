@@ -75,11 +75,13 @@ int OutputDevice::get_output_fd() const
   return m_output_watcher.fd;
 }
 
-void OutputDevice::start_output_device()
+void OutputDevice::start_output_device(PutThread)
 {
   DoutEntering(dc::io, "OutputDevice::start_output_device() [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(m_output_watcher.events != EV_UNDEF);
+  // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
+  // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
   if (EventLoopThread::instance().start(&m_output_watcher, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
@@ -138,15 +140,24 @@ RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyConditi
 
 void OutputDevice::disable_output_device()
 {
-  m_flags |= FDS_W_DISABLED;
-  m_disable_release = stop_output_device();
+  int flags = m_flags.fetch_or(FDS_W_DISABLED);
+  if ((flags & FDS_W_DISABLED) == 0)
+  {
+    disable_release_t::wat disable_release_w(m_disable_release);
+    *disable_release_w = stop_output_device();
+  }
 }
 
-void OutputDevice::enable_output_device()
+void OutputDevice::enable_output_device(PutThread type)
 {
-  m_flags &= ~FDS_W_DISABLED;
-  restart_if_non_active();
-  m_disable_release.execute();
+  DoutEntering(dc::evio, "OutputDevice::enable_output_device()");
+  int flags = m_flags.fetch_and(~FDS_W_DISABLED);
+  if ((flags & FDS_W_DISABLED) != 0)
+  {
+    restart_if_non_active(type);
+    disable_release_t::wat disable_release_w(m_disable_release);
+    disable_release_w->execute();
+  }
 }
 
 RefCountReleaser OutputDevice::close_output_device()
@@ -176,6 +187,9 @@ RefCountReleaser OutputDevice::close_output_device()
       Dout(dc::finish, err);
     }
     m_flags &= ~FDS_W_OPEN;
+    // Remove any pending disable (see the code in close_output_device).
+    if ((m_flags.fetch_and(~FDS_W_DISABLED) & FDS_W_DISABLED) != 0)
+      disable_release_t::wat(m_disable_release)->execute();
     if (!is_open())
     {
       m_flags |= FDS_DEAD;
