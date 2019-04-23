@@ -194,6 +194,7 @@ RefCountReleaser InputDevice::close_input_device()
 void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 {
   DoutEntering(dc::evio, "InputDevice::read_from_fd(" << fd << ") [" << self << ']');
+  RefCountReleaser need_allow_deletion;
   ssize_t space = self->m_ibuffer->dev2buf_contiguous();
   for (;;)
   {
@@ -236,7 +237,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 
     // The data is now in the buffer. This is where we becomes the reading thread.
     // BRWT.
-    self->data_received(new_data, rlen);
+    need_allow_deletion += self->data_received(new_data, rlen);
 
     // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
     // read so far). Perhaps we should just try to continue to read until EAGAIN.
@@ -248,9 +249,11 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 }
 
 // BRWT.
-void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
+RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
+  RefCountReleaser need_allow_deletion;
+
   // This function is both the Get Thread and the Put Thread; meaning that no other
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
@@ -260,7 +263,6 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
   StreamBuf::GetThreadLock::wat get_area_wat(self->m_ibuffer->get_area_lock(get_type));
   StreamBuf::PutThreadLock::wat put_area_wat(self->m_ibuffer->put_area_lock(put_type));
 
-  RefCountReleaser need_allow_deletion;
   size_t len;
   while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
   {
@@ -276,8 +278,8 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
 
       if (self->m_ibuffer->is_contiguous(msg_len, get_area_wat))
       {
-        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
-        self->m_ibuffer->raw_gbump(msg_len);
+        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(get_area_wat), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
+        self->m_ibuffer->raw_gbump(get_area_wat, msg_len);
       }
       else
       {
@@ -290,9 +292,9 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
 
       ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty(get_type, put_type);
+      self->m_ibuffer->raw_reduce_buffer_if_empty(get_area_wat, put_area_wat);
       if (self->is_disabled())
-        return;
+        return need_allow_deletion;
       rlen -= len;
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
@@ -305,16 +307,16 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     // The next loop eats up all complete messages in this last block.
     do
     {
-      char* start = self->m_ibuffer->raw_gptr();
+      char* start = self->m_ibuffer->raw_gptr(get_area_wat);
       size_t msg_len = (size_t)(new_data - start) + len;
       need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
-      self->m_ibuffer->raw_gbump(msg_len);
+      self->m_ibuffer->raw_gbump(get_area_wat, msg_len);
 
       ASSERT(self->m_ibuffer->get_data_size(get_type, put_area_wat) == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty(get_type, put_type);
+      self->m_ibuffer->raw_reduce_buffer_if_empty(get_area_wat, put_area_wat);
       if (self->is_disabled())
-        return;
+        return need_allow_deletion;
       rlen -= len;
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
@@ -322,6 +324,7 @@ void InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data
     } while ((len = input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
     break;
   }
+  return need_allow_deletion;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))

@@ -49,7 +49,7 @@ class InputDevice : public virtual FileDescriptor
     void (*_read_from_fd)(InputDevice* self, int fd);
     RefCountReleaser (*_read_returned_zero)(InputDevice* self);
     RefCountReleaser (*_read_error)(InputDevice* self, int err);
-    void (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
+    RefCountReleaser (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
   };
 
   struct VT_impl
@@ -73,7 +73,7 @@ class InputDevice : public virtual FileDescriptor
     static RefCountReleaser read_error(InputDevice* self, int UNUSED_ARG(err)) { return self->close(); }        // Read thread.
 
     // The default behavior is to do nothing.
-    static void data_received(InputDevice* self, char const* new_data, size_t rlen);
+    static RefCountReleaser data_received(InputDevice* self, char const* new_data, size_t rlen);
 
     // Virtual table of InputDevice.
     static constexpr VT_type VT{
@@ -165,14 +165,14 @@ class InputDevice : public virtual FileDescriptor
   {
     // Release the mutex on 'loop' while calling an external function.
     auto release_lock = EventLoopThread::temporary_release(EV_A);
-    static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);
+    static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);            // This might delete both, 'w' and 'w->data'.
   }
 
  protected:
   void read_from_fd(int fd) { VT_ptr->_read_from_fd(this, fd); }
   RefCountReleaser read_returned_zero() { return VT_ptr->_read_returned_zero(this); }
   RefCountReleaser read_error(int err) { return VT_ptr->_read_error(this, err); }
-  void data_received(char const* new_data, size_t rlen) { VT_ptr->_data_received(this, new_data, rlen); }
+  RefCountReleaser data_received(char const* new_data, size_t rlen) { return VT_ptr->_data_received(this, new_data, rlen); }
 };
 
 } // namespace evio

@@ -33,7 +33,7 @@
 
 namespace evio {
 
-static constexpr size_t default_output_blocksize_c = 2048;
+static constexpr size_t default_output_blocksize_c = 2048 - sizeof(MemoryBlock) - CW_MALLOC_OVERHEAD;
 
 class OutputDevicePtr
 {

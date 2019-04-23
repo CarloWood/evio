@@ -625,7 +625,7 @@ class StreamBuf : public streambuf
   // Manipulators and accessors that are called from InputBuffer/OutputBuffer.
 
   // Should be called to make sure that the buffer also decreases.
-  inline void reduce_buffer_if_empty(GetThread get_type, PutThread put_type);
+  inline void reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
 };
 
 //
@@ -731,12 +731,8 @@ class LinkBuffer : public Dev2Buf
   Buf2Dev const* as_Buf2Dev() const { return static_cast<Buf2Dev const*>(static_cast<StreamBuf const*>(this)); }
 };
 
-inline void StreamBuf::reduce_buffer_if_empty(GetThread get_type, PutThread put_type)
+inline void StreamBuf::reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat)
 {
-  // Considering that this is both the get- and put- thread, there isn't really
-  // a reason to obtain the locks...
-  GetThreadLock::wat get_area_wat(get_area_lock(get_type));
-  PutThreadLock::wat put_area_wat(put_area_lock(put_type));
   if (buffer_empty(get_area_wat, put_area_wat))
     reduce_buffer(get_area_wat, put_area_wat);
 }
@@ -755,12 +751,12 @@ class InputBuffer : public Dev2Buf
   // Stuff below reads from the input buffer and therefore should be BRT.
 
   // Raw binary access (instead of using istream):
-  char* raw_gptr() const { GetThread type; return gptr(GetThreadLock::crat(get_area_lock(type))); }   // Get pointer to get area.
-  void raw_gbump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); m_buffer_size_minus_unused_in_first_block -= n; }       // Bump pointer `n' bytes.
+  char* raw_gptr(GetThreadLock::crat const& get_area_rat) const { return gptr(get_area_rat); }   // Get pointer to get area.
+  void raw_gbump(GetThreadLock::wat const& get_area_wat, int n) { gbump(n, get_area_wat); m_buffer_size_minus_unused_in_first_block -= n; }       // Bump pointer `n' bytes.
   size_t raw_sgetn(char* s, size_t n) { GetThread type; return xsgetn_a(s, n, type); }   // Read `n' bytes and copy them to `s'.
 
   // Administration:
-  void raw_reduce_buffer_if_empty(GetThread get_type, PutThread put_type) { reduce_buffer_if_empty(get_type, put_type); } // Should be called to make sure that the buffer also decreases.
+  void raw_reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat) { reduce_buffer_if_empty(get_area_wat, put_area_wat); } // Should be called to make sure that the buffer also decreases.
 };
 
 // Program writing to a device:

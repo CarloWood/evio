@@ -32,7 +32,7 @@
 
 namespace evio {
 
-static constexpr size_t default_input_blocksize_c = 512;
+static constexpr size_t default_input_blocksize_c = 512 - sizeof(MemoryBlock) - CW_MALLOC_OVERHEAD;
 
 // This class is used as the base class of InputDecoder or LinkBufferPlus.
 // Any class that is not (an) InputDecoder that derives from this class
@@ -80,6 +80,7 @@ class InputDecoder : public InputDeviceEventsHandler
   // BRT.
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override
   {
+    DoutEntering(dc::io, "InputDecoder::end_of_msg_finder(..., " << rlen << ")");
     char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
     return newline ? newline - new_data + 1 : 0;
   }

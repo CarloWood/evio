@@ -137,7 +137,7 @@ class FileDescriptor : public AIRefCount
 #if CWDEBUG
   friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
   {
-    return os << static_cast<void const*>(fdptr);
+    return os << "FD:" << static_cast<void const*>(fdptr);
   }
 #endif
 };
