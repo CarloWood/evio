@@ -58,13 +58,14 @@ class FuzzyCondition : public FuzzyBool
 namespace evio {
 
 class FileDescriptor;
+class EventLoop;
 
 class EventLoopThread : public Singleton<EventLoopThread>
 {
   // This is a singleton.
   // However, you must call EventLoopThread::instance().init(handler) to initialize it before use.
   friend_Instance;
-  EventLoopThread() : m_inside_invoke_pending(false), m_terminate(false) { }
+  EventLoopThread() : m_inside_invoke_pending(false), m_terminate(not_yet) { }
   ~EventLoopThread();
   EventLoopThread(EventLoopThread const&) = delete;
 
@@ -79,7 +80,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   std::condition_variable m_invoke_handled_cv;
   bool m_invoke_handled;
   bool m_inside_invoke_pending;
-  bool m_terminate;
+  enum terminate_type { not_yet, cleanly, forced } m_terminate;
 
   ev_async m_async_w;
   std::atomic_bool m_running;
@@ -92,9 +93,11 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
   void run();
   void handle_invoke_pending();
+  friend class EventLoop;
+  void init(AIQueueHandle handler);     // Called from the constructor of EventLoop.
+  void terminate(bool normal_exit);     // Called from the destructor of EventLoop; exit as soon as all watchers added by start() have finished.
 
  public:
-  void init(AIQueueHandle handler);
 
   template<class ThreadType>
   utils::FuzzyBool is_active_input_device(ev_io const& io_watcher, ThreadType)
@@ -137,7 +140,6 @@ class EventLoopThread : public Singleton<EventLoopThread>
   bool stop(ev_io* io_watcher);
   bool start_if(utils::FuzzyCondition const& condition, ev_io* io_watcher, evio::FileDescriptor* device);
   bool stop_if(utils::FuzzyCondition const& condition, ev_io* io_watcher);
-  void terminate();                      // Exit as soon as all watchers added by start() have finished.
 
   void invoke_pending();
 
@@ -170,6 +172,21 @@ class EventLoopThread : public Singleton<EventLoopThread>
   {
     return TemporaryRelease(EV_A);
   }
+};
+
+class EventLoop
+{
+ private:
+  bool m_normal_exit;
+
+ public:
+  EventLoop(AIQueueHandle handler);
+  ~EventLoop();
+
+ // Call this immediately before the EventLoop leaves scope in order
+ // to make the EventLoopThread *finish* what it was doing before terminating.
+ // Leaving the scope by exception (without calling join()) then will force the EventLoop to terminate abruptly.
+ void join() { m_normal_exit = true; }
 };
 
 } // namespace evio

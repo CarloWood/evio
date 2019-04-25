@@ -61,8 +61,7 @@ void EventLoopThread::invoke_pending_cb(EV_P)
 //static
 void EventLoopThread::main(EV_P)
 {
-  Debug(NAMESPACE_DEBUG::init_thread());
-  Dout(dc::evio, "Event loop thread started.");
+  Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
   static_cast<EventLoopThread*>(ev_userdata(EV_A))->run();
 }
 
@@ -129,6 +128,12 @@ void EventLoopThread::handle_invoke_pending()
   std::unique_lock<std::mutex> lock(m_loop_mutex, std::adopt_lock);
   while (ev_pending_count(EV_A))
   {
+    if (AI_UNLIKELY(m_terminate == forced))
+    {
+      Dout(dc::evio, "Forced exit from event loop.");
+      break;
+    }
+    else
     {
       AIThreadPool& thread_pool(AIThreadPool::instance());
       auto const max_duration = std::chrono::milliseconds(64);
@@ -168,6 +173,8 @@ void EventLoopThread::handle_invoke_pending()
   }
   // Leave the mutex locked.
   lock.release();
+  if (AI_UNLIKELY(m_terminate == forced))
+    ev_break(EVBREAK_ALL);
   Dout(dc::evio|flush_cf, "Leaving EventLoopThread::handle_invoke_pending()");
 }
 
@@ -204,18 +211,18 @@ void EventLoopThread::bump_terminate()
     ev_async_send(EV_A_ &m_async_w);    // Wake up the event loop (again) if we are terminating.
 }
 
-void EventLoopThread::terminate()
+void EventLoopThread::terminate(bool normal_exit)
 {
-  DoutEntering(dc::evio, "EventLoopThread::terminate()");
+  DoutEntering(dc::evio, "EventLoopThread::terminate(" << normal_exit << ")");
   {
     std::lock_guard<std::mutex> lock(m_loop_mutex);
-    m_terminate = true;
+    m_terminate = normal_exit ? cleanly : forced;
     ev_unref(EV_A);             // Cause ev_run to exit when only m_async_w is left.
     ev_async_send(EV_A_ &m_async_w);
   }
   if (m_event_thread.joinable())
   {
-    Dout(dc::evio|continued_cf, "Joining m_event_thread... ");
+    Dout(dc::evio|continued_cf|flush_cf, "Joining m_event_thread... ");
     m_event_thread.join();
     Dout(dc::finish, "joined");
   }
@@ -367,5 +374,20 @@ bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_
 namespace {
 SingletonInstance<EventLoopThread> dummy __attribute__ ((__unused__));
 } // namespace
+
+EventLoop::EventLoop(AIQueueHandle handler) : m_normal_exit(false)
+{
+  DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ")");
+  EventLoopThread::instance().init(handler);
+}
+
+EventLoop::~EventLoop()
+{
+  DoutEntering(dc::evio, "EventLoop::~EventLoop()");
+  if (!m_normal_exit)
+    // Normally you want to call event_loop.join() at the end of the scope of an EventLoop event_loop(handler);
+    Dout(dc::warning, "Unclean exit from EventLoop!");
+  EventLoopThread::instance().terminate(m_normal_exit);
+}
 
 } // namespace evio
