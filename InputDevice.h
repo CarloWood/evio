@@ -192,7 +192,7 @@ void InputDevice::input(InputDecoder& input_decoder, Args... input_buffer_argume
 // Device-device link declarations.
 
 // A LinkBufferPlus plays the role of link buffer, InputDeviceEventsHandler and OutputDevicePtr all at once.
-class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, OutputDevicePtr
+class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, public OutputDevicePtr
 {
  public:
   LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :

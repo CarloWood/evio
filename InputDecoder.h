@@ -53,7 +53,7 @@ class InputDeviceEventsHandler
   InputBuffer* create_buffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark)
       { return create_buffer(input_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
   virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t, size_t)
-      { /* Should never be called */ return nullptr; }
+      { /* Should never be used */ return nullptr; }
 
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // BRT.
@@ -68,7 +68,7 @@ class InputDecoder : public InputDeviceEventsHandler
       size_t minimum_blocksize = default_input_blocksize_c,
       size_t buffer_full_watermark = std::numeric_limits<size_t>::max(),
       size_t max_alloc = std::numeric_limits<size_t>::max()
-      )
+      ) override
   {
     m_input_device = input_device;
     InputBuffer* input_buffer = new InputBuffer(input_device, minimum_blocksize, buffer_full_watermark, max_alloc);
