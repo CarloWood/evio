@@ -503,7 +503,9 @@ void StreamBuf::set_output_device(OutputDevice* device)
 void StreamBuf::printOn(std::ostream& os) const
 {
   os << "----------------------------------------------------------------------" << std::endl;
-  os << "max_allocated_block_size = " << m_max_allocated_block_size << "; buffer_full_watermark = " << m_buffer_full_watermark;
+  os << "minimum_block_size = " << m_minimum_block_size << "; "
+        "buffer_full_watermark = " << m_buffer_full_watermark << "; "
+        "max_allocated_block_size = " << m_max_allocated_block_size;
   int current_number_of_blocks = 0;
   for (MemoryBlock* block_node = m_get_area_block_node; block_node; block_node = block_node->m_next)
     ++current_number_of_blocks;
