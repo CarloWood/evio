@@ -62,12 +62,12 @@ class InputDeviceEventsHandler
 
 class InputDecoder : public InputDeviceEventsHandler
 {
- protected:
+ private:
   InputBuffer* create_buffer(
       InputDevice* input_device,
-      size_t minimum_blocksize = default_input_blocksize_c,
-      size_t buffer_full_watermark = std::numeric_limits<size_t>::max(),
-      size_t max_alloc = std::numeric_limits<size_t>::max()
+      size_t minimum_blocksize,
+      size_t buffer_full_watermark,
+      size_t max_alloc
       ) override
   {
     m_input_device = input_device;
@@ -75,6 +75,7 @@ class InputDecoder : public InputDeviceEventsHandler
     return input_buffer;
   }
 
+ protected:
   // Given the char array new_data of size rlen, returns the length of the string (starting a new_data) up to and
   // including the first newline, char if any. Otherwise returns 0.
   // BRT.

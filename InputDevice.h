@@ -185,7 +185,7 @@ template<typename... Args>
 void InputDevice::input(InputDecoder& input_decoder, Args... input_buffer_arguments)
 {
   Dout(dc::evio, "InputDevice::input(" << (void*)&input_decoder << ", ...) [" << this << ']');
-  m_ibuffer = input_decoder.create_buffer(this, input_buffer_arguments...);
+  m_ibuffer = static_cast<InputDeviceEventsHandler&>(input_decoder).create_buffer(this, input_buffer_arguments...);
   m_input_device_events_handler = &input_decoder;
 }
 

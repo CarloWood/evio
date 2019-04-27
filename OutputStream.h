@@ -54,7 +54,7 @@ class OutputDevicePtr
   OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark)
       { return create_buffer(output_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
   virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t, size_t)
-      { /* Should never be called */ return nullptr; }
+      { /* Should never be used. */ return nullptr; }
 };
 
 class OutputStream : public std::ostream, public OutputDevicePtr
