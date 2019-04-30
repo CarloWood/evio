@@ -21,8 +21,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// Define this (and DEBUG) to get an ENORMOUS ammount of debug output,
-#undef DEBUGDBSTREAMBUF
+// Configure with --enable-debug-buffers, which should define DEBUGDBSTREAMBUF,
+// (and define CWDEBUG) to get an ENORMOUS amount of debug output.
 
 #include "sys.h"
 #include "debug.h"
@@ -87,7 +87,7 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
 {
   DoutEntering(dc::evio, "StreamBuf::overflow_a(" << char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   if (c == static_cast<int_type>(EOF))
     return 0;
@@ -117,7 +117,7 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
   m_put_area_block_node.store(new_block, std::memory_order_release);            // Now the Get Thread may read the previous value (and advance m_get_area_block_node to it).
   //===========================================================
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   return 0;
 }
@@ -127,7 +127,7 @@ int StreamBuf::underflow_a(GetThread type)
 {
   DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   int result = 0;
   while (1)
@@ -161,7 +161,7 @@ int StreamBuf::underflow_a(GetThread type)
     break;
   }
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   return result;
 }
@@ -179,12 +179,12 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 {
   DoutEntering(dc::evio|continued_cf, "pbackfail(" << c << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   if (c == static_cast<int_type>(EOF))
   {
 #ifdef DEBUGDBSTREAMBUF
-    printOn(cerr);
+    printOn(std::cerr);
 #endif
     Dout(dc::finish, "Returning 0");
     return 0;
@@ -220,7 +220,7 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
   if (AI_UNLIKELY(!gptr_at_eback))
     get_area_block_node->release();
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   Dout(dc::finish, "Returning 0");
   return 0;
@@ -240,7 +240,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   std::streamsize remaining = n;
   while (remaining > 0)
@@ -280,9 +280,9 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
       //===========================================================
     }
   }
-  Dout(dc::finish, "Returning " << (n - remaining));
+  Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   m_buffer_size_minus_unused_in_first_block -= n - remaining;
   return n - remaining;
@@ -293,7 +293,7 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   std::streamsize remaining = n;
   while (remaining > 0)
@@ -342,9 +342,9 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
       //===========================================================
     }
   }
-  Dout(dc::finish, "Returning " << (n - remaining));
+  Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
-  printOn(cerr);
+  printOn(std::cerr);
 #endif
   return n - remaining;
 }

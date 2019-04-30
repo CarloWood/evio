@@ -283,6 +283,16 @@ class streambuf : private std::streambuf
   using GetThreadLock = aithreadsafe::Wrapper<GetThread, aithreadsafe::policy::Primitive<std::mutex>>;
   using PutThreadLock = aithreadsafe::Wrapper<PutThread, aithreadsafe::policy::Primitive<std::mutex>>;
 
+  // Using these is the same as writing to an ostream (that uses this buffer):
+  // The written data will not be visible to the GetThread until one flushes
+  // the stream (calls sync() on the buffer -- which calls sync_egptr) AND reaches
+  // the end of the current get area (so that underflow is called) or calls
+  // sync_next_egptr() directly.
+  using std::streambuf::sputc;
+  using std::streambuf::sputn;
+  using std::streambuf::sbumpc;
+  using std::streambuf::sgetn;
+
  private:
   using GetThreadAccess = GetThreadLock::wat;
   using PutThreadAccess = PutThreadLock::wat;
@@ -332,6 +342,7 @@ class streambuf : private std::streambuf
   // Constructor; m_next_egptr is set by a call to setp from StreamBuf().
   streambuf() : m_input_streambuf(this) { }
 
+#if 0
   // Initialize the input buffer pointer.
   void set_input_buffer(streambuf* input_buffer, SingleThread)
   {
@@ -340,6 +351,7 @@ class streambuf : private std::streambuf
     m_input_streambuf = input_buffer;
     m_input_streambuf->std::streambuf::setg(start, start, start);
   }
+#endif
 
   // Get area / Get Thread / Reading.
   [[gnu::always_inline]] auto eback(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::eback(); }
@@ -390,7 +402,6 @@ class streambuf : private std::streambuf
 class StreamBuf : public streambuf
 {
  public:
-  using int_type = std::streambuf::int_type;
   size_t const m_minimum_block_size;            // Size of the smallest block.
   size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
   size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
@@ -474,7 +485,8 @@ class StreamBuf : public streambuf
   size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
 
   // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
+  // m_buffer_size_minus_unused_in_last_block is not updated at the moment.
+//  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
 
   // Return the number of bytes currently in the buffer.
   std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
@@ -508,7 +520,7 @@ class StreamBuf : public streambuf
   //
 
   // Construct a StreamBuf object. The minimum number of allocated bytes for
-  // one block of the output buffer is minimum_blocksize.
+  // one block of the output buffer is minimum_block_size.
   // The maximum possible number of total allocated bytes of all blocks
   // together is max_alloc. When this value is reached, overflow() will
   // return EOF.
@@ -522,7 +534,7 @@ class StreamBuf : public streambuf
   StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
 
   // Finish initialization by setting the input buffer of this StreamBuf.
-  void set_input_buffer(StreamBuf* input_buffer) { SingleThread type; streambuf::set_input_buffer(input_buffer, type); }
+//  void set_input_buffer(StreamBuf* input_buffer) { SingleThread type; streambuf::set_input_buffer(input_buffer, type); }
 
  protected:
   //---------------------------------------------------------------------------
@@ -571,9 +583,9 @@ class StreamBuf : public streambuf
   // Return the amount of contiguous bytes in the get area.
   // This might return 0 even if the buffer isn't empty, therefore call
   // force_next_contiguous_number_of_bytes() when it returns 0.
-  size_t next_contiguous_number_of_bytes(GetThread type)
+  size_t next_contiguous_number_of_bytes(GetThread type) const
   {
-    GetThreadLock::rat get_area_rat(get_area_lock(type));
+    GetThreadLock::crat get_area_rat(get_area_lock(type));
     return egptr(get_area_rat) - gptr(get_area_rat);
   }
 
@@ -671,7 +683,7 @@ class Buf2Dev : public StreamBuf
   using StreamBuf::StreamBuf;
 
   // Reading by the device:
-  size_t buf2dev_contiguous()                                   // Returns the number of bytes that are available for reading
+  size_t buf2dev_contiguous() const                             // Returns the number of bytes that are available for reading
   {                                                             // from memory from position buf2dev_ptr() right now.
     GetThread type;                                             // Call buf2dev_contiguous_forced() if this returns 0.
     return next_contiguous_number_of_bytes(type);
@@ -715,7 +727,7 @@ class LinkBuffer : public Dev2Buf
 
   //-----------------------------------------------------------
   // DUPLICATE METHODS OF Buf2Dev (maybe only be called by the Get Thread).
-  size_t buf2dev_contiguous() { GetThread type; return next_contiguous_number_of_bytes(type); }
+  size_t buf2dev_contiguous() const { GetThread type; return next_contiguous_number_of_bytes(type); }
   size_t buf2dev_contiguous_forced() { GetThread type; return force_next_contiguous_number_of_bytes(type); }
   char* buf2dev_ptr() const { GetThread type; return gptr(GetThreadLock::crat(get_area_lock(type))); }
   void buf2dev_bump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); m_buffer_size_minus_unused_in_first_block -= n; }
@@ -782,7 +794,7 @@ class OutputBuffer : public Buf2Dev
 inline bool StreamBuf::is_contiguous(size_t len, GetThreadLock::crat const& get_area_crat) const
 {
   GetThread type;
-#ifdef DEBUGDBSTREAMBUF
+#if defined(CWDEBUG) && defined(DEBUGDBSTREAMBUF)
   if (gptr(get_area_crat) < get_area_block_node_start(type) || gptr(get_area_crat) > get_area_block_node_end(type))
     DoutFatal( dc::core, "Ack! getpointer out of sync with get_area_block_node !" );
 #endif
