@@ -94,14 +94,14 @@ namespace evio {
 // The actual act of starting or stopping a device is protected by a mutex
 // (there is only one thread at a time (allowed) in libev). In order to
 // assure that we will never end up in a prolongued state where the buffer
-// not empty but the device is stopped (and to a lesser degree where the
+// is not empty but the device is stopped (and to a lesser degree where the
 // buffer is empty but the device is started, as that will correct itself)
 // we need to test if the buffer is actually (still) empty inside the critical
 // area of libev (prior to stopping the device) in the case the original
 // test resulted in WasTrue.
 //
 // Consider reading from a buffer till it is empty and stopping the device,
-// followed by writing the buffer and starting the device (not race):
+// followed by writing to the buffer and starting the device (not race):
 //
 //     empty_buffer(GetThread)          !empty_buffer(PutThread)
 //

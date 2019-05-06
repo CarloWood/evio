@@ -92,6 +92,7 @@ static constexpr size_t malloc_overhead_c = CW_MALLOC_OVERHEAD;
 
 class MemoryBlock
 {
+  friend class streambuf;               // Needs read access to m_next.
   friend class StreamBuf;               // Needs access to create.
   friend class MsgBlock;                // Needs access to create/add_reference/release.
   friend class InputDevice;             // Needs access to create/release.
@@ -298,7 +299,9 @@ class streambuf : private std::streambuf
   using PutThreadAccess = PutThreadLock::wat;
 
   streambuf* m_input_streambuf;         // Buffer that we read from.
-  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr.
+  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the GetThread has to reset the get area.
+  std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
+  std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the PutThread.
   GetThreadLock m_get_area_lock;
   PutThreadLock m_put_area_lock;
 
@@ -307,6 +310,42 @@ class streambuf : private std::streambuf
   PutThreadLock const& put_area_lock(PutThread) const { return m_put_area_lock; }
   GetThreadLock& get_area_lock(GetThread) { return m_get_area_lock; }
   PutThreadLock& put_area_lock(PutThread) { return m_put_area_lock; }
+
+  // Store the current value of pptr in m_next_egptr.
+  [[gnu::always_inline]] void sync_egptr(char* cur_pptr, PutThreadLock::crat const&)
+  {
+    m_next_egptr2 = cur_pptr;                   // Must be memory_order_seq_cst.
+    // Do not, ourselves, overwrite a null value - that is a signal to the GetThread that the get area has to be
+    // reset to the beginning of the current block and only the GetThread may change m_next_egptr to non-null again
+    // (see sync_next_egptr below).
+    if (m_next_egptr)                           // Must be memory_order_seq_cst.
+      m_next_egptr.store(cur_pptr, std::memory_order_release);
+  }
+  [[gnu::always_inline]] void sync_egptr(PutThreadLock::crat const& put_area_rat)
+  {
+    sync_egptr(std::streambuf::pptr(), put_area_rat);
+  }
+
+  // If m_next_egptr == nullptr, then reset the get area to the start of get_area_block_node
+  // and sync m_next_egptr with value from the last call to sync_egptr(). Then continue with
+  // the following:
+  //
+  // If next_egptr is not inside the current get_area_block_node and both gptr and egptr point to the
+  // end of that block (so the get area is empty) then advance the get_area_block_node to the next
+  // block node in the chain and set the get area pointers to the beginning of the new block. Then
+  // continue with the following:
+  //
+  // If next_egptr is not inside the current get_area_block_node then advance egptr to the end
+  // of the current get_area_block_node. Otherwise set it to the last known pptr value ("next_egptr")
+  // (from the last call to sync_egptr()).
+  //
+  // This function updates cur_gptr to the current gptr, available to current egptr minus gptr and
+  // possibly advances get_area_block_node to get_area_block_node->next.
+  //
+  // Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
+  bool update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat);
+
+  char* update_put_area(std::streamsize& available, PutThreadLock::rat const& put_area_rat);
 
  private:
   // Override virtual functions.
@@ -365,38 +404,19 @@ class streambuf : private std::streambuf
   [[gnu::always_inline]] auto pptr(PutThreadLock::crat const&) const { return std::streambuf::pptr(); }
   [[gnu::always_inline]] auto epptr(PutThreadLock::crat const&) const { return std::streambuf::epptr(); }
   // Note that the way m_next_egptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
-  [[gnu::always_inline]] void pbump(int n, PutThreadLock::wat const& type) { std::streambuf::pbump(n); sync_egptr(type); }
-  [[gnu::always_inline]] void setp(char* p, char* ep, PutThreadLock::wat const&)
+  [[gnu::always_inline]] void pbump(int n, PutThreadLock::wat const& put_area_wat) { std::streambuf::pbump(n); sync_egptr(put_area_wat); }
+  [[gnu::always_inline]] void setp(char* p, char* ep, PutThreadLock::wat const& put_area_wat)
   {
-    m_next_egptr.store(p, std::memory_order_release);
+    sync_egptr(p, put_area_wat);
     std::streambuf::setp(p, ep);
   }
-  void setp_pbump(char* p, char* ep, int n, PutThreadLock::wat const&)
+  void setp_pbump(char* p, char* ep, int n, PutThreadLock::wat const& put_area_wat)
   {
-    m_next_egptr.store(p + n, std::memory_order_release);
+    sync_egptr(p + n, put_area_wat);
     std::streambuf::setp(p, ep);
     std::streambuf::pbump(n);
   }
-
- public:
-  // Store the current value of pptr in m_next_egptr.
-  [[gnu::always_inline]] void sync_egptr(PutThreadLock::crat const&) { m_next_egptr.store(std::streambuf::pptr(), std::memory_order_release); }
-
-  // Advance egptr to the last known pptr value and return true when egptr is set to the end of get_area_block_node.
-  // Note that if the put area resides in a different block than get_area_block_node (or pptr points to the end)
-  // then egptr will be set to the end of get_area_block_node and this function will return true.
-  bool sync_next_egptr(MemoryBlock* get_area_block_node, GetThreadLock::wat const& get_area_wat)
-  {
-    char* next_egptr = m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
-    char* start = get_area_block_node->block_start();
-    size_t size = get_area_block_node->get_size();
-    char* end = start + size;
-    bool before_end = start <= next_egptr && next_egptr < end;
-    if (before_end)
-      end = next_egptr;
-    setg(start, gptr(get_area_wat), end, get_area_wat);
-    return !before_end;
-  }
+  [[gnu::always_inline]] void store_last_gptr(char* p) { m_last_gptr.store(p, std::memory_order_release); }
 };
 
 class StreamBuf : public streambuf
@@ -590,7 +610,8 @@ class StreamBuf : public streambuf
   }
 
   // Returns the number of bytes that can be read directly from memory
-  // from position igptr(). Do not return 0 unless the buffer is empty.
+  // from position igptr(). Do not return 0 unless everything that
+  // was written before the last call to sync_egptr() has been read.
   size_t force_next_contiguous_number_of_bytes(GetThread type)
   {
     size_t contiguous_size;

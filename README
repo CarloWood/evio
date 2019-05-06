@@ -35,3 +35,52 @@ MemoryBlocksBuffer
 - Reading thread        (exclusively reads buffer memory)
 - Accessor threads      (does not access buffer memory)
 
+---
+
+Because the six pointers of the get/put area in std::streambuf are not
+atomic and not protected by a mutex, nor can be completely protected by
+a mutex by a derived class (for example, std::streambuf::sbumpc doesn't
+call a virtual function but writes directly to where gptr() points and
+then increments the gptr) care must be taken that each pointer is only
+ever accessed by one thread at a time.
+
+Since we can have two threads accessing the streambuf at the same time
+(called the PutThread which writes to the buffer, and GetThread which
+reads from the buffer) it is clear that this means the PutThread is the
+only thread that may access the three pointers of the put area while
+the GetThread is the only thread that may access the three pointers of
+the get area.
+
+In order to avoid excessive and unnecessary allocation of new memory
+blocks, it is desirable to "reset" both get area and put area when a
+buffer runs empty.
+
+The design to achieve this is as follows:
+
+When the PutThread "flushes" written data, it makes its current pptr
+known to the GetThread by copying it to an atomic variable (m_next_egptr2
+and when m_next_egptr is not equal nullptr also to m_next_egptr.
+
+When the GetThread hits egptr (underflow() is called), or when xsgetn()
+is called, the GetThread copies the current value of m_next_egptr to
+egptr.
+
+Whenever the GetThread has nothing to read anymore, which means gptr
+and egptr became equal to that last copied value of m_next_egptr, it
+copies its current gptr/egptr value to m_last_gptr.
+
+Whenever the PutThread is about to write new data, it should check
+if pptr is equal to m_last_gptr; if that is the case than necessarily
+gptr == egptr == m_last_gptr == pptr == m_next_egptr and the buffer
+is completely empty; and since we're the PutThread it will stay
+empty while we do the following:
+
+The PutThread then 'resets': it sets m_next_egptr to nullptr
+and pptr to the point to the start of the current block and
+continues writing as usual (possibly updating m_next_egptr2 again).
+
+When the GetThread tries to read again and it sees that m_next_egptr
+equals nullptr, it moves gptr to the start of the current block,
+resets m_last_gptr to the start of the current block and then
+restores m_next_egptr to the latest m_next_egptr2 value.
+

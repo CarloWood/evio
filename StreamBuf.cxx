@@ -91,35 +91,152 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
 #endif
   if (c == static_cast<int_type>(EOF))
     return 0;
-  //===========================================================
-  // Create a new MemoryBlock.
-  size_t block_size = new_block_size(type);
-  // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
-  std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
-  if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
+  std::streamsize available;
+  char* cur_pptr = update_put_area(available, PutThreadLock::rat(put_area_lock(type)));
+  if (available == 0)
   {
-    size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
-    if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
+    //===========================================================
+    // Create a new MemoryBlock.
+    size_t block_size = new_block_size(type);
+    // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
+    std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
+    if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
     {
-      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
-      return static_cast<int_type>(EOF);
+      size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
+      if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
+      {
+        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
+        return static_cast<int_type>(EOF);
+      }
+      size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
+      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
+      block_size = max_block_size;
     }
-    size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
-    m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
-    block_size = max_block_size;
+    MemoryBlock* new_block = MemoryBlock::create(block_size);
+    char* start = new_block->block_start();
+    *start = c;   // Write data before calling setp_pbump.
+    // Only after the next line, get_data_size_upper_bound(PutThread) will return the correct value again.
+    setp_pbump(start, start + block_size, 1, PutThreadLock::wat(put_area_lock(type)));
+    m_put_area_block_node.load(std::memory_order_relaxed)->m_next = new_block;    // The Get Thread is guaranteed not to read m_put_area_block_node->m_next.
+    m_put_area_block_node.store(new_block, std::memory_order_release);            // Now the Get Thread may read the previous value (and advance m_get_area_block_node to it).
+    //===========================================================
   }
-  MemoryBlock* new_block = MemoryBlock::create(block_size);
-  char* start = new_block->block_start();
-  *start = c;   // Write data before calling setp_pbump.
-  // Only after the next line, get_data_size_upper_bound(PutThread) will return the correct value again.
-  setp_pbump(start, start + block_size, 1, PutThreadLock::wat(put_area_lock(type)));
-  m_put_area_block_node.load(std::memory_order_relaxed)->m_next = new_block;    // The Get Thread is guaranteed not to read m_put_area_block_node->m_next.
-  m_put_area_block_node.store(new_block, std::memory_order_release);            // Now the Get Thread may read the previous value (and advance m_get_area_block_node to it).
-  //===========================================================
+  else
+  {
+    *cur_pptr = c;
+    pbump(1, PutThreadLock::wat(put_area_lock(type)));
+  }
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
   return 0;
+}
+
+bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
+{
+  // Get a copy of the last 'sync-ed' pptr.
+  char* next_egptr = m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
+  char* start = get_area_block_node->block_start();
+  char* end = start + get_area_block_node->get_size();
+  // There are several possible cases:
+  //
+  // 1) We're in the same block as the put area.
+  //
+  //   |=========================================|
+  //   ^        ^                    ^           ^
+  //   |        |                    |           |
+  // start   cur_gptr            next_egptr     end
+  //
+  // 2) We're not in the same block as the put area.
+  //
+  //   |================get=area=================|          |==============put=area===============|
+  //   ^        ^                                ^                      ^
+  //   |        |                                |                      |
+  // start   cur_gptr                           end                 next_egptr
+  //
+  // 3) We're in the same block as the put area, but the buffer is empty and we need to reset to the beginning of the buffer:
+  //
+  //   |=========================================|
+  //   ^              ^                          ^    next_egptr == nullptr
+  //   |              |                          |
+  // start      m_next_egptr2                   end
+  //
+
+  if (next_egptr != nullptr)            // Do we have to reset the get area to the beginning of the buffer?
+    cur_gptr = gptr(get_area_wat);      // No; just store the current value of gptr in cur_gptr (case 1 and 2).
+  else
+  //---------------------------------------------------------------------------
+  // Case 3
+  //
+  {
+    m_last_gptr.store(start, std::memory_order_relaxed);        // We are going to reset gptr to start.
+    m_next_egptr = start;                                       // Flush m_last_gptr before making m_next_egptr non-null.
+                                                                // This must be memory_order_seq_cst.
+
+    // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the PutThread
+    // might have changed m_next_egptr2 but missed the write to m_next_egptr, so we have to synchronize
+    // (m_)next_egptr with the latest value of m_next_egptr2.
+    char* expected_next_egptr = start;
+    do
+    {
+      next_egptr = m_next_egptr2;                               // Must be memory_order_seq_cst.
+    }
+    while (m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
+    // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
+    // Reset gptr to the beginning of the current memory block.
+    cur_gptr = start;
+  }
+  //
+  // 3) Here we reached the following situation:
+  //
+  //   |=========================================|
+  //   ^              ^                          ^
+  //   |              |                          |
+  //cur_gptr      next_egptr                    end
+  // start
+  //
+  // Where the meaning of cur_gptr rather is 'next gptr', we will use cur_gptr below to change gptr.
+  // This case has now become a case 1, so we continue as normal.
+  //
+  //---------------------------------------------------------------------------
+
+  char* cur_egptr = end;
+  for (;;)
+  {
+    bool case1 = start <= next_egptr && next_egptr <= end;      // Does next_egptr fall in the current get area block?
+    if (case1)
+      cur_egptr = next_egptr;                                   // We will use cur_egptr below to change egptr.
+    // The immediately available number of bytes in the get area (after the update below).
+    available = cur_egptr - cur_gptr;
+
+    if (available == 0 && !case1)
+    {
+      // This a case 2 therefore put_area_block_node != get_area_block_node and that remains the case.
+      // Therefore we can read m_get_area_block_node->m_next here without the risk that it will be
+      // updated concurrently by the PutThread.
+      //===========================================================
+      // Advance get area to next MemoryBlock.
+      MemoryBlock* prev_get_area_block_node = get_area_block_node;
+      get_area_block_node = get_area_block_node->m_next;
+      cur_gptr = start = get_area_block_node->block_start();
+      // m_buffer_size_minus_unused_in_first_block does not change.
+      prev_get_area_block_node->release();
+      //===========================================================
+      end = start + get_area_block_node->get_size();
+      // Continue from the start, but note that next_egptr is guaranteed not nullptr here.
+      // So this is now either case 1 or 2. However, since cur_gptr is now start, available
+      // will be non-null unless next_egptr == start, in which case case1 becomes true.
+      // So this jump back only happens once.
+      continue;
+    }
+    break;
+  }
+
+  // Finally, update the get area.
+  setg(start, cur_gptr, cur_egptr, get_area_wat);
+
+  // Return true if the current egptr points to the end of the block.
+  return cur_egptr == end;
 }
 
 // Get thread.
@@ -129,36 +246,16 @@ int StreamBuf::underflow_a(GetThread type)
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
+  char* cur_gptr;
+  std::streamsize available;
+  update_get_area(m_get_area_block_node, cur_gptr, available, GetThreadLock::wat(get_area_lock(type)));
   int result = 0;
-  while (1)
+  if (available == 0)
   {
-    GetThreadLock::wat get_area_wat(get_area_lock(type));
-    // True if egptr points to the end of m_get_area_block_node after returning from this function.
-    bool reached_end = sync_next_egptr(m_get_area_block_node, get_area_wat);
-    if (gptr(get_area_wat) == egptr(get_area_wat))
-    {
-      if (reached_end &&
-          m_put_area_block_node.load(std::memory_order_acquire) != m_get_area_block_node)
-      {
-        // If at the moment of the load() m_put_area_block_node was already unequal m_get_area_block_node
-        // then that remains the case. Therefore we now can read m_get_area_block_node->m_next.
-        //===========================================================
-        // Advance get area to next MemoryBlock.
-        MemoryBlock* get_area_block_node = m_get_area_block_node;
-        m_get_area_block_node = m_get_area_block_node->m_next;
-        char* start = m_get_area_block_node->block_start();
-        setg(start, start, start, get_area_wat);
-        // m_buffer_size_minus_unused_in_first_block does not change.
-        get_area_block_node->release();
-        continue;
-        //===========================================================
-      }
-      // There is nothing to read anymore at the moment.
-      Dout(dc::evio, "Returning EOF");
-      // FIXME: Reduce the buffer? See remark in OutputDevice::VT_impl::write_to_fd.
-      result = EOF;
-    }
-    break;
+    // There is nothing to read anymore at the moment.
+    store_last_gptr(cur_gptr);
+    Dout(dc::evio, "Returning EOF");
+    result = EOF;
   }
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
@@ -245,15 +342,10 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
   std::streamsize remaining = n;
   while (remaining > 0)
   {
-    bool reached_end;
     char* cur_gptr;
     std::streamsize available;
-    {
-      GetThreadLock::wat get_area_wat(get_area_lock(type));
-      reached_end = sync_next_egptr(m_get_area_block_node, get_area_wat);
-      cur_gptr = gptr(get_area_wat);
-      available = egptr(get_area_wat) - cur_gptr;
-    }
+    bool at_end = update_get_area(m_get_area_block_node, cur_gptr, available, GetThreadLock::wat(get_area_lock(type)));
+    // If at_end is true then egptr is set at the very end of the current memory block (m_get_area_block_node, which might have been changed too!)
     std::streamsize len;
     if (available > 0)
     {
@@ -261,11 +353,16 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
       std::memcpy(s, cur_gptr, len);
       gbump(len, GetThreadLock::wat(get_area_lock(type)));
       s += len;
+      available -= len;
       remaining -= len;
     }
-    if (!reached_end)           // Leave if egptr != block end.
+    if (!at_end)                // Leave if egptr != block end.
+    {
+      if (available == 0)       // Buffer empty?
+        store_last_gptr(cur_gptr + len);
       break;
-    if (available == len &&     // gptr == egptr == block end?
+    }
+    if (available == 0 &&       // gptr == egptr == block end?
         m_put_area_block_node.load(std::memory_order_acquire) != m_get_area_block_node)
     {
       // If at the moment of the load() m_put_area_block_node was already unequal m_get_area_block_node
@@ -288,6 +385,30 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
   return n - remaining;
 }
 
+char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat const&)
+{
+  char* block_start = std::streambuf::pbase();
+  char* cur_pptr = std::streambuf::pptr();
+  if (cur_pptr != block_start &&                // Don't start a reset cycle when pptr is already at the start of the block ;).
+      m_next_egptr.load(std::memory_order_acquire) != nullptr &&        // If next_egptr is nullptr then the put area was reset, but the get area wasn't yet;
+                                                                        // don't reset again until it was. This read must be acquire to make sure the write
+                                                                        // to last_gptr is visible too.
+      cur_pptr == m_last_gptr.load(std::memory_order_relaxed))          // If this happens while next_egptr != nullptr then the buffer is truely empty (gptr == pptr).
+  {
+    m_next_egptr2.store(block_start, std::memory_order_relaxed);        // Initialize next_egptr2 that the GetThread will use once it resets itself.
+                                                                        // This value will not be read by the GetThread until after it sees next_egptr to be nullptr.
+                                                                        // Therefore this write can be relaxed.
+    // A value of nullptr means 'block_start', but will prevent the PutThread to write to it
+    // until the GetThread did reset too. Nor will the PutThread reset again until that happened.
+    m_next_egptr.store(nullptr, std::memory_order_release);             // Atomically signal the GetThread that it must reset.
+                                                                        // This write must be release to flush the write of m_next_egptr2.
+    std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
+    cur_pptr = block_start;
+  }
+  available = std::streambuf::epptr() - cur_pptr;
+  return cur_pptr;
+}
+
 // Write thread.
 std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutThread type)
 {
@@ -299,22 +420,16 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
   while (remaining > 0)
   {
     std::streamsize available;
-    char* cur_pptr;
-    {
-      PutThreadLock::rat put_area_rat(put_area_lock(type));
-      cur_pptr = pptr(put_area_rat);
-      available = epptr(put_area_rat) - cur_pptr;
-    }
-    std::streamsize len;
+    char* cur_pptr = update_put_area(available, PutThreadLock::rat(put_area_lock(type)));
     if (available > 0)
     {
-      len = std::min(available, remaining);
+      std::streamsize len = std::min(available, remaining);
       std::memcpy(cur_pptr, s, len);            // Write to buffer before calling pbump.
       pbump(len, PutThreadLock::wat(put_area_lock(type)));
       s += len;
       remaining -= len;
     }
-    if (remaining > 0)                          // pptr == epptr == block end AND we still need to write more?
+    if (remaining > 0)                          // pptr == epptr (block end) AND we still need to write more?
     {
       //===========================================================
       // Create a new MemoryBlock.
@@ -408,7 +523,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadL
     get_area_block_node->release();
     //===========================================================
   }
-  // Reset the empty the buffer.
+  // Reset the empty buffer.
   char* start = m_get_area_block_node->block_start();
   setg(start, start, start, get_area_wat);
   setp(start, start + m_minimum_block_size, put_area_wat);
