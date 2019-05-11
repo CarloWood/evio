@@ -383,6 +383,7 @@ class streambuf : private std::streambuf
 
   // Constructor; m_next_egptr is set by a call to setp from StreamBuf().
   streambuf() : m_input_streambuf(this) { }
+  ~streambuf() noexcept { }
 
 #if 0
   // Initialize the input buffer pointer.
