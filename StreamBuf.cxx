@@ -169,6 +169,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
   // Case 3
   //
   {
+    Dout(dc::notice, "2. Setting m_last_gptr to " << (void*)start);
     m_last_gptr.store(start, std::memory_order_relaxed);        // We are going to reset gptr to start.
     m_next_egptr = start;                                       // Flush m_last_gptr before making m_next_egptr non-null.
                                                                 // This must be memory_order_seq_cst.
@@ -181,7 +182,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
     {
       next_egptr = m_next_egptr2;                               // Must be memory_order_seq_cst.
     }
-    while (m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
+    while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
     cur_gptr = start;
@@ -222,7 +223,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
       // m_buffer_size_minus_unused_in_first_block does not change.
       prev_get_area_block_node->release();
       //===========================================================
-      end = start + get_area_block_node->get_size();
+      cur_egptr = end = start + get_area_block_node->get_size();
       // Continue from the start, but note that next_egptr is guaranteed not nullptr here.
       // So this is now either case 1 or 2. However, since cur_gptr is now start, available
       // will be non-null unless next_egptr == start, in which case case1 becomes true.
@@ -345,9 +346,10 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
     char* cur_gptr;
     std::streamsize available;
     bool at_end = update_get_area(m_get_area_block_node, cur_gptr, available, GetThreadLock::wat(get_area_lock(type)));
+    ASSERT(available >= 0);
     // If at_end is true then egptr is set at the very end of the current memory block (m_get_area_block_node, which might have been changed too!)
     std::streamsize len;
-    if (available > 0)
+    if (available != 0)
     {
       len = std::min(available, remaining);
       std::memcpy(s, cur_gptr, len);
@@ -359,7 +361,9 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
     if (!at_end)                // Leave if egptr != block end.
     {
       if (available == 0)       // Buffer empty?
-        store_last_gptr(cur_gptr + len);
+PRAGMA_DIAGNOSTIC_PUSH_IGNORE_maybe_uninitialized
+        store_last_gptr(cur_gptr + len);                // Sorry compiler, but if available == 0 then len is definitely defined.
+PRAGMA_DIAGNOSTIC_POP
       break;
     }
     if (available == 0 &&       // gptr == egptr == block end?
@@ -593,7 +597,7 @@ void StreamBuf::set_input_device(InputDevice* device)
   ASSERT(!m_idevice);
   if (++m_device_counter == 2)
   {
-    DEBUG_ONLY(int count =) m_odevice->inhibit_deletion();
+    CWDEBUG_ONLY(int count =) m_odevice->inhibit_deletion();
     Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_input_device(" << device <<
         "); incremented ref count of output device [" << m_odevice << "] (now " << (count + 1) << ").");
   }
@@ -607,7 +611,7 @@ void StreamBuf::set_output_device(OutputDevice* device)
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
   {
-    DEBUG_ONLY(int count =) device->inhibit_deletion();
+    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
     Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_output_device(" << device <<
         "); incremented ref count of output device [" << device << "] (now " << (count + 1) << ").");
   }
@@ -691,7 +695,14 @@ void StreamBuf::printOn(std::ostream& os) const
   {
     os << "[" << (void*)block_node << "] ";
     if (block_node == m_get_area_block_node && block_node == put_area_block_node)
-      os << "\"" << buf2str(cur_gptr, cur_pptr - cur_gptr) << "\"" << std::endl;     // Print from gptr() to pptr().
+    {
+      if (cur_pptr >= cur_gptr)
+        os << "\"" << buf2str(cur_gptr, cur_pptr - cur_gptr) << "\"" << std::endl;     // Print from gptr() to pptr().
+      else if (is_resetting())
+        os << "\"" << buf2str(block_node->block_start(), cur_pptr - cur_pbase) << "\" (resetting)" << std::endl;     // Print from start of buffer to pptr().
+      else
+        os << "INVALID RANGE" << std::endl;
+    }
     else if (block_node == m_get_area_block_node)
       os << "\"" << buf2str(cur_gptr, block_node->get_size() - (cur_gptr - cur_eback)) << std::endl;      // Print from igptr() to the end of the buffer.
     else if (block_node == put_area_block_node)
@@ -702,7 +713,7 @@ void StreamBuf::printOn(std::ostream& os) const
   if (cur_eback != m_get_area_block_node->block_start() ||
       cur_pbase != put_area_block_node->block_start() ||
       cur_epptr != cur_pbase + put_area_block_node->get_size() ||
-      (m_get_area_block_node == put_area_block_node && cur_egptr > cur_pptr) ||
+      (m_get_area_block_node == put_area_block_node && !is_resetting() && cur_egptr > cur_pptr) ||
       cur_egptr > cur_eback + m_get_area_block_node->get_size() ||
       cur_gptr < cur_eback || cur_gptr > cur_egptr ||
       cur_pptr < cur_pbase || cur_pptr > cur_epptr)

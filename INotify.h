@@ -31,7 +31,7 @@
 namespace evio {
 
 class INotifyDecoder;
-class GetThread;
+struct GetThread;
 
 //=============================================================================
 //

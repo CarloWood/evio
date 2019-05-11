@@ -347,6 +347,9 @@ class streambuf : private std::streambuf
 
   char* update_put_area(std::streamsize& available, PutThreadLock::rat const& put_area_rat);
 
+  // Allow using this streambuf for an istream or ostream class.
+  std::streambuf* rdbuf() { return this; }
+
  private:
   // Override virtual functions.
 
@@ -416,7 +419,15 @@ class streambuf : private std::streambuf
     std::streambuf::setp(p, ep);
     std::streambuf::pbump(n);
   }
-  [[gnu::always_inline]] void store_last_gptr(char* p) { m_last_gptr.store(p, std::memory_order_release); }
+  [[gnu::always_inline]] void store_last_gptr(char* p)
+  {
+    Dout(dc::notice, "1. Setting m_last_gptr to " << (void*)p);
+    m_last_gptr.store(p, std::memory_order_release);
+  }
+
+#ifdef CWDEBUG
+  bool is_resetting() const { return m_next_egptr == nullptr; }
+#endif
 };
 
 class StreamBuf : public streambuf
@@ -467,6 +478,8 @@ class StreamBuf : public streambuf
  public:
   // Used for passing to MsgBlock constructor to increment the reference count.
   MemoryBlock* get_get_area_block_node(GetThread) const { return m_get_area_block_node; }
+  // Mostly for the testsuite.
+  MemoryBlock*& get_get_area_block_node(GetThread) { return m_get_area_block_node; }
 
   // Return a pointer to the first byte of the current get area memory block.
   char* get_area_block_node_start(GetThread) const { return m_get_area_block_node->block_start(); }

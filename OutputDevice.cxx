@@ -25,7 +25,9 @@
 #include "debug.h"
 #include "OutputDevice.h"
 #include "StreamBuf.h"
+#ifdef CWDEBUG
 #include <libcwd/buf2str.h>
+#endif
 
 namespace evio {
 
@@ -87,7 +89,7 @@ void OutputDevice::start_output_device(PutThread)
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until the destruction of the RefCountReleaser returned
     // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
-    DEBUG_ONLY(int count =) inhibit_deletion();
+    CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
@@ -102,7 +104,7 @@ void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& c
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until the destruction of the RefCountReleaser returned
     // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
-    DEBUG_ONLY(int count =) inhibit_deletion();
+    CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
@@ -182,7 +184,7 @@ RefCountReleaser OutputDevice::close_output_device()
     if (!already_closed && !dont_close())
     {
       Dout(dc::io|continued_cf, "close(" << output_fd << ") = ");
-      DEBUG_ONLY(int err =) ::close(output_fd);
+      CWDEBUG_ONLY(int err =) ::close(output_fd);
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
       Dout(dc::finish, err);
     }

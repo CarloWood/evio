@@ -46,7 +46,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     if (m_ptr)
     {
       // Cancel the call to inhibit_deletion().
-      DEBUG_ONLY(int count =) m_ptr->allow_deletion();
+      CWDEBUG_ONLY(int count =) m_ptr->allow_deletion();
       Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
     }
     m_ptr = nullptr;

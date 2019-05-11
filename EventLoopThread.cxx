@@ -136,11 +136,11 @@ void EventLoopThread::handle_invoke_pending()
     else
     {
       AIThreadPool& thread_pool(AIThreadPool::instance());
-      auto const max_duration = std::chrono::milliseconds(64);
-      auto duration = std::chrono::milliseconds(1);
+      //auto const max_duration = std::chrono::milliseconds(64);
+      //auto duration = std::chrono::milliseconds(1);
       auto queues_access = thread_pool.queues_read_access();
       auto& queue = thread_pool.get_queue(queues_access, m_handler);
-      DEBUG_ONLY(bool queue_was_full = false;)
+      CWDEBUG_ONLY(bool queue_was_full = false;)
       {
         bool queue_full;
         auto queue_access = queue.producer_access();
@@ -197,7 +197,7 @@ void EventLoopThread::init(AIQueueHandle handler)
   ev_async_start(EV_A_ &m_async_w);
 
   // Create the thread running ev_run.
-  m_event_thread = std::thread([this](){ EventLoopThread::main(EV_A); });
+  m_event_thread = std::thread([](){ EventLoopThread::main(EV_A); });
 
   // Wait till we're actually running.
   while (!m_running)

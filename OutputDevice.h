@@ -109,7 +109,7 @@ class OutputDevice : public virtual FileDescriptor
   RefCountReleaser stop_output_device();
   void disable_output_device();
   void enable_output_device(PutThread type);
-  int get_output_fd() const;
+  int get_output_fd() const override;
 
  protected:
   OutputDevice();

@@ -51,7 +51,7 @@ class SocketAddress             // TestSuite: test_SocketAddress.h
   };
 
  public:
-  SocketAddress() : m_sockaddr{AF_UNSPEC, 0}, m_sockaddr_un_ptr{nullptr} { }
+  SocketAddress() : m_sockaddr{AF_UNSPEC, {0, }}, m_sockaddr_un_ptr{nullptr} { }
   // Construct a SocketAddress from a string_view.
   // If sockaddr_text starts with a '/' then AF_UNIX is assumed,
   // otherwise AF_INET6 is assumed if the address portion contains a ':' (for example "[::ffff:127.0.0.1]:9001" will be AF_INET6,

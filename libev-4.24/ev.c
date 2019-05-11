@@ -480,7 +480,7 @@ struct signalfd_siginfo
  * This value is good at least till the year 4000.
  */
 #define MIN_INTERVAL  0.0001220703125 /* 1/2**13, good till 4000 */
-/*#define MIN_INTERVAL  0.00000095367431640625 /* 1/2**20, good till 2200 */
+//#define MIN_INTERVAL  0.00000095367431640625 /* 1/2**20, good till 2200 */
 
 #define MIN_TIMEJUMP  1. /* minimum timejump that gets detected (if monotonic clock available) */
 #define MAX_BLOCKTIME 59.743 /* never wait longer than this time (to detect time jumps) */
@@ -2473,7 +2473,7 @@ evpipe_write (EV_P_ EV_ATOMIC_T *flag)
       if (evpipe [0] < 0)
         {
           uint64_t counter = 1;
-          write (evpipe [1], &counter, sizeof (uint64_t));
+          size_t wlen __attribute__ ((unused)) = write (evpipe [1], &counter, sizeof (uint64_t));
         }
       else
 #endif
@@ -2485,7 +2485,7 @@ evpipe_write (EV_P_ EV_ATOMIC_T *flag)
           buf.len = 1;
           WSASend (EV_FD_TO_WIN32_HANDLE (evpipe [1]), &buf, 1, &sent, 0, 0, 0);
 #else
-          write (evpipe [1], &(evpipe [1]), 1);
+          size_t wlen __attribute__ ((unused)) = write (evpipe [1], &(evpipe [1]), 1);
 #endif
         }
 
@@ -2506,7 +2506,7 @@ pipecb (EV_P_ ev_io *iow, int revents)
       if (evpipe [0] < 0)
         {
           uint64_t counter;
-          read (evpipe [1], &counter, sizeof (uint64_t));
+          size_t rlen __attribute__ ((__unused__)) = read (evpipe [1], &counter, sizeof (uint64_t));
         }
       else
 #endif
@@ -2520,7 +2520,7 @@ pipecb (EV_P_ ev_io *iow, int revents)
           buf.len = sizeof (dummy);
           WSARecv (EV_FD_TO_WIN32_HANDLE (evpipe [0]), &buf, 1, &recvd, &flags, 0, 0);
 #else
-          read (evpipe [0], &dummy, sizeof (dummy));
+          size_t rlen __attribute__ ((__unused__)) = read (evpipe [0], &dummy, sizeof (dummy));
 #endif
         }
     }
@@ -3119,6 +3119,10 @@ ev_loop_new (unsigned int flags) EV_THROW
 #endif /* multiplicity */
 
 #if EV_VERIFY
+
+_Pragma("GCC diagnostic push") \
+_Pragma("GCC diagnostic ignored \"-Wunused-value\"")
+
 noinline ecb_cold
 static void
 verify_watcher (EV_P_ W w)
@@ -3889,7 +3893,7 @@ ev_io_start (EV_P_ ev_io *w) EV_THROW
   /* common bug, apparently */
   assert (("libev: ev_io_start called with corrupted watcher", ((WL)w)->next != (WL)w));
 
-  fd_change (EV_A_ fd, w->events & EV__IOFDSET | EV_ANFD_REIFY);
+  fd_change (EV_A_ fd, (w->events & EV__IOFDSET) | EV_ANFD_REIFY);
   w->events &= ~EV__IOFDSET;
 
   EV_FREQUENT_CHECK;
@@ -4837,6 +4841,8 @@ ev_embed_stop (EV_P_ ev_embed *w) EV_THROW
   EV_FREQUENT_CHECK;
 }
 #endif
+
+_Pragma("GCC diagnostic push")
 
 #if EV_FORK_ENABLE
 void

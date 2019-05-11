@@ -62,7 +62,7 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   {
     Dout(dc::finish|error_cf, ret);
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-    DEBUG_ONLY(ret =) ::close(fd);
+    CWDEBUG_ONLY(ret =) ::close(fd);
     Dout(dc::finish|cond_error_cf(ret < 0), ret);
     return false;
   }
@@ -105,7 +105,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
     catch (AIAlert::Error const& error)
     {
       Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-      DEBUG_ONLY(int ret =) ::close(fd);
+      CWDEBUG_ONLY(int ret =) ::close(fd);
       Dout(dc::finish|cond_error_cf(ret == -1), ret);
       THROW_ALERT("Socket::init([FD], [SOCKET_ADDRESS], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
           AIArgs("[FD]", fd)("[SOCKET_ADDRESS]", remote_address)("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
@@ -178,7 +178,7 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
   OutputDevice::VT_impl::write_to_fd(_self, fd);
 }
 
-void Socket::VT_impl::connected(Socket* DEBUG_ONLY(self), bool success)
+void Socket::VT_impl::connected(Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
   DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
   // Derive from Socket to implement this.
@@ -194,7 +194,7 @@ RefCountReleaser Socket::VT_impl::read_returned_zero(InputDevice* _self)
   return need_allow_deletion;
 }
 
-RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int err)
+RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int CWDEBUG_ONLY(err))
 {
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_error(" << err << ") [" << self << "]");
@@ -209,7 +209,7 @@ RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int err)
   return need_allow_deletion;
 }
 
-void Socket::VT_impl::disconnected(Socket* DEBUG_ONLY(self), bool success)
+void Socket::VT_impl::disconnected(Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
   DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
   // Clone VT and override to implement this.
@@ -233,6 +233,10 @@ SocketAddress Socket::local_address() const
   }
 
   return result;
+}
+
+Socket::~Socket() noexcept
+{
 }
 
 } // namespace evio

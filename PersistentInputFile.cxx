@@ -48,7 +48,7 @@ RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _
   if (!self->is_watched() && !self->open_filename().empty())
   {
     self->add_watch(self->open_filename().c_str(), IN_MODIFY);
-    DEBUG_ONLY(int count =) self->inhibit_deletion();   // Keep this object alive because the call to add_watch registered m_inotify as callback object.
+    CWDEBUG_ONLY(int count =) self->inhibit_deletion(); // Keep this object alive because the call to add_watch registered m_inotify as callback object.
                                                         // Object is kept alive until the destruction of the RefCountReleaser returned
                                                         // by PersistentInputFile::closed() after that called `need_allow_deletion = this`.
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << self << ']');

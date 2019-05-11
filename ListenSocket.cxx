@@ -51,7 +51,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   {
     int opt = 1;
     // Some OS need (optval_t)&opt, glibc doesn't (libc-5 does).
-    DEBUG_ONLY(int res =) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    CWDEBUG_ONLY(int res =) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     Dout(dc::warning(res < 0)|error_cf, "ListenSocketDevice::listen: setsockopt(SO_REUSEADDR)");
   }
 #endif // SO_REUSEADDR
@@ -75,7 +75,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
     }
     int errn = errno;
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-    DEBUG_ONLY(int res =) ::close(fd);
+    CWDEBUG_ONLY(int res =) ::close(fd);
     Dout(dc::finish|cond_error_cf(res == -1), res);
     errno = errn;
     THROW_ALERTE("bind([FD], [BIND_ADDR], [SIZE]) = -1",
@@ -88,7 +88,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   {
     int errn = errno;
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-    DEBUG_ONLY(int res2 =) ::close(fd);
+    CWDEBUG_ONLY(int res2 =) ::close(fd);
     Dout(dc::finish|cond_error_cf(res2 == -1), res2);
     errno = errn;
     THROW_ALERTE("listen([FD], [BACKLOG]) = -1", AIArgs("[FD]", fd)("[BACKLOG]", backlog));

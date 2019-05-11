@@ -204,6 +204,16 @@ class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, publi
 
 void InputDevice::set_link_input(LinkBufferPlus* link_buffer)
 {
+  // You can't pass an InputDevice to a OutputDevice::output() when the InputDevice
+  // already has a buffer (ie, you called already InputDevice::input()).
+  //
+  // If you *really* need to do this then it is possible to replace the buffer by
+  // deriving from InputDevice (so you get access to the protected m_ibuffer) and
+  // then calling from the derived intput device:
+  //     if (m_ibuffer->release(CWDEBUG_ONLY(this)))
+  //       m_ibuffer = nullptr;
+  // before passing it to OutputDevice::output().
+  //
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
   m_input_device_events_handler = link_buffer;

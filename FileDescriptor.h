@@ -134,7 +134,7 @@ class FileDescriptor : public AIRefCount
   // When we get here the object is also marked as FDS_DEAD.
   virtual RefCountReleaser closed() { return RefCountReleaser(); }
 
-#if CWDEBUG
+#ifdef CWDEBUG
   friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
   {
     return os << "FD:" << static_cast<void const*>(fdptr);
@@ -146,7 +146,9 @@ class FileDescriptor : public AIRefCount
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
 boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
+#if CWDEBUG_ALLOC
   DoutEntering(dc::evio, "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name() << ", ARGS...>(ARGS&&...)");
+#endif
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
   AllocTag2(device, "Created with evio::create");
   Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << device << "].");

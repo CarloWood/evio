@@ -46,15 +46,15 @@ class PersistentInputFile : public File, private INotify
     static constexpr File::VT_type VT{
       /*File*/
         /*InputDevice*/
-        nullptr,
+      { nullptr,
         read_from_fd,
         read_returned_zero,
         read_error,
-        data_received,
+        data_received },
         /*OutputDevice*/
-        nullptr,
+      { nullptr,
         write_to_fd,
-        write_error
+        write_error }
     };
   };
 

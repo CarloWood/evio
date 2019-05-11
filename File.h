@@ -51,15 +51,15 @@ class File : public InputDevice, public OutputDevice
     // Virtual table of File.
     static constexpr VT_type VT{
       /*InputDevice*/
-      nullptr,
+    { nullptr,
       read_from_fd,
       read_returned_zero,
       read_error,
-      data_received,
+      data_received },
       /*OutputDevice*/
-      nullptr,
+    { nullptr,
       write_to_fd,
-      write_error
+      write_error }
     };
   };
 

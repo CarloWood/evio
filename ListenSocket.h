@@ -115,11 +115,11 @@ class ListenSocketDevice : public InputDevice
     static constexpr VT_type VT{
       /*ListenSocketDevice*/
         /*InputDevice*/
-        nullptr,
+      { nullptr,
         read_from_fd,
         read_returned_zero,
         read_error,
-        data_received,
+        data_received },
       maybe_out_of_fds,
       nullptr   // _spawn_accepted
     };
@@ -178,14 +178,14 @@ class ListenSocket : public ListenSocketDevice
     static constexpr VT_type VT{
       /*ListenSocket*/
         /*ListenSocketDevice*/
-          /*InputDevice*/
-          nullptr,
+      {   /*InputDevice*/
+        { nullptr,
           read_from_fd,
           read_returned_zero,
           read_error,
-          data_received,
+          data_received },
         maybe_out_of_fds,
-        spawn_accepted,         // Overridden
+        spawn_accepted },       // Overridden
       new_connection
     };
   };

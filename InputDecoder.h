@@ -29,6 +29,7 @@
 
 #include "StreamBuf.h"  // MsgBlock.
 #include <limits>
+#include <cstring>
 
 namespace evio {
 

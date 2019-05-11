@@ -71,15 +71,15 @@ class Socket : public InputDevice, public OutputDevice
     static constexpr VT_type VT{
       /*Socket*/
         /*InputDevice*/
-        nullptr,
+      { nullptr,
         read_from_fd,
         read_returned_zero,
         read_error,
-        data_received,
+        data_received },
         /*OutputDevice*/
-        nullptr,
+      { nullptr,
         write_to_fd,
-        write_error,
+        write_error },
       connected,
       disconnected
     };
@@ -149,6 +149,7 @@ class Socket : public InputDevice, public OutputDevice
   //
 
   Socket() : VT_ptr(this), m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
+  ~Socket() noexcept;
 
   // Associate this object with an existing and open socket `fd'.
   void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
