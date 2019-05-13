@@ -37,6 +37,14 @@ namespace evio {
 
 void set_nonblocking(int fd)
 {
+  if (fd <= 2)
+  {
+    // You don't want to do this; it will only result in std::out / std::cerr to go 'bad' and not printing anything anymore.
+    // See https://stackoverflow.com/questions/32508801/fprintf-stdcout-doesnt-print-part-of-the-string-to-stdout-stderr
+    Dout(dc::warning, "Setting fd " << fd << " to non-blocking will cause all standard streams to become non-blocking "
+        "which in turn will cause erratic write failures to the standard output streams causing them to go bad and stop "
+        "displaying output.");
+  }
 #ifdef CW_CONFIG_NONBLOCK_POSIX
   int nonb = O_NONBLOCK;
 #elif defined(CW_CONFIG_NONBLOCK_BSD)

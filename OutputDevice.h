@@ -178,6 +178,7 @@ class OutputDevice : public virtual FileDescriptor
 
   // Called from the streambuf associated with this device when pubsync() is called on it.
   friend class Buf2Dev;
+  friend class LinkBuffer;
   virtual int sync();
 };
 

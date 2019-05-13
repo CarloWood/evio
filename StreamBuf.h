@@ -379,10 +379,23 @@ class streambuf : private std::streambuf
   std::streambuf* get_sb() { return static_cast<std::streambuf*>(this); }
 
  protected:
-  // Constructor thread.
+  // The total size of the buffer minus the amount of unused bytes in the put area.
+//  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
 
-  // Constructor; m_next_egptr is set by a call to setp from StreamBuf().
-  streambuf() : m_input_streambuf(this) { }
+  // The total size of the buffer minus the amount of unused bytes in the get area.
+  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
+
+ protected:
+  // Constructor thread.
+  static char s_next_egptr_init[1];
+
+  // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
+  streambuf() :
+    m_input_streambuf(this),
+    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
+    m_last_gptr(nullptr)                // See update_put_area.
+    { }
+  // Suppress warning about not inlining destructor.
   ~streambuf() noexcept { }
 
 #if 0
@@ -422,13 +435,50 @@ class streambuf : private std::streambuf
   }
   [[gnu::always_inline]] void store_last_gptr(char* p)
   {
-    Dout(dc::notice, "1. Setting m_last_gptr to " << (void*)p);
     m_last_gptr.store(p, std::memory_order_release);
   }
 
-#ifdef CWDEBUG
+#if defined(CWDEBUG) || defined(DEBUGDBSTREAMBUF)
   bool is_resetting() const { return m_next_egptr == nullptr; }
 #endif
+
+ public:
+  // Returns true if output buffer is empty.
+  bool buffer_empty(GetThreadLock::crat const& get_area_rat, PutThreadLock::crat const& put_area_rat) const { return gptr(get_area_rat) == pptr(put_area_rat); }
+  utils::FuzzyBool buffer_empty(PutThreadLock::crat const& put_area_rat) const
+  {
+    GetThreadLock::crat get_area_rat(get_area_lock(GetThread()));
+    // This is the put thread. Therefore, if the buffer is empty it will stay empty,
+    // but if it is not empty then the get thread might make it empty immediately
+    // after leaving this function.
+    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::True : fuzzy::WasFalse;
+  }
+  utils::FuzzyBool buffer_empty(GetThreadLock::crat const& get_area_rat) const
+  {
+    PutThreadLock::crat put_area_rat(put_area_lock(PutThread()));
+    // This is the get thread. Therefore, if the buffer is not empty it will stay not empty,
+    // but if it is empty then the put thread might write data to it immediately
+    // after leaving this function.
+    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::WasTrue : fuzzy::False;
+  }
+
+  // Return the number of unused bytes in the get area of the input buffer
+  size_t unused_in_first_block(GetThreadLock::crat const& get_area_rat) const { return gptr(get_area_rat) - eback(get_area_rat); }
+
+  // Return the number of unused bytes in the put area of the output buffer.
+  size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
+
+  // Return the number of bytes currently in the buffer.
+  // m_buffer_size_minus_unused_in_last_block is not updated at the moment.
+//  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
+
+  // Return the number of bytes currently in the buffer.
+  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
+
+  // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
+  // because it is not possible that the Get Thread removes data from the buffer immediately
+  // after returning (since we are the Get Thread too).
+  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
 };
 
 class StreamBuf : public streambuf
@@ -444,13 +494,6 @@ class StreamBuf : public streambuf
 
   // Pointer to the put area - block object.
   std::atomic<MemoryBlock*> m_put_area_block_node;
-
- protected:
-  // The total size of the buffer minus the amount of unused bytes in the put area.
-  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
-
-  // The total size of the buffer minus the amount of unused bytes in the get area.
-  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
 
  private:
   // Return a lower bound for the number of characters in the buffer.
@@ -493,44 +536,7 @@ class StreamBuf : public streambuf
   // The returned value only makes sense when this is both the Get Thread and the Put Thread at the same time.
   bool has_multiple_blocks(GetThread, PutThread) const { return m_get_area_block_node != m_put_area_block_node; }
 
-  // Returns true if output buffer is empty.
-  bool buffer_empty(GetThreadLock::crat const& get_area_rat, PutThreadLock::crat const& put_area_rat) const { return gptr(get_area_rat) == pptr(put_area_rat); }
-  utils::FuzzyBool buffer_empty(PutThreadLock::crat const& put_area_rat) const
-  {
-    GetThreadLock::crat get_area_rat(get_area_lock(GetThread()));
-    // This is the put thread. Therefore, if the buffer is empty it will stay empty,
-    // but if it is not empty then the get thread might make it empty immediately
-    // after leaving this function.
-    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::True : fuzzy::WasFalse;
-  }
-  utils::FuzzyBool buffer_empty(GetThreadLock::crat const& get_area_rat) const
-  {
-    PutThreadLock::crat put_area_rat(put_area_lock(PutThread()));
-    // This is the get thread. Therefore, if the buffer is not empty it will stay not empty,
-    // but if it is empty then the put thread might write data to it immediately
-    // after leaving this function.
-    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::WasTrue : fuzzy::False;
-  }
-
-  // Return the number of unused bytes in the get area of the input buffer
-  size_t unused_in_first_block(GetThreadLock::crat const& get_area_rat) const { return gptr(get_area_rat) - eback(get_area_rat); }
-
-  // Return the number of unused bytes in the put area of the output buffer.
-  size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
-
-  // Return the number of bytes currently in the buffer.
-  // m_buffer_size_minus_unused_in_last_block is not updated at the moment.
-//  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
-
-  // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
-
-  // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
-  // because it is not possible that the Get Thread removes data from the buffer immediately
-  // after returning (since we are the Get Thread too).
-  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
-
-#ifdef CWDEBUG
+#ifdef DEBUGDBSTREAMBUF
   // Print debug information in stream `o'.
   // *undocumented*
   void printOn(std::ostream& o) const;
@@ -766,6 +772,7 @@ class LinkBuffer : public Dev2Buf
   size_t buf2dev_contiguous_forced() { GetThread type; return force_next_contiguous_number_of_bytes(type); }
   char* buf2dev_ptr() const { GetThread type; return gptr(GetThreadLock::crat(get_area_lock(type))); }
   void buf2dev_bump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); m_buffer_size_minus_unused_in_first_block -= n; }
+  int sync() override;
   void flush();
   //-----------------------------------------------------------
 
@@ -829,7 +836,7 @@ class OutputBuffer : public Buf2Dev
 inline bool StreamBuf::is_contiguous(size_t len, GetThreadLock::crat const& get_area_crat) const
 {
   GetThread type;
-#if defined(CWDEBUG) && defined(DEBUGDBSTREAMBUF)
+#ifdef DEBUGDBSTREAMBUF
   if (gptr(get_area_crat) < get_area_block_node_start(type) || gptr(get_area_crat) > get_area_block_node_end(type))
     DoutFatal( dc::core, "Ack! getpointer out of sync with get_area_block_node !" );
 #endif
@@ -843,7 +850,9 @@ inline std::ostream& operator<<(std::ostream& os, evio::MsgBlock const& msg_bloc
 {
   os.write(msg_block.get_start(), msg_block.get_size()); return os;
 }
+#endif
 
+#ifdef DEBUGDBSTREAMBUF
 inline std::ostream& operator<<(std::ostream& os, evio::StreamBuf const& db)
 {
   db.printOn(os);
