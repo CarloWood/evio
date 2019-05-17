@@ -270,6 +270,10 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
       MemoryBlock* prev_get_area_block_node = get_area_block_node;
       get_area_block_node = get_area_block_node->m_next;
       cur_gptr = start = get_area_block_node->block_start();
+      // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
+      // that the PutThread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
+      // pointing to that, now newly allocated, memory!
+      store_last_gptr(cur_gptr);
       // m_buffer_size_minus_unused_in_first_block does not change.
       prev_get_area_block_node->release();
     }
@@ -433,6 +437,10 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
       m_get_area_block_node = m_get_area_block_node->m_next;
       char* start = m_get_area_block_node->block_start();
       setg(start, start, start, get_area_lock(type));
+      // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
+      // that the PutThread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
+      // pointing to that, now newly allocated, memory!
+      store_last_gptr(start);
       get_area_block_node->release();
       //===========================================================
     }
@@ -617,6 +625,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadL
   char* start = m_get_area_block_node->block_start();
   setg(start, start, start, get_area_wat);
   setp(start, start + m_minimum_block_size, put_area_wat);
+  store_last_gptr(start);
 }
 
 int Buf2Dev::sync()
