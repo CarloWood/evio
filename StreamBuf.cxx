@@ -33,6 +33,7 @@
 #include <cstdlib>
 #ifdef CWDEBUG
 #include <libcwd/buf2str.h>
+#include <libcwd/char2str.h>
 using namespace libcwd;
 #else
 // Comment this out if you want to be able to use --disable-debug and --enable-debug-buffers at the same time.
@@ -135,6 +136,7 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
       m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
       block_size = max_block_size;
     }
+    Dout(dc::notice, "overflow_a: allocating new memory block of size " << block_size);
     MemoryBlock* new_block = MemoryBlock::create(block_size);
 #ifdef DEBUGKEEPMEMORYBLOCKS
     keep(new_block);
@@ -201,6 +203,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
   // Case 3
   //
   {
+    Dout(dc::notice, "update_get_area: resetting get area.");
     m_last_gptr.store(start, std::memory_order_relaxed);        // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start, 0);
@@ -275,6 +278,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
       // pointing to that, now newly allocated, memory!
       store_last_gptr(cur_gptr);
       // m_buffer_size_minus_unused_in_first_block does not change.
+      Dout(dc::notice, "update_get_area: freeing memory block of size " << prev_get_area_block_node->get_size());
       prev_get_area_block_node->release();
     }
     //===========================================================
@@ -329,7 +333,7 @@ int StreamBuf::underflow_a(GetThread type)
 // we just read back so it can be part of the *next* message.
 StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 {
-  DoutEntering(dc::evio|continued_cf, "pbackfail(" << c << ") [" << this << ']');
+  DoutEntering(dc::notice, "pbackfail(" << libcwd::char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -338,7 +342,6 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 #ifdef DEBUGDBSTREAMBUF
     printOn(std::cerr);
 #endif
-    Dout(dc::finish, "Returning 0");
     return 0;
   }
   bool gptr_at_eback;
@@ -348,10 +351,12 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
   MemoryBlock* get_area_block_node = MemoryBlock::create(block_size);
   {
     GetThreadLock::wat get_area_wat(get_area_lock(type));
-    gptr_at_eback = gptr(get_area_wat) == eback(get_area_wat);
+    std::ptrdiff_t offset = gptr(get_area_wat) - eback(get_area_wat);
+    gptr_at_eback = offset == 0 || m_next_egptr == nullptr;
     // Likely because that should be the reason one call pbackfail in the first place.
     if (AI_LIKELY(gptr_at_eback))
     {
+      Dout(dc::notice, "Prepending block to buffer.");
       //===========================================================
       // Prepend a new MemoryBlock with minimal size.
       char* const start = get_area_block_node->block_start();
@@ -359,6 +364,32 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
       get_area_block_node->m_next = m_get_area_block_node;
       m_get_area_block_node = get_area_block_node;
       //===========================================================
+      // Is the buffer being reset?
+      if (m_next_egptr == nullptr)
+      {
+        Dout(dc::notice, "pbackfail_a: resetting get area.");
+        m_last_gptr.store(start + block_size - 1, std::memory_order_relaxed);
+#ifdef DEBUGEVENTRECORDING
+        RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start + block_size - 1, 0);
+        resetting_get_area(data);
+#endif
+        m_next_egptr = start + block_size - 1;                      // Flush m_last_gptr before making m_next_egptr non-null.
+                                                                    // This must be memory_order_seq_cst.
+
+        // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the PutThread
+        // might have changed m_next_egptr2 but missed the write to m_next_egptr, so we have to synchronize
+        // (m_)next_egptr with the latest value of m_next_egptr2.
+        char* expected_next_egptr = start + block_size - 1;
+        char* next_egptr;
+        do
+        {
+          next_egptr = m_next_egptr2;                               // Must be memory_order_seq_cst.
+        }
+        while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
+        // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
+        // Reset gptr to the end of the new memory block.
+        m_buffer_size_minus_unused_in_first_block += offset;
+      }
     }
     else
       gbump(-1, get_area_wat);
@@ -374,7 +405,6 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
-  Dout(dc::finish, "Returning 0");
   return 0;
 }
 
@@ -441,6 +471,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
       // that the PutThread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
       // pointing to that, now newly allocated, memory!
       store_last_gptr(start);
+      Dout(dc::notice, "xsgetn_a: freeing memory block of size " << get_area_block_node->get_size());
       get_area_block_node->release();
       //===========================================================
     }
@@ -470,6 +501,7 @@ char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat 
       // streambuf constructor.
       cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while next_egptr != nullptr then the buffer is truely empty (gptr == pptr).
   {
+    Dout(dc::notice, "update_put_area: resetting put area.");
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
@@ -484,7 +516,6 @@ char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat 
     // until the GetThread did reset too. Nor will the PutThread reset again until that happened.
     m_next_egptr.store(nullptr, std::memory_order_release);             // Atomically signal the GetThread that it must reset.
                                                                         // This write must be release to flush the write of m_next_egptr2.
-    std::memset(cur_pptr, '-', std::streambuf::epptr() - cur_pptr);
     std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
     cur_pptr = block_start;
   }
@@ -495,7 +526,7 @@ char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat 
 // Write thread.
 std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutThread type)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << ']');
+  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << "] ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -536,6 +567,7 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
         m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
         block_size = max_block_size;
       }
+      Dout(dc::notice, "xsputn_a: allocating new memory block of size " << block_size);
       MemoryBlock* new_block = MemoryBlock::create(block_size);
 #ifdef DEBUGKEEPMEMORYBLOCKS
       keep(new_block);
@@ -551,7 +583,7 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
       //===========================================================
     }
   }
-  Dout(dc::finish, " = " << (n - remaining));
+  Dout(dc::finish, "= " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -618,6 +650,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadL
     m_get_area_block_node = MemoryBlock::create(m_minimum_block_size);
     m_buffer_size_minus_unused_in_first_block.store(m_minimum_block_size, std::memory_order_relaxed);
     m_put_area_block_node = m_get_area_block_node;
+    Dout(dc::notice, "reduce_buffer: freeing memory block of size " << get_area_block_node->get_size());
     get_area_block_node->release();
     //===========================================================
   }

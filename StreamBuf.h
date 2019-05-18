@@ -330,6 +330,7 @@ class streambuf : private std::streambuf
   using std::streambuf::sputn;
   using std::streambuf::sbumpc;
   using std::streambuf::sgetn;
+  using std::streambuf::sputbackc;
 
 #ifdef DEBUGEVENTRECORDING
   utils::NodeMemoryPool recording_pool;
