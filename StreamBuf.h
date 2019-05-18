@@ -432,9 +432,6 @@ class streambuf : private std::streambuf
   // Called when a get area is empty while reading.
   int_type underflow() override final;
 
-  // Called when a putback failed.
-  int_type pbackfail(int_type c) override final;
-
   // Called to speed up a read of `n' number of characters.
   std::streamsize xsgetn(char* s, std::streamsize n) override final;
 
@@ -629,7 +626,6 @@ class StreamBuf : public streambuf
   // Added _a to avoid compiler warning about hidden virtual function :/.
   std::streamsize showmanyc_a(GetThread);
   int_type underflow_a(GetThread);
-  int_type pbackfail_a(int_type c, GetThread);
   std::streamsize xsgetn_a(char* s, std::streamsize const n, GetThread);
 
   int_type overflow_a(int_type c, PutThread);
@@ -699,6 +695,9 @@ class StreamBuf : public streambuf
 
   // Should only be called by release()
   virtual ~StreamBuf() { Dout(dc::io, "~StreamBuf() [" << this << ']'); }
+
+  // Called when a putback failed.
+  int_type pbackfail(int_type c) override final;
 
   // Allow printing of `this' pointers.
   friend std::ostream& operator<<(std::ostream& os, streambuf* sb) { return os << (void*)static_cast<StreamBuf*>(sb); }

@@ -329,14 +329,19 @@ int StreamBuf::underflow_a(GetThread type)
 // from when we were not by coincidence on the edge of a block).
 //
 // The only safe way to use putback is therefore to read a single
-// character, decide we don't want it and put the character that
-// we just read back so it can be part of the *next* message.
-StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
+// character using sbumpc, decide we don't want it and put the
+// character that we just read back so it can be part of the *next*
+// message. In this case pbackfail will NOT be called.
+//
+// If one reads a character with sgetn (or from an istream) resulting
+// in xsgetn_a() being called and the that results in the buffer
+// going empty - then that can cause a buffer reset, resetting the
+// put area to the start of the current memory block. Putting back
+// a character is then never safe because it basically writes into
+// the (new) put area.
+StreamBuf::int_type StreamBuf::pbackfail(int_type c)
 {
   DoutEntering(dc::notice, "pbackfail(" << libcwd::char2str(c) << ") [" << this << ']');
-#ifdef DEBUGDBSTREAMBUF
-  printOn(std::cerr);
-#endif
   if (c == static_cast<int_type>(EOF))
   {
 #ifdef DEBUGDBSTREAMBUF
@@ -344,67 +349,7 @@ StreamBuf::int_type StreamBuf::pbackfail_a(int_type c, GetThread type)
 #endif
     return 0;
   }
-  bool gptr_at_eback;
-  // Allocate a new MemoryBlock with minimal size before locking the get area,
-  // anticipating that gptr() is going to be equal eback().
-  size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
-  MemoryBlock* get_area_block_node = MemoryBlock::create(block_size);
-  {
-    GetThreadLock::wat get_area_wat(get_area_lock(type));
-    std::ptrdiff_t offset = gptr(get_area_wat) - eback(get_area_wat);
-    gptr_at_eback = offset == 0 || m_next_egptr == nullptr;
-    // Likely because that should be the reason one call pbackfail in the first place.
-    if (AI_LIKELY(gptr_at_eback))
-    {
-      Dout(dc::notice, "Prepending block to buffer.");
-      //===========================================================
-      // Prepend a new MemoryBlock with minimal size.
-      char* const start = get_area_block_node->block_start();
-      setg(start, start + block_size - 1, start + block_size, get_area_wat);
-      get_area_block_node->m_next = m_get_area_block_node;
-      m_get_area_block_node = get_area_block_node;
-      //===========================================================
-      // Is the buffer being reset?
-      if (m_next_egptr == nullptr)
-      {
-        Dout(dc::notice, "pbackfail_a: resetting get area.");
-        m_last_gptr.store(start + block_size - 1, std::memory_order_relaxed);
-#ifdef DEBUGEVENTRECORDING
-        RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start + block_size - 1, 0);
-        resetting_get_area(data);
-#endif
-        m_next_egptr = start + block_size - 1;                      // Flush m_last_gptr before making m_next_egptr non-null.
-                                                                    // This must be memory_order_seq_cst.
-
-        // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the PutThread
-        // might have changed m_next_egptr2 but missed the write to m_next_egptr, so we have to synchronize
-        // (m_)next_egptr with the latest value of m_next_egptr2.
-        char* expected_next_egptr = start + block_size - 1;
-        char* next_egptr;
-        do
-        {
-          next_egptr = m_next_egptr2;                               // Must be memory_order_seq_cst.
-        }
-        while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
-        // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
-        // Reset gptr to the end of the new memory block.
-        m_buffer_size_minus_unused_in_first_block += offset;
-      }
-    }
-    else
-      gbump(-1, get_area_wat);
-    // Relaxed because we don't need to be synchronized with anything. The only
-    // requirement is that the Put Thread "eventually" sees this change so it
-    // can keep track of a reasonable estimate.
-    m_buffer_size_minus_unused_in_first_block.fetch_add(1, std::memory_order_relaxed);
-    *gptr(get_area_wat) = c;
-  }
-  // Free the new MemoryBlock when it was unused.
-  if (AI_UNLIKELY(!gptr_at_eback))
-    get_area_block_node->release();
-#ifdef DEBUGDBSTREAMBUF
-  printOn(std::cerr);
-#endif
+  DoutFatal(dc::fatal, "Do not use sputbackc. It is not thread-safe.");
   return 0;
 }
 
@@ -607,12 +552,6 @@ std::streambuf::int_type streambuf::underflow()
 {
   GetThread type;
   return static_cast<StreamBuf*>(m_input_streambuf)->underflow_a(type);
-}
-
-std::streambuf::int_type streambuf::pbackfail(int_type c)
-{
-  GetThread type;
-  return static_cast<StreamBuf*>(m_input_streambuf)->pbackfail_a(c, type);
 }
 
 std::streamsize streambuf::xsgetn(char* s, std::streamsize n)
