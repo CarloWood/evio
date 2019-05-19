@@ -68,9 +68,19 @@ void StreamBuf::dump()
 }
 #endif // DEBUGKEEPMEMORYBLOCKS
 
+  // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
-  m_minimum_block_size(minimum_block_size), m_buffer_full_watermark(buffer_full_watermark), m_max_allocated_block_size(max_allocated_block_size),
-  /*m_buffer_size_minus_unused_in_last_block(0),*/ m_device_counter(0)
+#ifdef DEBUGEVENTRECORDING
+    recording_pool(1024, sizeof(RecordingData)),
+#endif
+    m_input_streambuf(this),
+    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
+    m_last_gptr(nullptr),               // See update_put_area.
+    m_minimum_block_size(minimum_block_size),
+    m_buffer_full_watermark(buffer_full_watermark),
+    m_max_allocated_block_size(max_allocated_block_size),
+    /*m_buffer_size_minus_unused_in_last_block(0),*/
+    m_device_counter(0)
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
   SingleThread type;
@@ -163,7 +173,7 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
   return 0;
 }
 
-bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
+bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
 {
   // Get a copy of the last 'sync-ed' pptr.
   char* next_egptr = m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
@@ -430,9 +440,9 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
   return n - remaining;
 }
 
-char streambuf::s_next_egptr_init[1];
+char StreamBuf::s_next_egptr_init[1];
 
-char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat const&)
+char* StreamBuf::update_put_area(std::streamsize& available, PutThreadLock::rat const&)
 {
   char* block_start = std::streambuf::pbase();
   char* cur_pptr = std::streambuf::pptr();
@@ -543,31 +553,31 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
 // which mean that if they access the get area then they should access
 // our m_input_streambuf.
 
-std::streamsize streambuf::showmanyc()
+std::streamsize StreamBuf::showmanyc()
 {
   GetThread type;
   return static_cast<StreamBuf*>(m_input_streambuf)->showmanyc_a(type);
 }
 
-std::streambuf::int_type streambuf::underflow()
+std::streambuf::int_type StreamBuf::underflow()
 {
   GetThread type;
   return static_cast<StreamBuf*>(m_input_streambuf)->underflow_a(type);
 }
 
-std::streamsize streambuf::xsgetn(char* s, std::streamsize n)
+std::streamsize StreamBuf::xsgetn(char* s, std::streamsize n)
 {
   GetThread type;
   return static_cast<StreamBuf*>(m_input_streambuf)->xsgetn_a(s, n, type);
 }
 
-std::streambuf::int_type streambuf::overflow(int_type c)
+std::streambuf::int_type StreamBuf::overflow(int_type c)
 {
   PutThread type;
   return static_cast<StreamBuf*>(this)->overflow_a(c, type);
 }
 
-std::streamsize streambuf::xsputn(char const* s, std::streamsize n)
+std::streamsize StreamBuf::xsputn(char const* s, std::streamsize n)
 {
   PutThread type;
   return static_cast<StreamBuf*>(this)->xsputn_a(s, n, type);
@@ -815,7 +825,7 @@ void StreamBuf::printOn(std::ostream& os) const
 #ifdef DEBUGEVENTRECORDING
 
 // Read from the buffer: copy data from `data->start' to `to'.
-void streambuf::record_memcpy(RecordingData* data, char* to)
+void StreamBuf::record_memcpy(RecordingData* data, char* to)
 {
   data->m_type = memcpy_reading;
   {
@@ -827,7 +837,7 @@ void streambuf::record_memcpy(RecordingData* data, char* to)
 }
 
 // Write data to the buffer: copy data from `from' to `data->start`.
-void streambuf::record_memcpy(RecordingData* data, char const* from)
+void StreamBuf::record_memcpy(RecordingData* data, char const* from)
 {
   data->m_type = memcpy_writing;
   {
@@ -838,21 +848,21 @@ void streambuf::record_memcpy(RecordingData* data, char const* from)
   write_stream_offset += data->m_length;
 }
 
-void streambuf::resetting_put_area(RecordingData* data)
+void StreamBuf::resetting_put_area(RecordingData* data)
 {
   data->m_type = put_area_reset;
   std::lock_guard<std::mutex> lock(recording_mutex);
   recording_buffer.push_back(data);
 }
 
-void streambuf::resetting_get_area(RecordingData* data)
+void StreamBuf::resetting_get_area(RecordingData* data)
 {
   data->m_type = get_area_reset;
   std::lock_guard<std::mutex> lock(recording_mutex);
   recording_buffer.push_back(data);
 }
 
-void streambuf::updating_get_area(RecordingData* data)
+void StreamBuf::updating_get_area(RecordingData* data)
 {
   data->m_type = get_area_update;
   std::lock_guard<std::mutex> lock(recording_mutex);

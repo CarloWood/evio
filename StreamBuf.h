@@ -305,32 +305,11 @@ struct RecordingData
 //         |                    |
 //         `--------------------'
 
-// Nobody has access to the std::streambuf.
-// To make sure that even StreamBuf doesn't directly call any of its methods
-// repeat those methods of std::stream buf that we're using, here.
-class streambuf : private std::streambuf
+class StreamBuf : public std::streambuf
 {
  public:
-  // Standard member types.
-  using char_type = std::streambuf::char_type;
-  using traits_type = std::streambuf::traits_type;
-  using int_type = std::streambuf::int_type;
-  using pos_type = std::streambuf::pos_type;
-  using off_type = std::streambuf::off_type;
-
   using GetThreadLock = aithreadsafe::Wrapper<GetThread, aithreadsafe::policy::Primitive<std::mutex>>;
   using PutThreadLock = aithreadsafe::Wrapper<PutThread, aithreadsafe::policy::Primitive<std::mutex>>;
-
-  // Using these is the same as writing to an ostream (that uses this buffer):
-  // The written data will not be visible to the GetThread until one flushes
-  // the stream (calls sync() on the buffer -- which calls sync_egptr) AND reaches
-  // the end of the current get area (so that underflow is called) or calls
-  // sync_next_egptr() directly.
-  using std::streambuf::sputc;
-  using std::streambuf::sputn;
-  using std::streambuf::sbumpc;
-  using std::streambuf::sgetn;
-  using std::streambuf::sputbackc;
 
 #ifdef DEBUGEVENTRECORDING
   utils::NodeMemoryPool recording_pool;
@@ -354,7 +333,8 @@ class streambuf : private std::streambuf
   using GetThreadAccess = GetThreadLock::wat;
   using PutThreadAccess = PutThreadLock::wat;
 
-  streambuf* m_input_streambuf;         // Buffer that we read from.
+  StreamBuf* m_input_streambuf;         // Buffer that we read from.
+
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
  public:
   std::mutex get_area_release_mutex;
@@ -457,21 +437,9 @@ class streambuf : private std::streambuf
   // Constructor thread.
   static char s_next_egptr_init[1];
 
-  // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
-  streambuf() :
-#ifdef DEBUGEVENTRECORDING
-    recording_pool(1024, sizeof(RecordingData)),
-#endif
-    m_input_streambuf(this),
-    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
-    m_last_gptr(nullptr)                // See update_put_area.
-    { }
-  // Suppress warning about not inlining destructor.
-  ~streambuf() noexcept { }
-
 #if 0
   // Initialize the input buffer pointer.
-  void set_input_buffer(streambuf* input_buffer, SingleThread)
+  void set_input_buffer(StreamBuf* input_buffer, SingleThread)
   {
     // This assumes that also input_buffer was just constructed and still empty.
     char* start = input_buffer->std::streambuf::pbase();
@@ -556,10 +524,7 @@ class streambuf : private std::streambuf
   // because it is not possible that the Get Thread removes data from the buffer immediately
   // after returning (since we are the Get Thread too).
   size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
-};
 
-class StreamBuf : public streambuf
-{
  public:
   size_t const m_minimum_block_size;            // Size of the smallest block.
   size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
@@ -621,7 +586,6 @@ class StreamBuf : public streambuf
 
  protected:
   // Also the actual virtual functions are redirected to these member functions.
-  friend class streambuf;
 
   // Added _a to avoid compiler warning about hidden virtual function :/.
   std::streamsize showmanyc_a(GetThread);
@@ -699,8 +663,10 @@ class StreamBuf : public streambuf
   // Called when a putback failed.
   int_type pbackfail(int_type c) override final;
 
+#ifndef DEBUGDBSTREAMBUF
   // Allow printing of `this' pointers.
-  friend std::ostream& operator<<(std::ostream& os, streambuf* sb) { return os << (void*)static_cast<StreamBuf*>(sb); }
+  friend std::ostream& operator<<(std::ostream& os, StreamBuf* sb) { return os << (void*)sb; }
+#endif
 
  public:
   //---------------------------------------------------------------------------
