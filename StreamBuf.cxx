@@ -136,7 +136,7 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
       m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
       block_size = max_block_size;
     }
-    Dout(dc::notice, "overflow_a: allocating new memory block of size " << block_size);
+    Dout(dc::evio, "overflow_a: allocating new memory block of size " << block_size);
     MemoryBlock* new_block = MemoryBlock::create(block_size);
 #ifdef DEBUGKEEPMEMORYBLOCKS
     keep(new_block);
