@@ -203,7 +203,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
   // Case 3
   //
   {
-    Dout(dc::notice, "update_get_area: resetting get area.");
+    Dout(dc::evio, "update_get_area: resetting get area.");
     m_last_gptr.store(start, std::memory_order_relaxed);        // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start, 0);
@@ -223,7 +223,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
     while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
-    m_buffer_size_minus_unused_in_first_block += cur_gptr - start;
+    m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_relaxed);
     cur_gptr = start;
   }
   //
@@ -278,7 +278,7 @@ bool streambuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
       // pointing to that, now newly allocated, memory!
       store_last_gptr(cur_gptr);
       // m_buffer_size_minus_unused_in_first_block does not change.
-      Dout(dc::notice, "update_get_area: freeing memory block of size " << prev_get_area_block_node->get_size());
+      Dout(dc::evio, "update_get_area: freeing memory block of size " << prev_get_area_block_node->get_size());
       prev_get_area_block_node->release();
     }
     //===========================================================
@@ -416,12 +416,13 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
       // that the PutThread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
       // pointing to that, now newly allocated, memory!
       store_last_gptr(start);
-      Dout(dc::notice, "xsgetn_a: freeing memory block of size " << get_area_block_node->get_size());
+      Dout(dc::evio, "xsgetn_a: freeing memory block of size " << get_area_block_node->get_size());
       get_area_block_node->release();
       //===========================================================
     }
   }
-  m_buffer_size_minus_unused_in_first_block -= n - remaining;
+  // This RMW operation seems to take a considerable amount of CPU cycles.
+  m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_relaxed);
   Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
@@ -446,7 +447,7 @@ char* streambuf::update_put_area(std::streamsize& available, PutThreadLock::rat 
       // streambuf constructor.
       cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while next_egptr != nullptr then the buffer is truely empty (gptr == pptr).
   {
-    Dout(dc::notice, "update_put_area: resetting put area.");
+    Dout(dc::evio, "update_put_area: resetting put area.");
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
@@ -512,7 +513,7 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
         m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
         block_size = max_block_size;
       }
-      Dout(dc::notice, "xsputn_a: allocating new memory block of size " << block_size);
+      Dout(dc::evio, "xsputn_a: allocating new memory block of size " << block_size);
       MemoryBlock* new_block = MemoryBlock::create(block_size);
 #ifdef DEBUGKEEPMEMORYBLOCKS
       keep(new_block);
