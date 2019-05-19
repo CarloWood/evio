@@ -311,7 +311,59 @@ class StreamBuf : public std::streambuf
   using GetThreadLock = aithreadsafe::Wrapper<GetThread, aithreadsafe::policy::Primitive<std::mutex>>;
   using PutThreadLock = aithreadsafe::Wrapper<PutThread, aithreadsafe::policy::Primitive<std::mutex>>;
 
+ public:
+  size_t const m_minimum_block_size;            // Size of the smallest block.
+  size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
+  size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
+
+ private:
+  using GetThreadAccess = GetThreadLock::wat;
+  using PutThreadAccess = PutThreadLock::wat;
+
+  StreamBuf* m_input_streambuf;         // Buffer that we read from.
+
+  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the GetThread has to reset the get area.
+  std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
+  std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the PutThread.
+
+  GetThreadLock m_get_area_lock;
+  PutThreadLock m_put_area_lock;
+
+  // Pointer to the get area - block object.
+  MemoryBlock* m_get_area_block_node;
+
+  // Pointer to the put area - block object.
+  MemoryBlock* m_put_area_block_node;
+
+  // The total size of the buffer minus the amount of unused bytes in the put area.
+//  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
+
+  // The total size of the buffer minus the amount of unused bytes in the get area.
+  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
+
+  // Constructor thread.
+  static char s_next_egptr_init[1];
+
+  //---------------------------------------------------------------------------
+  // Protected attributes:
+  //
+ protected:
+
+  // The devices whose constructor this StreamBuf was passed to.
+  InputDevice* m_idevice;
+  OutputDevice* m_odevice;
+
+  // Count of number of devices.
+  int m_device_counter;
+
+#ifdef DEBUGNEXTEGPTRSANITYCHECK
+ public:
+  std::mutex get_area_release_mutex;
+  virtual void sanity_check() = 0;
+#endif
+
 #ifdef DEBUGEVENTRECORDING
+ public:
   utils::NodeMemoryPool recording_pool;
   std::vector<RecordingData*> recording_buffer;
   std::mutex recording_mutex;
@@ -328,25 +380,6 @@ class StreamBuf : public std::streambuf
   void resetting_get_area(RecordingData* data);
   void updating_get_area(RecordingData* data);
 #endif
-
- private:
-  using GetThreadAccess = GetThreadLock::wat;
-  using PutThreadAccess = PutThreadLock::wat;
-
-  StreamBuf* m_input_streambuf;         // Buffer that we read from.
-
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
- public:
-  std::mutex get_area_release_mutex;
-  virtual void sanity_check() = 0;
- protected:
-#endif
-  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the GetThread has to reset the get area.
-  std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
- private:
-  std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the PutThread.
-  GetThreadLock m_get_area_lock;
-  PutThreadLock m_put_area_lock;
 
  public:
   GetThreadLock const& get_area_lock(GetThread) const { return m_get_area_lock; }
@@ -426,17 +459,6 @@ class StreamBuf : public std::streambuf
   friend class OutputStream;
   std::streambuf* get_sb() { return static_cast<std::streambuf*>(this); }
 
- protected:
-  // The total size of the buffer minus the amount of unused bytes in the put area.
-//  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
-
-  // The total size of the buffer minus the amount of unused bytes in the get area.
-  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
-
- protected:
-  // Constructor thread.
-  static char s_next_egptr_init[1];
-
 #if 0
   // Initialize the input buffer pointer.
   void set_input_buffer(StreamBuf* input_buffer, SingleThread)
@@ -448,11 +470,16 @@ class StreamBuf : public std::streambuf
   }
 #endif
 
+ protected:
   // Get area / Get Thread / Reading.
   [[gnu::always_inline]] auto eback(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::eback(); }
   [[gnu::always_inline]] auto gptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::gptr(); }
   [[gnu::always_inline]] auto egptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::egptr(); }
-  [[gnu::always_inline]] void gbump(int n, GetThreadLock::wat const&) { m_input_streambuf->std::streambuf::gbump(n); }
+  [[gnu::always_inline]] void gbump(int n, GetThreadLock::wat const&)
+  {
+    m_input_streambuf->std::streambuf::gbump(n);
+    m_buffer_size_minus_unused_in_first_block.fetch_sub(n, std::memory_order_acq_rel);
+  }
   [[gnu::always_inline]] void setg(char* eb, char* g, char* eg, GetThreadLock::wat const&) { m_input_streambuf->std::streambuf::setg(eb, g, eg); }
 
   // Put area / Put Thread / Writing.
@@ -518,30 +545,24 @@ class StreamBuf : public std::streambuf
 //  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
 
   // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
+  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const
+  {
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
+  }
 
   // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
   // because it is not possible that the Get Thread removes data from the buffer immediately
   // after returning (since we are the Get Thread too).
-  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const { return m_buffer_size_minus_unused_in_first_block - unused_in_last_block(put_area_rat); }
-
- public:
-  size_t const m_minimum_block_size;            // Size of the smallest block.
-  size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
-  size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
+  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const
+  {
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
+  }
 
 #ifdef DEBUGKEEPMEMORYBLOCKS
   std::vector<MemoryBlock*> m_keep_v;
   void keep(MemoryBlock* mb);
   void dump();
 #endif
-
- private:
-  // Pointer to the get area - block object.
-  MemoryBlock* m_get_area_block_node;
-
-  // Pointer to the put area - block object.
-  MemoryBlock* m_put_area_block_node;
 
  public:
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
@@ -617,18 +638,6 @@ class StreamBuf : public std::streambuf
   // *undocumented*
   void printOn(std::ostream& o) const;
 #endif
-
- protected:
-  //---------------------------------------------------------------------------
-  // Protected attributes:
-  //
-
-  // The devices whose constructor this StreamBuf was passed to.
-  InputDevice* m_idevice;
-  OutputDevice* m_odevice;
-
-  // Count of number of devices.
-  int m_device_counter;
 
  public:
   //---------------------------------------------------------------------------
@@ -824,7 +833,6 @@ class Buf2Dev : public StreamBuf
   {
     GetThread type;
     gbump(n, GetThreadLock::wat(get_area_lock(type)));
-    m_buffer_size_minus_unused_in_first_block -= n;
   }
 
   // Called by the Put Thread to indicate that there is
@@ -852,7 +860,7 @@ class LinkBuffer : public Dev2Buf
   size_t buf2dev_contiguous() const { GetThread type; return next_contiguous_number_of_bytes(type); }
   size_t buf2dev_contiguous_forced() { GetThread type; return force_next_contiguous_number_of_bytes(type); }
   char* buf2dev_ptr() const { GetThread type; return gptr(GetThreadLock::crat(get_area_lock(type))); }
-  void buf2dev_bump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); m_buffer_size_minus_unused_in_first_block -= n; }
+  void buf2dev_bump(int n) { GetThread type; gbump(n, GetThreadLock::wat(get_area_lock(type))); }
   int sync() override;
   void flush();
   //-----------------------------------------------------------
@@ -887,7 +895,7 @@ class InputBuffer : public Dev2Buf
 
   // Raw binary access (instead of using istream):
   char* raw_gptr(GetThreadLock::crat const& get_area_rat) const { return gptr(get_area_rat); }   // Get pointer to get area.
-  void raw_gbump(GetThreadLock::wat const& get_area_wat, int n) { gbump(n, get_area_wat); m_buffer_size_minus_unused_in_first_block -= n; }       // Bump pointer `n' bytes.
+  void raw_gbump(GetThreadLock::wat const& get_area_wat, int n) { gbump(n, get_area_wat); }       // Bump pointer `n' bytes.
   size_t raw_sgetn(char* s, size_t n) { GetThread type; return xsgetn_a(s, n, type); }   // Read `n' bytes and copy them to `s'.
 
   // Administration:

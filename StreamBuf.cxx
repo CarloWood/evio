@@ -70,17 +70,17 @@ void StreamBuf::dump()
 
   // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
-#ifdef DEBUGEVENTRECORDING
-    recording_pool(1024, sizeof(RecordingData)),
-#endif
-    m_input_streambuf(this),
-    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
-    m_last_gptr(nullptr),               // See update_put_area.
     m_minimum_block_size(minimum_block_size),
     m_buffer_full_watermark(buffer_full_watermark),
     m_max_allocated_block_size(max_allocated_block_size),
-    /*m_buffer_size_minus_unused_in_last_block(0),*/
+    m_input_streambuf(this),
+    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
+    m_last_gptr(nullptr),               // See update_put_area.
     m_device_counter(0)
+    /*m_buffer_size_minus_unused_in_last_block(0),*/
+#ifdef DEBUGEVENTRECORDING
+    , recording_pool(1024, sizeof(RecordingData))
+#endif
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
   SingleThread type;
@@ -132,18 +132,17 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
     //===========================================================
     // Create a new MemoryBlock.
     size_t block_size = new_block_size(type);
-    // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
-    std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
+    std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_acq_rel);
     if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
     {
       size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
       if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
       {
-        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
+        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_acq_rel);
         return static_cast<int_type>(EOF);
       }
       size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
-      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
+      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_acq_rel);
       block_size = max_block_size;
     }
     Dout(dc::evio, "overflow_a: allocating new memory block of size " << block_size);
@@ -233,7 +232,7 @@ bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
     while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
-    m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_relaxed);
+    m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_acq_rel);
     cur_gptr = start;
   }
   //
@@ -400,7 +399,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
 #else
       std::memcpy(s, cur_gptr, len);
 #endif
-      gbump(len, GetThreadLock::wat(get_area_lock(type)));
+      std::streambuf::gbump(len);       // Do not update m_buffer_size_minus_unused_in_first_block, that happens at the end of this function.
       s += len;
       available -= len;
       remaining -= len;
@@ -432,7 +431,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
     }
   }
   // This RMW operation seems to take a considerable amount of CPU cycles.
-  m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_relaxed);
+  m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_acq_rel);
   Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
@@ -509,18 +508,17 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
       //===========================================================
       // Create a new MemoryBlock.
       size_t block_size = new_block_size(type);
-      // This can be done relaxed because m_buffer_size_minus_unused_in_first_block is only read by the Put thread ("this" thread).
-      std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_relaxed);
+      std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_acq_rel);
       if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
       {
         size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
         if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
         {
-          m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_relaxed);
+          m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_acq_rel);
           return static_cast<int_type>(EOF);
         }
         size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
-        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_relaxed);
+        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_acq_rel);
         block_size = max_block_size;
       }
       Dout(dc::evio, "xsputn_a: allocating new memory block of size " << block_size);
@@ -598,7 +596,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadL
 #endif
     MemoryBlock* get_area_block_node = m_get_area_block_node;
     m_get_area_block_node = MemoryBlock::create(m_minimum_block_size);
-    m_buffer_size_minus_unused_in_first_block.store(m_minimum_block_size, std::memory_order_relaxed);
+    m_buffer_size_minus_unused_in_first_block.store(m_minimum_block_size, std::memory_order_acq_rel);
     m_put_area_block_node = m_get_area_block_node;
     Dout(dc::notice, "reduce_buffer: freeing memory block of size " << get_area_block_node->get_size());
     get_area_block_node->release();
