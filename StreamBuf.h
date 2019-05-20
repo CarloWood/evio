@@ -369,17 +369,10 @@ class StreamBuf : public std::streambuf
   friend class OutputStream;
   std::streambuf* get_sb() { return static_cast<std::streambuf*>(this); }
 
- private:
-  // Calculate the size of the new block as a function of the currently amount of buffered data.
-  size_t new_block_size(PutThread type) const;
-
-  // Called when the buffer is empty to reduce its size.
-  void reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
-
+ protected:
   //---------------------------------------------------------------------------
   // Protected attributes:
   //
- protected:
 
   // The devices whose constructor this StreamBuf was passed to.
   InputDevice* m_idevice;
@@ -388,22 +381,22 @@ class StreamBuf : public std::streambuf
   // Count of number of devices.
   int m_device_counter;
 
- protected:
-  // Get area / Get Thread / Reading.
-  [[gnu::always_inline]] auto eback(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::eback(); }
-  [[gnu::always_inline]] auto gptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::gptr(); }
-  [[gnu::always_inline]] auto egptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::egptr(); }
-  [[gnu::always_inline]] void gbump(int n, GetThreadLock::wat const&)
-  {
-    m_input_streambuf->std::streambuf::gbump(n);
-    m_buffer_size_minus_unused_in_first_block.fetch_sub(n, std::memory_order_acq_rel);
-  }
-  [[gnu::always_inline]] void setg(char* eb, char* g, char* eg, GetThreadLock::wat const&) { m_input_streambuf->std::streambuf::setg(eb, g, eg); }
+  //===========================================================================
+  //
+  // PUT THREAD API
+  //
+  // Only one thread at a time may access this API (as long as none is using
+  // the single threaded API).
 
+ private:
+  // Calculate the size of the new block as a function of the currently amount of buffered data.
+  size_t new_block_size(PutThread type) const;
+
+ protected:
   // Put area / Put Thread / Writing.
-  [[gnu::always_inline]] auto pbase(PutThreadLock::crat const&) const { return std::streambuf::pbase(); }
-  [[gnu::always_inline]] auto pptr(PutThreadLock::crat const&) const { return std::streambuf::pptr(); }
-  [[gnu::always_inline]] auto epptr(PutThreadLock::crat const&) const { return std::streambuf::epptr(); }
+  [[gnu::always_inline]] char* pbase(PutThreadLock::crat const&) const { return std::streambuf::pbase(); }
+  [[gnu::always_inline]] char* pptr(PutThreadLock::crat const&) const { return std::streambuf::pptr(); }
+  [[gnu::always_inline]] char* epptr(PutThreadLock::crat const&) const { return std::streambuf::epptr(); }
   // Note that the way m_next_egptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
   [[gnu::always_inline]] void pbump(int n, PutThreadLock::wat const& put_area_wat) { std::streambuf::pbump(n); sync_egptr(put_area_wat); }
   [[gnu::always_inline]] void setp(char* p, char* ep, PutThreadLock::wat const& put_area_wat)
@@ -429,13 +422,6 @@ class StreamBuf : public std::streambuf
   }
 
  protected:
-  // Also the actual virtual functions are redirected to these member functions.
-
-  // Added _a to avoid compiler warning about hidden virtual function :/.
-  std::streamsize showmanyc_a(GetThread);
-  int_type underflow_a(GetThread);
-  std::streamsize xsgetn_a(char* s, std::streamsize const n, GetThread);
-
   int_type overflow_a(int_type c, PutThread);
   std::streamsize xsputn_a(char const* s, std::streamsize const n, PutThread);
 
@@ -470,6 +456,99 @@ class StreamBuf : public std::streambuf
     return contiguous_size;
   }
 
+ public:
+  PutThreadLock const& put_area_lock(PutThread) const { return m_put_area_lock; }
+  PutThreadLock& put_area_lock(PutThread) { return m_put_area_lock; }
+
+  // Store the current value of pptr in m_next_egptr.
+  [[gnu::always_inline]] void sync_egptr(char* cur_pptr, PutThreadLock::crat const&)
+  {
+    m_next_egptr2 = cur_pptr;                   // Must be memory_order_seq_cst.
+#ifdef DEBUGNEXTEGPTRSANITYCHECK
+    sanity_check();
+#endif
+    // Do not, ourselves, overwrite a null value - that is a signal to the GetThread that the get area has to be
+    // reset to the beginning of the current block and only the GetThread may change m_next_egptr to non-null again
+    // (see sync_egptr below).
+    if (m_next_egptr)                           // Must be memory_order_seq_cst.
+    {
+      m_next_egptr.store(cur_pptr, std::memory_order_release);
+#ifdef DEBUGNEXTEGPTRSANITYCHECK
+      sanity_check();
+#endif
+    }
+  }
+  [[gnu::always_inline]] void sync_egptr(PutThreadLock::crat const& put_area_rat)
+  {
+    sync_egptr(std::streambuf::pptr(), put_area_rat);
+  }
+
+  char* update_put_area(std::streamsize& available, PutThreadLock::rat const& put_area_rat);
+
+  // Allow using this streambuf for an istream or ostream class.
+  std::streambuf* rdbuf() { return this; }
+
+ public:
+  utils::FuzzyBool buffer_empty(PutThreadLock::crat const& put_area_rat) const
+  {
+    GetThreadLock::crat get_area_rat(get_area_lock(GetThread()));
+    // This is the put thread. Therefore, if the buffer is empty it will stay empty,
+    // but if it is not empty then the get thread might make it empty immediately
+    // after leaving this function.
+    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::True : fuzzy::WasFalse;
+  }
+
+  // Return the number of unused bytes in the put area of the output buffer.
+  size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
+
+  // Return the number of bytes currently in the buffer.
+  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const
+  {
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
+  }
+
+ public:
+  //---------------------------------------------------------------------------
+  // Public accessors
+  //
+
+#if 0
+  // Returns true if the output buffer is full.
+  bool buffer_full() const
+  {
+    bool full = used_size() >= m_buffer_full_watermark;
+#ifdef CWDEBUG
+    if (full)
+      Dout(dc::warning, "StreamBuf::buffer_full: used_size() = " << used_size() << " >= m_buffer_full_watermark = " << m_buffer_full_watermark << " [" << this << ']');
+#endif
+    return full;
+  }
+#endif
+
+  //===========================================================================
+  //
+  // GET THREAD API
+  //
+  // Only one thread at a time may access this API (as long as none is using
+  // the single threaded API).
+
+ protected:
+  // Get area / Get Thread / Reading.
+  [[gnu::always_inline]] char* eback(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::eback(); }
+  [[gnu::always_inline]] char* gptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::gptr(); }
+  [[gnu::always_inline]] char* egptr(GetThreadLock::crat const&) const { return m_input_streambuf->std::streambuf::egptr(); }
+  [[gnu::always_inline]] void gbump(int n, GetThreadLock::wat const&)
+  {
+    m_input_streambuf->std::streambuf::gbump(n);
+    m_buffer_size_minus_unused_in_first_block.fetch_sub(n, std::memory_order_acq_rel);
+  }
+  [[gnu::always_inline]] void setg(char* eb, char* g, char* eg, GetThreadLock::wat const&) { m_input_streambuf->std::streambuf::setg(eb, g, eg); }
+
+  // Added _a to avoid compiler warning about hidden virtual function :/.
+  std::streamsize showmanyc_a(GetThread);
+  int_type underflow_a(GetThread);
+  std::streamsize xsgetn_a(char* s, std::streamsize const n, GetThread);
+
   // Return the amount of contiguous bytes in the get area.
   // This might return 0 even if the buffer isn't empty, therefore call
   // force_next_contiguous_number_of_bytes() when it returns 0.
@@ -501,42 +580,6 @@ class StreamBuf : public std::streambuf
     return contiguous_size;
   }
 
- protected:
-  //---------------------------------------------------------------------------
-  // Manipulators and accessors that are called from InputBuffer/OutputBuffer.
-
-  // Should be called to make sure that the buffer also decreases.
-  inline void reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
-
- public:
-  GetThreadLock const& get_area_lock(GetThread) const { return m_get_area_lock; }
-  PutThreadLock const& put_area_lock(PutThread) const { return m_put_area_lock; }
-  GetThreadLock& get_area_lock(GetThread) { return m_get_area_lock; }
-  PutThreadLock& put_area_lock(PutThread) { return m_put_area_lock; }
-
-  // Store the current value of pptr in m_next_egptr.
-  [[gnu::always_inline]] void sync_egptr(char* cur_pptr, PutThreadLock::crat const&)
-  {
-    m_next_egptr2 = cur_pptr;                   // Must be memory_order_seq_cst.
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-    sanity_check();
-#endif
-    // Do not, ourselves, overwrite a null value - that is a signal to the GetThread that the get area has to be
-    // reset to the beginning of the current block and only the GetThread may change m_next_egptr to non-null again
-    // (see sync_egptr below).
-    if (m_next_egptr)                           // Must be memory_order_seq_cst.
-    {
-      m_next_egptr.store(cur_pptr, std::memory_order_release);
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-      sanity_check();
-#endif
-    }
-  }
-  [[gnu::always_inline]] void sync_egptr(PutThreadLock::crat const& put_area_rat)
-  {
-    sync_egptr(std::streambuf::pptr(), put_area_rat);
-  }
-
   // If m_next_egptr == nullptr, then reset the get area to the start of get_area_block_node
   // and sync m_next_egptr with value from the last call to sync_egptr(). Then continue with
   // the following:
@@ -556,22 +599,10 @@ class StreamBuf : public std::streambuf
   // Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
   bool update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat);
 
-  char* update_put_area(std::streamsize& available, PutThreadLock::rat const& put_area_rat);
-
-  // Allow using this streambuf for an istream or ostream class.
-  std::streambuf* rdbuf() { return this; }
-
  public:
-  // Returns true if output buffer is empty.
-  bool buffer_empty(GetThreadLock::crat const& get_area_rat, PutThreadLock::crat const& put_area_rat) const { return gptr(get_area_rat) == pptr(put_area_rat); }
-  utils::FuzzyBool buffer_empty(PutThreadLock::crat const& put_area_rat) const
-  {
-    GetThreadLock::crat get_area_rat(get_area_lock(GetThread()));
-    // This is the put thread. Therefore, if the buffer is empty it will stay empty,
-    // but if it is not empty then the get thread might make it empty immediately
-    // after leaving this function.
-    return (gptr(get_area_rat) == pptr(put_area_rat)) ? fuzzy::True : fuzzy::WasFalse;
-  }
+  GetThreadLock const& get_area_lock(GetThread) const { return m_get_area_lock; }
+  GetThreadLock& get_area_lock(GetThread) { return m_get_area_lock; }
+
   utils::FuzzyBool buffer_empty(GetThreadLock::crat const& get_area_rat) const
   {
     PutThreadLock::crat put_area_rat(put_area_lock(PutThread()));
@@ -584,26 +615,9 @@ class StreamBuf : public std::streambuf
   // Return the number of unused bytes in the get area of the input buffer
   size_t unused_in_first_block(GetThreadLock::crat const& get_area_rat) const { return gptr(get_area_rat) - eback(get_area_rat); }
 
-  // Return the number of unused bytes in the put area of the output buffer.
-  size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
-
   // Return the number of bytes currently in the buffer.
   // m_buffer_size_minus_unused_in_last_block is not updated at the moment.
 //  std::streamsize get_data_size_lower_bound(GetThreadLock::crat const& get_area_rat) const { return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat); }
-
-  // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const
-  {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
-  }
-
-  // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
-  // because it is not possible that the Get Thread removes data from the buffer immediately
-  // after returning (since we are the Get Thread too).
-  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const
-  {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
-  }
 
  public:
   // Used for passing to MsgBlock constructor to increment the reference count.
@@ -617,10 +631,26 @@ class StreamBuf : public std::streambuf
   // Return a pointer that points one past the end of the current get area memory block.
   char* get_area_block_node_end(GetThread) const { return m_get_area_block_node->block_start() + m_get_area_block_node->get_size(); }
 
-  // Returns `true' when this buffer currently has more then one block allocated.
-  // This can be used to speed up read/write access methods.
-  // The returned value only makes sense when this is both the Get Thread and the Put Thread at the same time.
-  bool has_multiple_blocks(GetThread, PutThread) const { return m_get_area_block_node != m_put_area_block_node; }
+  // Returns true if a string with length `len' is contiguous
+  // in the current get area of the output buffer.
+  bool is_contiguous(size_t len, GetThreadLock::crat const& get_area_crat) const;
+
+  //===========================================================================
+  //
+  // SINGLE THREADED API
+  //
+  // Neither put thread nor get thread may be running while this is called.
+  //
+
+ protected:
+  // Called when the buffer is empty to reduce its size.
+  void reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
+
+  //---------------------------------------------------------------------------
+  // Manipulators and accessors that are called from InputBuffer/OutputBuffer.
+
+  // Should be called to make sure that the buffer also decreases.
+  inline void reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
 
  public:
   //---------------------------------------------------------------------------
@@ -668,28 +698,23 @@ class StreamBuf : public std::streambuf
   bool release(FileDescriptor const* device);
 
  public:
-  //---------------------------------------------------------------------------
-  // Public accessors
-  //
+  // Returns true if output buffer is empty.
+  bool buffer_empty(GetThreadLock::crat const& get_area_rat, PutThreadLock::crat const& put_area_rat) const { return gptr(get_area_rat) == pptr(put_area_rat); }
 
-  // Returns true if a string with length `len' is contiguous
-  // in the current get area of the output buffer.
-  bool is_contiguous(size_t len, GetThreadLock::crat const& get_area_crat) const;
-
-#if 0
-  // Returns true if the output buffer is full.
-  bool buffer_full() const
+  // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
+  // because it is not possible that the Get Thread removes data from the buffer immediately
+  // after returning (since we are the Get Thread too).
+  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const
   {
-    bool full = used_size() >= m_buffer_full_watermark;
-#ifdef CWDEBUG
-    if (full)
-      Dout(dc::warning, "StreamBuf::buffer_full: used_size() = " << used_size() << " >= m_buffer_full_watermark = " << m_buffer_full_watermark << " [" << this << ']');
-#endif
-    return full;
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
   }
-#endif
 
-  //---------------------------------------------------------------------------
+  // Returns `true' when this buffer currently has more then one block allocated.
+  // This can be used to speed up read/write access methods.
+  // The returned value only makes sense when this is both the Get Thread and the Put Thread at the same time.
+  bool has_multiple_blocks(GetThread, PutThread) const { return m_get_area_block_node != m_put_area_block_node; }
+
+  //===========================================================================
   // Debugging stuff.
 
 #if defined(CWDEBUG) || defined(DEBUGDBSTREAMBUF)
@@ -760,6 +785,14 @@ class StreamBuf : public std::streambuf
   void resetting_put_area(RecordingData* data);
   void resetting_get_area(RecordingData* data);
   void updating_get_area(RecordingData* data);
+#endif
+
+#ifdef CWDEBUG
+ public:
+  bool debug_update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
+  {
+    return update_get_area(get_area_block_node, cur_gptr, available, get_area_wat);
+  }
 #endif
 };
 
