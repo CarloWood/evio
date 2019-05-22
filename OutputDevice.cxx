@@ -277,10 +277,9 @@ int OutputDevice::sync()
     return -1;
   }
   // Advance m_next_egptr, if necessary; making any data written so far available to the Get Thread.
-  m_obuffer->sync_egptr(StreamBuf::PutThreadLock::rat(m_obuffer->put_area_lock(type)));
+  m_obuffer->sync_egptr();
   utils::FuzzyCondition condition_not_empty([this, type]{
-        StreamBuf::PutThreadLock::rat put_area_rat(m_obuffer->put_area_lock(type));
-        return !m_obuffer->StreamBufProducer::buffer_empty(put_area_rat);
+        return !m_obuffer->StreamBufProducer::buffer_empty();
       });
   if ((condition_not_empty && !is_active(type)).is_momentary_true())
     start_output_device(type, condition_not_empty);

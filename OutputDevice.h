@@ -177,8 +177,7 @@ class OutputDevice : public virtual FileDescriptor
   void write_error(int err) { VT_ptr->_write_error(this, err); }
 
   // Called from the streambuf associated with this device when pubsync() is called on it.
-  friend class Buf2Dev;
-  friend class LinkBuffer;
+  friend class StreamBufProducer;
   virtual int sync();
 };
 

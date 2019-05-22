@@ -168,9 +168,9 @@ static_assert(alignof(MemoryBlock) == alignof(size_t) && sizeof(MemoryBlock) % s
 //
 // class MsgBlock
 //
-// MsgBlock is only passes as a temporary object to InputDevice::decode and as such
-// a particular instance is only used by the BRT (Buffer Reading Thread) which means
-// it is effectively single threaded with respect to the whole MemoryBlocksBuffer.
+// MsgBlock is only passed as a temporary object to InputDevice::decode and as such
+// a particular instance is only used by the consumer thread, which means it is
+// effectively single threaded with respect to the whole MemoryBlocksBuffer.
 //
 class MsgBlock
 {
@@ -350,9 +350,9 @@ class StreamBufCommon : public std::streambuf
 {
  protected:
   friend class StreamBufConsumer;
-  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the GetThread has to reset the get area.
+  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the consumer thread has to reset the get area.
   std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
-  std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the PutThread.
+  std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the producer thread.
 
   // The total size of the buffer minus the amount of unused bytes in the get area.
   std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
@@ -377,17 +377,11 @@ class StreamBufCommon : public std::streambuf
 class StreamBufProducer : public StreamBufCommon
 {
  public:
-  using PutThreadLock = aithreadsafe::Wrapper<PutThread, aithreadsafe::policy::Primitive<std::mutex>>;
-
- public:
   size_t const m_minimum_block_size;            // Size of the smallest block.
   size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
   size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
 
  private:
-  using PutThreadAccess = PutThreadLock::wat;
-  PutThreadLock m_put_area_lock;
-
   // The total size of the buffer minus the amount of unused bytes in the put area.
 //  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
 
@@ -395,9 +389,13 @@ class StreamBufProducer : public StreamBufCommon
   // Pointer to the put area - block object.
   MemoryBlock* m_put_area_block_node;
 
+  // The output device whose constructor this StreamBuf was passed to.
+  // Writing to this variable is single threaded. The producer may read it.
+  OutputDevice* m_odevice;
+
  private:
   // Calculate the size of the new block as a function of the currently amount of buffered data.
-  size_t new_block_size(PutThread type) const;
+  size_t new_block_size() const;
 
  protected:
   StreamBufProducer(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
@@ -408,19 +406,21 @@ class StreamBufProducer : public StreamBufCommon
   {
   }
 
-  [[gnu::always_inline]] char* pbase(PutThreadLock::crat const&) const { return std::streambuf::pbase(); }
-  [[gnu::always_inline]] char* pptr(PutThreadLock::crat const&) const { return std::streambuf::pptr(); }
-  [[gnu::always_inline]] char* epptr(PutThreadLock::crat const&) const { return std::streambuf::epptr(); }
   // Note that the way m_next_egptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
-  [[gnu::always_inline]] void pbump(int n, PutThreadLock::wat const& put_area_wat) { std::streambuf::pbump(n); sync_egptr(put_area_wat); }
-  [[gnu::always_inline]] void setp(char* p, char* ep, PutThreadLock::wat const& put_area_wat)
+  [[gnu::always_inline]] void pbump(int n)
   {
-    sync_egptr(p, put_area_wat);
+    std::streambuf::pbump(n);
+    sync_egptr();
+  }
+
+  [[gnu::always_inline]] void setp(char* p, char* ep)
+  {
+    sync_egptr(p);
     std::streambuf::setp(p, ep);
   }
-  void setp_pbump(char* p, char* ep, int n, PutThreadLock::wat const& put_area_wat)
+  void setp_pbump(char* p, char* ep, int n)
   {
-    sync_egptr(p + n, put_area_wat);
+    sync_egptr(p + n);
     std::streambuf::setp(p, ep);
     std::streambuf::pbump(n);
   }
@@ -429,8 +429,8 @@ class StreamBufProducer : public StreamBufCommon
   [[gnu::always_inline]] char* pptr_consumer_read_access() const { return std::streambuf::pptr(); }
 
  protected:
-  int_type overflow_a(int_type c, PutThread);
-  std::streamsize xsputn_a(char const* s, std::streamsize const n, PutThread);
+  int_type overflow_a(int_type c);
+  std::streamsize xsputn_a(char const* s, std::streamsize const n);
 
  protected:
   // Called when a putback failed.
@@ -444,31 +444,35 @@ class StreamBufProducer : public StreamBufCommon
  protected:
   // Returns the number of bytes that can be written directly into memory
   // at position pptr() at this moment.
-  size_t available_contiguous_number_of_bytes(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
+  size_t available_contiguous_number_of_bytes() const { return epptr() - pptr(); }
 
   // Same as above, but doesn't return 0 unless out of memory or buffer full.
-  size_t force_available_contiguous_number_of_bytes(PutThread type)
+  size_t force_available_contiguous_number_of_bytes()
   {
     size_t contiguous_size;
     {
-      PutThreadLock::rat put_area_rat(put_area_lock(type));
-      contiguous_size = epptr(put_area_rat) - pptr(put_area_rat);
+      contiguous_size = epptr() - pptr();
     }
-    if (contiguous_size == 0 && overflow_a(0, type) != EOF)       // Write a dummy byte '\0'
+    if (contiguous_size == 0 && overflow_a(0) != EOF)   // Write a dummy byte '\0'
     {
-      PutThreadLock::wat put_area_wat(put_area_lock(type));
-      pbump(-1, put_area_wat);                                    // Erase dummy byte
-      contiguous_size = epptr(put_area_wat) - pptr(put_area_wat);
+      pbump(-1);                                        // Erase dummy byte
+      contiguous_size = epptr() - pptr();
     }
     return contiguous_size;
   }
 
  public:
-  PutThreadLock const& put_area_lock(PutThread) const { return m_put_area_lock; }
-  PutThreadLock& put_area_lock(PutThread) { return m_put_area_lock; }
+  // Called by the producer thread to indicate that there is
+  // more in the buffer that can be read by the device.
+  int sync() override;
+
+  // Alternatively, this can be called, i.e. for non-streams,
+  // whenever anything was written to the buffer to make
+  // sure that it is written out.
+  void flush();
 
   // Store the current value of pptr in m_next_egptr.
-  [[gnu::always_inline]] void sync_egptr(char* cur_pptr, PutThreadLock::crat const&)
+  [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
     m_next_egptr2 = cur_pptr;                   // Must be memory_order_seq_cst.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
@@ -485,26 +489,26 @@ class StreamBufProducer : public StreamBufCommon
 #endif
     }
   }
-  [[gnu::always_inline]] void sync_egptr(PutThreadLock::crat const& put_area_rat)
+  [[gnu::always_inline]] void sync_egptr()
   {
-    sync_egptr(std::streambuf::pptr(), put_area_rat);
+    sync_egptr(std::streambuf::pptr());
   }
 
-  char* update_put_area(std::streamsize& available, PutThreadLock::rat const& put_area_rat);
+  char* update_put_area(std::streamsize& available);
 
   // Allow using this streambuf for an istream or ostream class.
   std::streambuf* rdbuf() { return this; }
 
  public:
-  [[gnu::always_inline]] inline utils::FuzzyBool buffer_empty(PutThreadLock::crat const& put_area_rat) const;
+  [[gnu::always_inline]] inline utils::FuzzyBool buffer_empty() const;
 
   // Return the number of unused bytes in the put area of the output buffer.
-  size_t unused_in_last_block(PutThreadLock::crat const& put_area_rat) const { return epptr(put_area_rat) - pptr(put_area_rat); }
+  size_t unused_in_last_block() const { return epptr() - pptr(); }
 
   // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_upper_bound(PutThreadLock::crat const& put_area_rat) const
+  std::streamsize get_data_size_upper_bound() const
   {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block();
   }
 
  public:
@@ -547,7 +551,7 @@ class StreamBufConsumer
 
   [[gnu::always_inline]] inline StreamBufCommon& common();
 
-  // Get area / Get Thread / Reading.
+  // Get area / consumer thread / reading.
   [[gnu::always_inline]] inline char* eback(GetThreadLock::crat const&) const;
   [[gnu::always_inline]] inline char* gptr(GetThreadLock::crat const&) const;
   [[gnu::always_inline]] inline char* egptr(GetThreadLock::crat const&) const;
@@ -569,6 +573,8 @@ class StreamBufConsumer
   std::streamsize showmanyc_a(GetThread);
   std::streambuf::int_type underflow_a(GetThread);
   std::streamsize xsgetn_a(char* s, std::streamsize const n, GetThread);
+
+  friend class LinkBuffer;      // Needs access to next_contiguous_number_of_bytes and force_next_contiguous_number_of_bytes.
 
   // Return the amount of contiguous bytes in the get area.
   // This might return 0 even if the buffer isn't empty, therefore call
@@ -639,10 +645,14 @@ class StreamBufConsumer
 class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 {
  private:
+  // The input device whose constructor this StreamBuf was passed to.
+  InputDevice* m_idevice;
+
+ private:
   // Override virtual functions.
 
   //---------------------------------------------------------------------------
-  // Get area / Get Thread / Reading.
+  // Get area / consumer thread / reading.
 
   // Called to probe how much can at least be extracted from the input buffer.
   std::streamsize showmanyc() override final;
@@ -654,7 +664,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   std::streamsize xsgetn(char* s, std::streamsize n) override final;
 
   //---------------------------------------------------------------------------
-  // Put area / Put Thread / Writing.
+  // Put area / producer thread / writing.
 
   // Called when a block is full.
   int_type overflow(int_type c) override final;
@@ -667,10 +677,6 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // Single Threaded Protected attributes:
   //
 
-  // The devices whose constructor this StreamBuf was passed to.
-  InputDevice* m_idevice;
-  OutputDevice* m_odevice;
-
   // Count of number of devices.
   int m_device_counter;
 
@@ -682,13 +688,13 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   //
  protected:
   // Called when the buffer is empty to reduce its size.
-  void reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
+  void reduce_buffer(GetThreadLock::wat const& get_area_wat);
 
   //---------------------------------------------------------------------------
   // Manipulators and accessors that are called from InputBuffer/OutputBuffer.
 
   // Should be called to make sure that the buffer also decreases.
-  inline void reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat);
+  inline void reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat);
 
  public:
   //---------------------------------------------------------------------------
@@ -709,6 +715,12 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // used for construction to change this.
   StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
 
+  // Which InputDevice is pointing to me, if any?
+  void set_input_device(InputDevice* device);
+
+  // Which OutputDevice is pointing to me, if any?
+  void set_output_device(OutputDevice* device);
+
   // Finish initialization by setting the input buffer of this StreamBuf.
 #if 0
   // Initialize the input buffer pointer.
@@ -726,31 +738,25 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   virtual ~StreamBuf() noexcept { Dout(dc::io, "~StreamBuf() [" << this << ']'); }
 
  public:
-  //---------------------------------------------------------------------------
-  // Which InputDevice/OutputDevice object(s) is/are pointing to me?
-
-  void set_input_device(InputDevice* device);
-  void set_output_device(OutputDevice* device);
-
   // When both (or the only) associated devices call this function, then we delete ourselfs.
   bool release(FileDescriptor const* device);
 
  public:
   // Returns true if output buffer is empty.
-  bool buffer_empty(GetThreadLock::crat const& get_area_rat, PutThreadLock::crat const& put_area_rat) const { return StreamBufConsumer::gptr(get_area_rat) == pptr(put_area_rat); }
+  bool buffer_empty(GetThreadLock::crat const& get_area_rat) const { return StreamBufConsumer::gptr(get_area_rat) == pptr(); }
 
   // Same as get_data_size_upper_bound, but this time returning a lasting, exact value
-  // because it is not possible that the Get Thread removes data from the buffer immediately
-  // after returning (since we are the Get Thread too).
-  size_t get_data_size(GetThread, PutThreadLock::crat const& put_area_rat) const
+  // because it is not possible that the consumer thread removes data from the buffer immediately
+  // after returning (since we are the consumer thread too).
+  size_t get_data_size(GetThread) const
   {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block(put_area_rat);
+    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block();
   }
 
   // Returns `true' when this buffer currently has more then one block allocated.
   // This can be used to speed up read/write access methods.
-  // The returned value only makes sense when this is both the Get Thread and the Put Thread at the same time.
-  bool has_multiple_blocks(GetThread, PutThread) const { return m_get_area_block_node != m_put_area_block_node; }
+  // The returned value only makes sense when this is both the consumer thread and the producer thread at the same time.
+  bool has_multiple_blocks(GetThread) const { return m_get_area_block_node != m_put_area_block_node; }
 
   //===========================================================================
   // Debugging stuff.
@@ -834,7 +840,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 #endif
 };
 
-utils::FuzzyBool StreamBufProducer::buffer_empty(PutThreadLock::crat const& put_area_rat) const
+utils::FuzzyBool StreamBufProducer::buffer_empty() const
 {
   // This is the producer thread. Therefore, if the buffer is empty it will stay empty,
   // but if it is not empty then the consumer thread might make it empty immediately
@@ -852,7 +858,7 @@ utils::FuzzyBool StreamBufProducer::buffer_empty(PutThreadLock::crat const& put_
   // cache line, but that is pretty much guaranteed too considering its normal
   // alignment). This unsafe access is reflected in the fact that we need to
   // cast 'this' to get access.
-  return (static_cast<StreamBuf const*>(this)->gptr_producer_read_access() == pptr(put_area_rat)) ? fuzzy::True : fuzzy::WasFalse;
+  return (static_cast<StreamBuf const*>(this)->gptr_producer_read_access() == pptr()) ? fuzzy::True : fuzzy::WasFalse;
 }
 
 utils::FuzzyBool StreamBufConsumer::buffer_empty(GetThreadLock::crat const& get_area_rat) const
@@ -920,24 +926,20 @@ class Dev2Buf : public StreamBuf
   // Writing by the device:
   size_t dev2buf_contiguous() const                             // Return the number of bytes that can be written directly
   {                                                             //  into memory at position dev2buf_ptr() at this moment.
-    PutThread type;
-    return available_contiguous_number_of_bytes(PutThreadLock::crat(put_area_lock(type)));
+    return available_contiguous_number_of_bytes();
   }
   size_t dev2buf_contiguous_forced()                            // Same as above, but doesn't return 0 unless
   {                                                             //  out of memory or buffer full.
-    PutThread type;
-    return force_available_contiguous_number_of_bytes(type);
+    return force_available_contiguous_number_of_bytes();
   }
   char* dev2buf_ptr() const                                     // Get pointer to put area.
   {
-    PutThread type;
-    return pptr(PutThreadLock::crat(put_area_lock(type)));
+    return pptr();
   }
   // Data must be written to the buffer *before* calling dev2buf_bump.
   void dev2buf_bump(int n)                                      // Bump pointer `n' bytes.
   {
-    PutThread type;
-    pbump(n, PutThreadLock::wat(put_area_lock(type)));
+    pbump(n);
   }
 };
 
@@ -969,15 +971,6 @@ class Buf2Dev : public StreamBuf
     GetThread type;
     StreamBufConsumer::gbump(n, GetThreadLock::wat(get_area_lock(type)));
   }
-
-  // Called by the Put Thread to indicate that there is
-  // more in the buffer that can be read by the device.
-  int sync() override;
-
-  // Alternatively, this can be called, i.e. for non-streams,
-  // whenever anything was written to the buffer to make
-  // sure that it is written out.
-  void flush();
 };
 
 // Linking two devices together:
@@ -988,16 +981,17 @@ class LinkBuffer : public Dev2Buf
   LinkBuffer(InputDevice* input_device, OutputDevice* output_device,
       size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc)
-    { set_input_device(input_device); set_output_device(output_device); }
+  {
+    set_input_device(input_device);
+    as_Buf2Dev()->set_output_device(output_device);
+  }
 
   //-----------------------------------------------------------
-  // DUPLICATE METHODS OF Buf2Dev (maybe only be called by the Get Thread).
-  size_t buf2dev_contiguous() const { GetThread type; return next_contiguous_number_of_bytes(type); }
-  size_t buf2dev_contiguous_forced() { GetThread type; return force_next_contiguous_number_of_bytes(type); }
-  char* buf2dev_ptr() const { GetThread type; return StreamBufConsumer::gptr(GetThreadLock::crat(get_area_lock(type))); }
-  void buf2dev_bump(int n) { GetThread type; StreamBufConsumer::gbump(n, GetThreadLock::wat(get_area_lock(type))); }
-  int sync() override;
-  void flush();
+  // DUPLICATE METHODS OF Buf2Dev (maybe only be called by the consumer thread).
+  size_t buf2dev_contiguous() const { GetThread type; return as_Buf2Dev()->next_contiguous_number_of_bytes(type); }
+  size_t buf2dev_contiguous_forced() { GetThread type; return as_Buf2Dev()->force_next_contiguous_number_of_bytes(type); }
+  char* buf2dev_ptr() const { GetThread type; return as_Buf2Dev()->StreamBufConsumer::gptr(StreamBufConsumer::GetThreadLock::crat(as_Buf2Dev()->get_area_lock(type))); }
+  void buf2dev_bump(int n) { GetThread type; as_Buf2Dev()->StreamBufConsumer::gbump(n, StreamBufConsumer::GetThreadLock::wat(as_Buf2Dev()->get_area_lock(type))); }
   //-----------------------------------------------------------
 
   // Because this class has the same interface as Buf2Dev, it is safe to provide these casting operators:
@@ -1009,10 +1003,10 @@ class LinkBuffer : public Dev2Buf
   Buf2Dev const* as_Buf2Dev() const { return static_cast<Buf2Dev const*>(static_cast<StreamBuf const*>(this)); }
 };
 
-inline void StreamBuf::reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat)
+inline void StreamBuf::reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat)
 {
-  if (buffer_empty(get_area_wat, put_area_wat))
-    reduce_buffer(get_area_wat, put_area_wat);
+  if (buffer_empty(get_area_wat))
+    reduce_buffer(get_area_wat);
 }
 
 // Program reading from a device:
@@ -1034,7 +1028,7 @@ class InputBuffer : public Dev2Buf
   size_t raw_sgetn(char* s, size_t n) { GetThread type; return xsgetn_a(s, n, type); }   // Read `n' bytes and copy them to `s'.
 
   // Administration:
-  void raw_reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat, PutThreadLock::wat const& put_area_wat) { reduce_buffer_if_empty(get_area_wat, put_area_wat); } // Should be called to make sure that the buffer also decreases.
+  void raw_reduce_buffer_if_empty(GetThreadLock::wat const& get_area_wat) { reduce_buffer_if_empty(get_area_wat); } // Should be called to make sure that the buffer also decreases.
 };
 
 // Program writing to a device:
@@ -1048,15 +1042,14 @@ class OutputBuffer : public Buf2Dev
   // Stuff below writes to the output buffer and therefore should be BWT.
 
   // Raw binary access (instead of using ostream):
-  char* raw_pptr() const { PutThread type; return pptr(PutThreadLock::crat(put_area_lock(type))); }     // Get pointer to put area.
+  char* raw_pptr() const { return pptr(); }                             // Get pointer to put area.
   // Data must be written to the buffer *before* calling raw_pbump().
-  void raw_pbump(int n) { PutThread type; pbump(n, PutThreadLock::wat(put_area_lock(type))); }          // Bump pointer `n' bytes.
-  size_t raw_sputn(char const* s, size_t n) { PutThread type; return xsputn_a(s, n, type); }            // Copy `n' bytes from `s' to the buffer.
+  void raw_pbump(int n) { pbump(n); }                                   // Bump pointer `n' bytes.
+  size_t raw_sputn(char const* s, size_t n) { return xsputn_a(s, n); }  // Copy `n' bytes from `s' to the buffer.
 };
 
 // Returns true if a string with length `len' is contiguous
 // in the current get area of the output buffer.
-// Get Thread.
 inline bool StreamBufConsumer::is_contiguous(size_t len, GetThreadLock::crat const& get_area_crat) const
 {
   GetThread type;
