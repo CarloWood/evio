@@ -159,7 +159,7 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
       {
         utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer, type]{
             StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
-            return m_obuffer->buffer_empty(get_area_rat);
+            return m_obuffer->StreamBufConsumer::buffer_empty(get_area_rat);
         });
         if (condition_empty_buffer.is_momentary_true())
         {

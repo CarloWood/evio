@@ -70,14 +70,8 @@ void StreamBuf::dump()
 
   // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
-    m_minimum_block_size(minimum_block_size),
-    m_buffer_full_watermark(buffer_full_watermark),
-    m_max_allocated_block_size(max_allocated_block_size),
-    m_input_streambuf(this),
-    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
-    m_last_gptr(nullptr),               // See update_put_area.
+    StreamBufProducer(minimum_block_size, buffer_full_watermark, max_allocated_block_size),
     m_device_counter(0)
-    /*m_buffer_size_minus_unused_in_last_block(0),*/
 #ifdef DEBUGEVENTRECORDING
     , recording_pool(1024, sizeof(RecordingData))
 #endif
@@ -103,7 +97,7 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
 #endif
   char* const start = m_get_area_block_node->block_start();
   setp(start, start + block_size, PutThreadLock::wat(put_area_lock(type)));
-  setg(start, start, start, GetThreadLock::wat(get_area_lock(type)));
+  StreamBufConsumer::setg(start, start, start, GetThreadLock::wat(get_area_lock(type)));
   m_buffer_size_minus_unused_in_first_block.store(block_size, std::memory_order_relaxed);
   //===========================================================
   m_idevice = nullptr;
@@ -111,15 +105,15 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
 }
 
 // Calculate new block size for our output_buffer.
-size_t StreamBuf::new_block_size(PutThread type) const
+size_t StreamBufProducer::new_block_size(PutThread type) const
 {
   size_t data_size_upper_bound = get_data_size_upper_bound(PutThreadLock::crat(put_area_lock(type)));
   return utils::malloc_size(std::max(data_size_upper_bound, m_minimum_block_size) + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
 }
 
-StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
+StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c, PutThread type)
 {
-  DoutEntering(dc::evio, "StreamBuf::overflow_a(" << char2str(c) << ") [" << this << ']');
+  DoutEntering(dc::evio, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -172,10 +166,27 @@ StreamBuf::int_type StreamBuf::overflow_a(int_type c, PutThread type)
   return 0;
 }
 
-bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
+// If m_next_egptr == nullptr, then reset the get area to the start of get_area_block_node
+// and sync m_next_egptr with value from the last call to sync_egptr(). Then continue with
+// the following:
+//
+// If next_egptr is not inside the current get_area_block_node and both gptr and egptr point to the
+// end of that block (so the get area is empty) then advance the get_area_block_node to the next
+// block node in the chain and set the get area pointers to the beginning of the new block. Then
+// continue with the following:
+//
+// If next_egptr is not inside the current get_area_block_node then advance egptr to the end
+// of the current get_area_block_node. Otherwise set it to the last known pptr value ("next_egptr")
+// (from the last call to sync_egptr()).
+//
+// This function updates cur_gptr to the current gptr, available to current egptr minus gptr and
+// possibly advances get_area_block_node to get_area_block_node->next.
+//
+// Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
+bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
 {
   // Get a copy of the last 'sync-ed' pptr.
-  char* next_egptr = m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
+  char* next_egptr = common().m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
   char* start = get_area_block_node->block_start();
   char* end = start + get_area_block_node->get_size();
   // There are several possible cases:
@@ -213,13 +224,13 @@ bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
   //
   {
     Dout(dc::evio, "update_get_area: resetting get area.");
-    m_last_gptr.store(start, std::memory_order_relaxed);        // We are going to reset gptr to start.
+    common().m_last_gptr.store(start, std::memory_order_relaxed);       // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start, 0);
     resetting_get_area(data);
 #endif
-    m_next_egptr = start;                                       // Flush m_last_gptr before making m_next_egptr non-null.
-                                                                // This must be memory_order_seq_cst.
+    common().m_next_egptr = start;                                      // Flush m_last_gptr before making m_next_egptr non-null.
+                                                                        // This must be memory_order_seq_cst.
 
     // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the PutThread
     // might have changed m_next_egptr2 but missed the write to m_next_egptr, so we have to synchronize
@@ -227,12 +238,12 @@ bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
     char* expected_next_egptr = start;
     do
     {
-      next_egptr = m_next_egptr2;                               // Must be memory_order_seq_cst.
+      next_egptr = common().m_next_egptr2;                              // Must be memory_order_seq_cst.
     }
-    while (!m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
+    while (!common().m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
-    m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_acq_rel);
+    common().m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_acq_rel);
     cur_gptr = start;
   }
   //
@@ -308,7 +319,7 @@ bool StreamBuf::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gp
 }
 
 // Get thread.
-int StreamBuf::underflow_a(GetThread type)
+int StreamBufConsumer::underflow_a(GetThread type)
 {
   DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
@@ -348,7 +359,7 @@ int StreamBuf::underflow_a(GetThread type)
 // put area to the start of the current memory block. Putting back
 // a character is then never safe because it basically writes into
 // the (new) put area.
-StreamBuf::int_type StreamBuf::pbackfail(int_type c)
+StreamBuf::int_type StreamBufProducer::pbackfail(int_type c)
 {
   DoutEntering(dc::notice, "pbackfail(" << libcwd::char2str(c) << ") [" << this << ']');
   if (c == static_cast<int_type>(EOF))
@@ -363,7 +374,7 @@ StreamBuf::int_type StreamBuf::pbackfail(int_type c)
 }
 
 // Number of characters available for reading from this buffer (output_buffer).
-std::streamsize StreamBuf::showmanyc_a(GetThread type)
+std::streamsize StreamBufConsumer::showmanyc_a(GetThread type)
 {
   // showmanyc() is not supported because I don't think it is needed and it would cost extra CPU time to make it work.
   ASSERT(false);        // m_buffer_size_minus_unused_in_last_block isn't updated at the moment.
@@ -373,7 +384,7 @@ std::streamsize StreamBuf::showmanyc_a(GetThread type)
 }
 
 //Get Thread.
-std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread type)
+std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n, GetThread type)
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
@@ -399,7 +410,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
 #else
       std::memcpy(s, cur_gptr, len);
 #endif
-      std::streambuf::gbump(len);       // Do not update m_buffer_size_minus_unused_in_first_block, that happens at the end of this function.
+      common().gbump(len);              // Do not update m_buffer_size_minus_unused_in_first_block, that happens at the end of this function.
       s += len;
       available -= len;
       remaining -= len;
@@ -431,7 +442,7 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
     }
   }
   // This RMW operation seems to take a considerable amount of CPU cycles.
-  m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_acq_rel);
+  common().m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_acq_rel);
   Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
@@ -439,9 +450,9 @@ std::streamsize StreamBuf::xsgetn_a(char* s, std::streamsize const n, GetThread 
   return n - remaining;
 }
 
-char StreamBuf::s_next_egptr_init[1];
+char StreamBufCommon::s_next_egptr_init[1];
 
-char* StreamBuf::update_put_area(std::streamsize& available, PutThreadLock::rat const&)
+char* StreamBufProducer::update_put_area(std::streamsize& available, PutThreadLock::rat const&)
 {
   char* block_start = std::streambuf::pbase();
   char* cur_pptr = std::streambuf::pptr();
@@ -478,8 +489,7 @@ char* StreamBuf::update_put_area(std::streamsize& available, PutThreadLock::rat 
   return cur_pptr;
 }
 
-// Write thread.
-std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutThread type)
+std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const n, PutThread type)
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << "] ");
 #ifdef DEBUGDBSTREAMBUF
@@ -554,19 +564,19 @@ std::streamsize StreamBuf::xsputn_a(char const* s, std::streamsize const n, PutT
 std::streamsize StreamBuf::showmanyc()
 {
   GetThread type;
-  return static_cast<StreamBuf*>(m_input_streambuf)->showmanyc_a(type);
+  return m_input_streambuf->showmanyc_a(type);
 }
 
 std::streambuf::int_type StreamBuf::underflow()
 {
   GetThread type;
-  return static_cast<StreamBuf*>(m_input_streambuf)->underflow_a(type);
+  return m_input_streambuf->underflow_a(type);
 }
 
 std::streamsize StreamBuf::xsgetn(char* s, std::streamsize n)
 {
   GetThread type;
-  return static_cast<StreamBuf*>(m_input_streambuf)->xsgetn_a(s, n, type);
+  return m_input_streambuf->xsgetn_a(s, n, type);
 }
 
 std::streambuf::int_type StreamBuf::overflow(int_type c)
@@ -604,7 +614,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat, PutThreadL
   }
   // Reset the empty buffer.
   char* start = m_get_area_block_node->block_start();
-  setg(start, start, start, get_area_wat);
+  StreamBufConsumer::setg(start, start, start, get_area_wat);
   setp(start, start + m_minimum_block_size, put_area_wat);
   store_last_gptr(start);
 }

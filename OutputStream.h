@@ -64,7 +64,7 @@ class OutputStream : public std::ostream, public OutputDevicePtr
   {
     m_output_device = output_device;
     OutputBuffer* output_buffer = new OutputBuffer(output_device, minimum_blocksize, buffer_full_watermark, max_alloc);
-    [[maybe_unused]] std::streambuf* old_streambuf = rdbuf(output_buffer->get_sb());
+    [[maybe_unused]] std::streambuf* old_streambuf = rdbuf(output_buffer);
     return output_buffer;
   }
 };
