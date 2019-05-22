@@ -121,8 +121,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
     start_output_device(type);
   else if (m_obuffer)
   {
-    StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
-    if (!m_obuffer->buffer_empty(get_area_rat))   // Must be the same thread as the thread that created the buffer.
+    if (!m_obuffer->buffer_empty())   // Must be the same thread as the thread that created the buffer.
       start_output_device(type);
   }
 }
@@ -156,9 +155,8 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
       if (self->m_obuffer)
       {
-        utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer, type]{
-            StreamBuf::GetThreadLock::rat get_area_rat(m_obuffer->get_area_lock(type));
-            return m_obuffer->StreamBufConsumer::buffer_empty(get_area_rat);
+        utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer]{
+            return m_obuffer->StreamBufConsumer::buffer_empty();
         });
         if (condition_empty_buffer.is_momentary_true())
         {

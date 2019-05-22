@@ -77,7 +77,6 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
 #endif
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
-  SingleThread type;
   size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
 #ifdef CWDEBUG
   if (block_size != m_minimum_block_size)
@@ -97,7 +96,7 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
 #endif
   char* const start = m_get_area_block_node->block_start();
   setp(start, start + block_size);
-  StreamBufConsumer::setg(start, start, start, GetThreadLock::wat(get_area_lock(type)));
+  StreamBufConsumer::setg(start, start, start);
   m_buffer_size_minus_unused_in_first_block.store(block_size, std::memory_order_relaxed);
   //===========================================================
   m_idevice = nullptr;
@@ -183,7 +182,7 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
 // possibly advances get_area_block_node to get_area_block_node->next.
 //
 // Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
-bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available, GetThreadLock::wat const& get_area_wat)
+bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available)
 {
   // Get a copy of the last 'sync-ed' pptr.
   char* next_egptr = common().m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
@@ -213,12 +212,12 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // start      m_next_egptr2                   end
   //
 
-  cur_gptr = gptr(get_area_wat);        // Just store the current value of gptr in cur_gptr (case 1 and 2).
+  cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
 #ifdef DEBUGEVENTRECORDING
   RecordingData* data = new (recording_pool) RecordingData(cur_gptr - start, start, end - start);
   updating_get_area(data);
 #endif
-  if (next_egptr == nullptr)            // Do we have to reset the get area to the beginning of the buffer?
+  if (next_egptr == nullptr)    // Do we have to reset the get area to the beginning of the buffer?
   //---------------------------------------------------------------------------
   // Case 3
   //
@@ -276,7 +275,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     if (case1)
     {
       // Update get area and always return false - even when gptr is at the end of the block.
-      setg(start, cur_gptr, cur_egptr, get_area_wat);
+      setg(start, cur_gptr, cur_egptr);
       return false;     // There isn't a next block.
     }
 
@@ -310,7 +309,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   }
 
   // Finally, update the get area.
-  setg(start, cur_gptr, cur_egptr, get_area_wat);
+  setg(start, cur_gptr, cur_egptr);
 
   ASSERT(case1 || get_area_block_node->m_next);
 
@@ -319,7 +318,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 }
 
 // Get thread.
-int StreamBufConsumer::underflow_a(GetThread type)
+int StreamBufConsumer::underflow_a()
 {
   DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
@@ -327,7 +326,7 @@ int StreamBufConsumer::underflow_a(GetThread type)
 #endif
   char* cur_gptr;
   std::streamsize available;
-  update_get_area(m_get_area_block_node, cur_gptr, available, GetThreadLock::wat(get_area_lock(type)));
+  update_get_area(m_get_area_block_node, cur_gptr, available);
   int result = 0;
   if (available == 0)
   {
@@ -374,17 +373,16 @@ StreamBuf::int_type StreamBufProducer::pbackfail(int_type c)
 }
 
 // Number of characters available for reading from this buffer (output_buffer).
-std::streamsize StreamBufConsumer::showmanyc_a(GetThread type)
+std::streamsize StreamBufConsumer::showmanyc_a()
 {
   // showmanyc() is not supported because I don't think it is needed and it would cost extra CPU time to make it work.
   ASSERT(false);        // m_buffer_size_minus_unused_in_last_block isn't updated at the moment.
-  GetThreadLock::crat get_area_rat(get_area_lock(type));
-  //return m_buffer_size_minus_unused_in_last_block - unused_in_first_block(get_area_rat);
+  //return m_buffer_size_minus_unused_in_last_block - unused_in_first_block();
   return 0;
 }
 
 //Get Thread.
-std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n, GetThread type)
+std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
 {
   DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
@@ -395,7 +393,7 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n, Ge
   {
     char* cur_gptr;
     std::streamsize available;
-    bool at_end_and_has_next_block = update_get_area(m_get_area_block_node, cur_gptr, available, GetThreadLock::wat(get_area_lock(type)));
+    bool at_end_and_has_next_block = update_get_area(m_get_area_block_node, cur_gptr, available);
     ASSERT(available >= 0);
     // If at_end_and_has_next_block is true then egptr is set to the very end of the
     // current memory block (m_get_area_block_node, which might have been changed too!)
@@ -431,7 +429,7 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n, Ge
       MemoryBlock* get_area_block_node = m_get_area_block_node;
       m_get_area_block_node = m_get_area_block_node->m_next;
       char* start = m_get_area_block_node->block_start();
-      setg(start, start, start, get_area_lock(type));
+      setg(start, start, start);
       // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
       // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
       // pointing to that, now newly allocated, memory!
@@ -563,20 +561,17 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
 
 std::streamsize StreamBuf::showmanyc()
 {
-  GetThread type;
-  return m_input_streambuf->showmanyc_a(type);
+  return m_input_streambuf->showmanyc_a();
 }
 
 std::streambuf::int_type StreamBuf::underflow()
 {
-  GetThread type;
-  return m_input_streambuf->underflow_a(type);
+  return m_input_streambuf->underflow_a();
 }
 
 std::streamsize StreamBuf::xsgetn(char* s, std::streamsize n)
 {
-  GetThread type;
-  return m_input_streambuf->xsgetn_a(s, n, type);
+  return m_input_streambuf->xsgetn_a(s, n);
 }
 
 std::streambuf::int_type StreamBuf::overflow(int_type c)
@@ -591,7 +586,7 @@ std::streamsize StreamBuf::xsputn(char const* s, std::streamsize n)
 
 //============================================================================
 
-void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat)
+void StreamBuf::reduce_buffer()
 {
   DoutEntering(dc::notice, "StreamBuf::reduce_buffer");
   // The buffer if empty, so there is only one block (get_area_block_node == put_area_block_node).
@@ -612,7 +607,7 @@ void StreamBuf::reduce_buffer(GetThreadLock::wat const& get_area_wat)
   }
   // Reset the empty buffer.
   char* start = m_get_area_block_node->block_start();
-  StreamBufConsumer::setg(start, start, start, get_area_wat);
+  StreamBufConsumer::setg(start, start, start);
   setp(start, start + m_minimum_block_size);
   store_last_gptr(start);
 }
@@ -717,8 +712,6 @@ void StreamBuf::printOn(std::ostream& os) const
   }
   os << "Total size: " << total_size << '\n';
   // Get a get- and put- area snapshot.
-  GetThread get_type;
-  PutThread put_type;
   char* cur_eback;
   char* cur_gptr;
   char* cur_egptr;
@@ -726,17 +719,16 @@ void StreamBuf::printOn(std::ostream& os) const
   char* cur_pptr;
   char* cur_epptr;
   {
-    GetThreadLock::crat get_area_rat(get_area_lock(get_type));
-    cur_eback = eback(get_area_rat);
-    cur_gptr = gptr(get_area_rat);
-    cur_egptr = egptr(get_area_rat);
+    cur_eback = eback();
+    cur_gptr = gptr();
+    cur_egptr = egptr();
     cur_pbase = pbase();
     cur_pptr = pptr();
     cur_epptr = epptr();
 
-    size_t uifb = unused_in_first_block(get_area_rat);
+    size_t uifb = unused_in_first_block();
     size_t uilb = unused_in_last_block();
-    size_t data_size = get_data_size(get_type);
+    size_t data_size = get_data_size();
     if (total_size != uifb + data_size + uilb)
       DoutFatal(dc::core, "Inconsistent get_data_size (" << total_size << " != " << uifb << " + " << data_size << " + " << uilb << ")!");
   }

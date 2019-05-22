@@ -260,8 +260,6 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
   GetThread get_type;
-  // Therefore we might as well obtain locks here.
-  StreamBuf::GetThreadLock::wat get_area_wat(self->m_ibuffer->get_area_lock(get_type));
 
   size_t len;
   while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
@@ -269,17 +267,17 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
     // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
     InputDecoder* input_decoder = static_cast<InputDecoder*>(self->m_input_device_events_handler);
     // We seem to have a complete new message and need to call `decode'
-    if (self->m_ibuffer->has_multiple_blocks(get_type))
+    if (self->m_ibuffer->has_multiple_blocks())
     {
       // The new message must start at the beginning of the buffer,
       // so the total length of the new message is total size of
       // the buffer minus what was read on top of it.
-      size_t msg_len = self->m_ibuffer->get_data_size(get_type) - (rlen - len);
+      size_t msg_len = self->m_ibuffer->get_data_size() - (rlen - len);
 
-      if (self->m_ibuffer->is_contiguous(msg_len, get_area_wat))
+      if (self->m_ibuffer->is_contiguous(msg_len))
       {
-        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(get_area_wat), msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
-        self->m_ibuffer->raw_gbump(get_area_wat, msg_len);
+        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()), get_type);
+        self->m_ibuffer->raw_gbump(msg_len);
       }
       else
       {
@@ -290,9 +288,9 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
         memory_block->release();
       }
 
-      ASSERT(self->m_ibuffer->get_data_size(get_type) == rlen - len);
+      ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty(get_area_wat);
+      self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (self->is_disabled())
         return need_allow_deletion;
       rlen -= len;
@@ -307,14 +305,14 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
     // The next loop eats up all complete messages in this last block.
     do
     {
-      char* start = self->m_ibuffer->raw_gptr(get_area_wat);
+      char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node(get_type)), get_type);
-      self->m_ibuffer->raw_gbump(get_area_wat, msg_len);
+      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()), get_type);
+      self->m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(self->m_ibuffer->get_data_size(get_type) == rlen - len);
+      ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty(get_area_wat);
+      self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (self->is_disabled())
         return need_allow_deletion;
       rlen -= len;
