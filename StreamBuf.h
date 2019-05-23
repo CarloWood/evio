@@ -539,6 +539,30 @@ class StreamBufConsumer
   // Pointer to the get area - block object.
   MemoryBlock* m_get_area_block_node;
 
+#ifdef DEBUGSTREAMBUFSTATS
+  size_t m_number_of_calls_to_update_get_area;
+  size_t m_number_of_get_area_resets;
+  size_t m_number_of_calls_to_store_last_gptr;
+  size_t m_number_of_calls_to_xsgetn_a;
+  size_t m_number_of_calls_to_underflow_a;
+  size_t m_xsgetn_a_read_zero_bytes;
+  size_t m_xsgetn_a_read_all_requested_bytes;
+
+ public:
+  void reset_stats()
+  {
+    m_number_of_calls_to_update_get_area = 0;
+    m_number_of_get_area_resets = 0;
+    m_number_of_calls_to_store_last_gptr = 0;
+    m_number_of_calls_to_xsgetn_a = 0;
+    m_number_of_calls_to_underflow_a = 0;
+    m_xsgetn_a_read_zero_bytes = 0;
+    m_xsgetn_a_read_all_requested_bytes = 0;
+  }
+
+  void dump_stats() const;
+#endif
+
  protected:
   inline StreamBufConsumer();
 
@@ -553,6 +577,9 @@ class StreamBufConsumer
 
   [[gnu::always_inline]] void store_last_gptr(char* p)
   {
+#ifdef DEBUGSTREAMBUFSTATS
+    ++m_number_of_calls_to_store_last_gptr;
+#endif
     common().m_last_gptr.store(p, std::memory_order_release);
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, p, 0);
@@ -813,7 +840,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   void updating_get_area(RecordingData* data);
 #endif
 
-#ifdef CWDEBUG
+#if defined(CWDEBUG) || defined(DEBUG)
  public:
   bool debug_update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available)
   {

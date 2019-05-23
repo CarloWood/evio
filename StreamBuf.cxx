@@ -184,6 +184,9 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
 // Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
 bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available)
 {
+#ifdef DEBUGSTREAMBUFSTATS
+  ++m_number_of_calls_to_update_get_area;
+#endif
   // Get a copy of the last 'sync-ed' pptr.
   char* next_egptr = common().m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
   char* start = get_area_block_node->block_start();
@@ -222,6 +225,9 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // Case 3
   //
   {
+#ifdef DEBUGSTREAMBUFSTATS
+    ++m_number_of_get_area_resets;
+#endif
     Dout(dc::evio, "update_get_area: resetting get area.");
     common().m_last_gptr.store(start, std::memory_order_relaxed);       // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
@@ -324,6 +330,9 @@ int StreamBufConsumer::underflow_a()
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
+#ifdef DEBUGSTREAMBUFSTATS
+  ++m_number_of_calls_to_underflow_a;
+#endif
   char* cur_gptr;
   std::streamsize available;
   update_get_area(m_get_area_block_node, cur_gptr, available);
@@ -388,6 +397,9 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
+#ifdef DEBUGSTREAMBUFSTATS
+  ++m_number_of_calls_to_xsgetn_a;
+#endif
   std::streamsize remaining = n;
   while (remaining > 0)
   {
@@ -444,6 +456,12 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
   Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
+#endif
+#ifdef DEBUGSTREAMBUFSTATS
+  if (n - remaining == 0)
+    ++m_xsgetn_a_read_zero_bytes;
+  if (remaining == 0)
+    ++m_xsgetn_a_read_all_requested_bytes;
 #endif
   return n - remaining;
 }
@@ -882,5 +900,20 @@ std::ostream& operator<<(std::ostream& os, RecordingData const& data)
 }
 
 #endif // DEBUGEVENTRECORDING
+
+#ifdef DEBUGSTREAMBUFSTATS
+
+void StreamBufConsumer::dump_stats() const
+{
+  std::cout << "m_number_of_calls_to_update_get_area = " << m_number_of_calls_to_update_get_area << std::endl;;
+  std::cout << "m_number_of_get_area_resets = " << m_number_of_get_area_resets << std::endl;
+  std::cout << "m_number_of_calls_to_store_last_gptr = " << m_number_of_calls_to_store_last_gptr << std::endl;
+  std::cout << "m_number_of_calls_to_xsgetn_a = " << m_number_of_calls_to_xsgetn_a << std::endl;
+  std::cout << "m_number_of_calls_to_underflow_a = " << m_number_of_calls_to_underflow_a << std::endl;
+  std::cout << "m_xsgetn_a_read_zero_bytes = " << m_xsgetn_a_read_zero_bytes << std::endl;
+  std::cout << "m_xsgetn_a_read_all_requested_bytes = " << m_xsgetn_a_read_all_requested_bytes << std::endl;
+}
+
+#endif // DEBUGSTREAMBUFSTATS
 
 } // namespace evio
