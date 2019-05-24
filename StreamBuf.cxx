@@ -618,17 +618,11 @@ void StreamBuf::reduce_buffer()
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     std::lock_guard<std::mutex> lock(get_area_release_mutex);
 #endif
-    MemoryBlock* get_area_block_node = m_get_area_block_node;
-    m_get_area_block_node = MemoryBlock::create(m_minimum_block_size);
-    m_total_allocated += m_minimum_block_size;
-#ifdef DEBUGSTREAMBUFSTATS
-    ++m_number_of_created_blocks;
-    m_created_block_size.push_back(m_minimum_block_size);
-#endif
-    m_put_area_block_node = m_get_area_block_node;
-    Dout(dc::notice, "reduce_buffer: freeing memory block of size " << get_area_block_node->get_size());
-    std::streamsize new_total_freed = m_total_freed.load(std::memory_order_relaxed) + get_area_block_node->get_size();
-    get_area_block_node->release();
+    MemoryBlock* prev_get_area_block_node = m_get_area_block_node;
+    m_put_area_block_node = m_get_area_block_node = create_memory_block(m_minimum_block_size);
+    Dout(dc::notice, "reduce_buffer: freeing memory block of size " << prev_get_area_block_node->get_size());
+    std::streamsize new_total_freed = m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
+    prev_get_area_block_node->release();
     m_total_freed.store(new_total_freed, std::memory_order_release);
     //===========================================================
   }
