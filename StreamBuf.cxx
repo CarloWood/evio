@@ -627,8 +627,9 @@ void StreamBuf::reduce_buffer()
 #endif
     m_put_area_block_node = m_get_area_block_node;
     Dout(dc::notice, "reduce_buffer: freeing memory block of size " << get_area_block_node->get_size());
-    m_total_freed += get_area_block_node->get_size();
+    std::streamsize new_total_freed = m_total_freed.load(std::memory_order_relaxed) + get_area_block_node->get_size();
     get_area_block_node->release();
+    m_total_freed.store(new_total_freed, std::memory_order_release);
     //===========================================================
   }
   // Reset the empty buffer.
