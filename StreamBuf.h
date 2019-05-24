@@ -367,6 +367,7 @@ class StreamBufCommon : public std::streambuf
   // Constructor thread.
   static char s_next_egptr_init[1];     // Provides a random address to initialize m_next_egptr with (so it isn't nullptr).
 
+  // Constructor; m_next_egptr is initialized by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
   StreamBufCommon() :
     m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
     m_last_gptr(nullptr)                // See update_put_area.
@@ -502,14 +503,14 @@ class StreamBufProducer : public StreamBufCommon
   // Store the current value of pptr in m_next_egptr.
   [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
-    m_next_egptr2 = cur_pptr;                   // Must be memory_order_seq_cst.
+    m_next_egptr2.store(cur_pptr, std::memory_order_seq_cst);   // Must be memory_order_seq_cst.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
     // Do not, ourselves, overwrite a null value - that is a signal to the Consumer that the get area has to be
     // reset to the beginning of the current block and only the Consumer may change m_next_egptr to non-null again
     // (see sync_egptr below).
-    if (m_next_egptr)                           // Must be memory_order_seq_cst.
+    if (m_next_egptr.load(std::memory_order_seq_cst))           // Must be memory_order_seq_cst.
     {
       m_next_egptr.store(cur_pptr, std::memory_order_release);
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
@@ -810,7 +811,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 
 #if defined(CWDEBUG) || defined(DEBUGDBSTREAMBUF)
  protected:
-  bool is_resetting() const { return m_next_egptr == nullptr; }
+  bool is_resetting() const { return m_next_egptr.load(std::memory_order_relaxed) == nullptr; }
 #endif
 
 #ifdef DEBUGKEEPMEMORYBLOCKS
@@ -826,8 +827,8 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 
   void sanity_check() override
   {
-    char* next_egptr = m_next_egptr;
-    char* next_egptr2 = m_next_egptr2;
+    char* next_egptr = m_next_egptr.load(std::memory_order_relaxed);
+    char* next_egptr2 = m_next_egptr2.load(std::memory_order_relaxed);
     bool r1 = next_egptr == nullptr || next_egptr == s_next_egptr_init;
     bool r2 = false;
     std::lock_guard<std::mutex> lock(get_area_release_mutex);

@@ -71,7 +71,7 @@ void StreamBuf::dump()
 }
 #endif // DEBUGKEEPMEMORYBLOCKS
 
-  // Constructor; m_next_egptr is set by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
+  // Constructor.
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
     StreamBufProducer(minimum_block_size, buffer_full_watermark, max_allocated_block_size),
     m_device_counter(0)
@@ -262,7 +262,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start, 0);
     resetting_get_area(data);
 #endif
-    common().m_next_egptr = start;                                      // Flush m_last_gptr before making m_next_egptr non-null.
+    common().m_next_egptr.store(start, std::memory_order_seq_cst);      // Flush m_last_gptr before making m_next_egptr non-null.
                                                                         // This must be memory_order_seq_cst.
 
     // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the producer thread
@@ -271,7 +271,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     char* expected_next_egptr = start;
     do
     {
-      next_egptr = common().m_next_egptr2;                              // Must be memory_order_seq_cst.
+      next_egptr = common().m_next_egptr2.load(std::memory_order_seq_cst);      // Must be memory_order_seq_cst.
     }
     while (!common().m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
@@ -315,7 +315,6 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     // This a case 2 therefore get_area_block_node->m_next is non-null and we can safely call release_memory_block(get_area_block_node).
     // Update get_area_block_node to point to the next block and return the new start.
     cur_gptr = start = release_memory_block(get_area_block_node);
-
     cur_egptr = end = start + get_area_block_node->get_size();
     // Continue from the start, but note that next_egptr is guaranteed not nullptr here.
     // So this is now either case 1 or 2. However, since cur_gptr is now start, available
@@ -467,7 +466,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
 {
   char* block_start = std::streambuf::pbase();
   char* cur_pptr = std::streambuf::pptr();
-  ASSERT(m_next_egptr != s_next_egptr_init);
+  ASSERT(m_next_egptr.load(std::memory_order_acquire) != s_next_egptr_init);
   if (cur_pptr != block_start &&                // Don't start a reset cycle when pptr is already at the start of the block ;).
       m_next_egptr.load(std::memory_order_acquire) != nullptr &&        // If next_egptr is nullptr then the put area was reset, but the get area wasn't yet;
                                                                         // don't reset again until it was. This read must be acquire to make sure the write
