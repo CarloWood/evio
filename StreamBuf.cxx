@@ -569,16 +569,7 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
         if (block_size < m_minimum_block_size)
           return static_cast<int_type>(EOF);
       }
-      Dout(dc::evio, "xsputn_a: allocating new memory block of size " << block_size);
-      MemoryBlock* new_block = MemoryBlock::create(block_size);
-      m_total_allocated += block_size;
-#ifdef DEBUGSTREAMBUFSTATS
-      ++m_number_of_created_blocks;
-      m_created_block_size.push_back(block_size);
-#endif
-#ifdef DEBUGKEEPMEMORYBLOCKS
-      keep(new_block);
-#endif
+      MemoryBlock* new_block = create_memory_block(block_size);
       char* start = new_block->block_start();
       // Set m_next before calling setp; the consumer thread is guaranteed not to read it until sync_egptr() is called in setp() below.
       m_put_area_block_node->m_next = new_block;
