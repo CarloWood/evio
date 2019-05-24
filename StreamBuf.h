@@ -809,7 +809,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   //===========================================================================
   // Debugging stuff.
 
-#if defined(CWDEBUG) || defined(DEBUGDBSTREAMBUF)
+#ifdef DEBUGDBSTREAMBUF
  protected:
   bool is_resetting() const { return m_next_egptr.load(std::memory_order_relaxed) == nullptr; }
 #endif
