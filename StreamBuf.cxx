@@ -312,28 +312,10 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
       return false;     // There isn't a next block.
     }
 
-    // This a case 2 therefore get_area_block_node->m_next is non-null.
-    ASSERT(get_area_block_node->m_next);
-    // Therefore we can read m_get_area_block_node->m_next here without the risk that it will be
-    // updated concurrently by the producer thread.
-    //===========================================================
-    // Advance get area to next MemoryBlock.
-    {
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-      std::lock_guard<std::mutex> lock(get_area_release_mutex);
-#endif
-      MemoryBlock* prev_get_area_block_node = get_area_block_node;
-      get_area_block_node = get_area_block_node->m_next;
-      cur_gptr = start = get_area_block_node->block_start();
-      // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
-      // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
-      // pointing to that, now newly allocated, memory!
-      store_last_gptr(cur_gptr);
-      Dout(dc::evio, "update_get_area: freeing memory block of size " << prev_get_area_block_node->get_size());
-      common().m_total_freed += prev_get_area_block_node->get_size();
-      prev_get_area_block_node->release();
-    }
-    //===========================================================
+    // This a case 2 therefore get_area_block_node->m_next is non-null and we can safely call release_memory_block(get_area_block_node).
+    // Update get_area_block_node to point to the next block and return the new start.
+    cur_gptr = start = release_memory_block(get_area_block_node);
+
     cur_egptr = end = start + get_area_block_node->get_size();
     // Continue from the start, but note that next_egptr is guaranteed not nullptr here.
     // So this is now either case 1 or 2. However, since cur_gptr is now start, available
