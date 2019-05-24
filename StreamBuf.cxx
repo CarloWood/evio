@@ -460,23 +460,8 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
     }
     if (available == 0)                 // gptr == egptr == block end?
     {
-      //===========================================================
-      // Advance get area to next MemoryBlock.
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-      std::lock_guard<std::mutex> lock(get_area_release_mutex);
-#endif
-      MemoryBlock* get_area_block_node = m_get_area_block_node;
-      m_get_area_block_node = m_get_area_block_node->m_next;
-      char* start = m_get_area_block_node->block_start();
+      char* start = release_memory_block(m_get_area_block_node);
       setg(start, start, start);
-      // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
-      // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
-      // pointing to that, now newly allocated, memory!
-      store_last_gptr(start);
-      Dout(dc::evio, "xsgetn_a: freeing memory block of size " << get_area_block_node->get_size());
-      common().m_total_freed += get_area_block_node->get_size();
-      get_area_block_node->release();
-      //===========================================================
     }
   }
   std::streamsize new_total_read = common().m_total_read.load(std::memory_order_relaxed) + n - remaining;
