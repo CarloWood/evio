@@ -120,6 +120,21 @@ size_t StreamBufProducer::new_block_size() const
   return utils::malloc_size(std::max(data_size_upper_bound, m_minimum_block_size) + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
 }
 
+MemoryBlock* StreamBufProducer::create_memory_block(size_t block_size)
+{
+  Dout(dc::evio, "StreamBufProducer::create: allocating new memory block of size " << block_size);
+  MemoryBlock* new_block = MemoryBlock::create(block_size);
+  m_total_allocated += block_size;
+#ifdef DEBUGSTREAMBUFSTATS
+  ++m_number_of_created_blocks;
+  m_created_block_size.push_back(block_size);
+#endif
+#ifdef DEBUGKEEPMEMORYBLOCKS
+  keep(new_block);
+#endif
+  return new_block;
+}
+
 StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
 {
   DoutEntering(dc::evio, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
@@ -171,6 +186,27 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
   printOn(std::cerr);
 #endif
   return 0;
+}
+
+// Advance get area to next MemoryBlock.
+char* StreamBufConsumer::release_memory_block(MemoryBlock*& get_area_block_node)
+{
+#ifdef DEBUGNEXTEGPTRSANITYCHECK
+  std::lock_guard<std::mutex> lock(get_area_release_mutex);
+#endif
+  MemoryBlock* prev_get_area_block_node = get_area_block_node;
+  get_area_block_node = get_area_block_node->m_next;
+  char* start = get_area_block_node->block_start();
+  // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
+  // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
+  // pointing to that, now newly allocated, memory!
+  store_last_gptr(start);
+  Dout(dc::evio, "StreamBufConsumer::release: freeing memory block of size " << prev_get_area_block_node->get_size());
+  // As only the consumer thread writes to m_total_freed, we can avoid a RMW operation here.
+  std::streamsize new_total_freed = common().m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
+  prev_get_area_block_node->release();
+  common().m_total_freed.store(new_total_freed, std::memory_order_release);
+  return start;
 }
 
 // If m_next_egptr == nullptr, then reset the get area to the start of get_area_block_node

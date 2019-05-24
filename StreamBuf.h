@@ -451,6 +451,8 @@ class StreamBufProducer : public StreamBufCommon
     std::streambuf::pbump(n);
   }
 
+  MemoryBlock* create_memory_block(size_t block_size);
+
  public: // Really ugly hack. Please do not use this (for internal use only).
   [[gnu::always_inline]] char* pptr_consumer_read_access() const { return std::streambuf::pptr(); }
 
@@ -595,11 +597,12 @@ class StreamBufConsumer
   void dump_stats() const;
 #endif
 
- protected:
-  inline StreamBufConsumer();
-
+ private:
   [[gnu::always_inline]] inline StreamBufCommon& common();
   [[gnu::always_inline]] inline StreamBufCommon const& common() const;
+
+ protected:
+  inline StreamBufConsumer();
 
   // Get area / consumer thread / reading.
   [[gnu::always_inline]] inline char* eback() const;
@@ -653,6 +656,8 @@ class StreamBufConsumer
   }
 
   bool update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available);
+
+  char* release_memory_block(MemoryBlock*& get_area_block_node);
 
  public: // Really ugly hack. Please do not use this (for internal use only).
   [[gnu::always_inline]] inline char* gptr_producer_read_access() const;
