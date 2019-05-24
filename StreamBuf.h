@@ -40,6 +40,9 @@
 #include "utils/NodeMemoryPool.h"
 #include <vector>
 #endif
+#ifdef DEBUGSTREAMBUFSTATS
+#include <vector>
+#endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -354,8 +357,12 @@ class StreamBufCommon : public std::streambuf
   std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
   std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the producer thread.
 
-  // The total size of the buffer minus the amount of unused bytes in the get area.
-  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_first_block;
+  // The total accumulated amount of freed memory.
+  // This value only ever increases.
+  std::atomic<std::streamsize> m_total_freed;
+  // The total accumulated amount of data that was read from this buffer.
+  // This value only ever increases, it is not decreased when memory is freed.
+  std::atomic<std::streamsize> m_total_read;
 
   // Constructor thread.
   static char s_next_egptr_init[1];     // Provides a random address to initialize m_next_egptr with (so it isn't nullptr).
@@ -381,17 +388,34 @@ class StreamBufProducer : public StreamBufCommon
   size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
   size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
 
- private:
-  // The total size of the buffer minus the amount of unused bytes in the put area.
-//  std::atomic<std::streamsize> m_buffer_size_minus_unused_in_last_block;
-
  protected:
+  // The total accumulated amount of memory allocated for this buffer.
+  // This value only ever increases, it is not decreased when memory is freed.
+  std::streamsize m_total_allocated;
+
+  // The total accumulated amount of reused memory by resetting the buffer.
+  std::streamsize m_total_reset;
+
   // Pointer to the put area - block object.
   MemoryBlock* m_put_area_block_node;
 
   // The output device whose constructor this StreamBuf was passed to.
   // Writing to this variable is single threaded. The producer may read it.
   OutputDevice* m_odevice;
+
+#ifdef DEBUGSTREAMBUFSTATS
+  size_t m_number_of_created_blocks;
+  std::vector<size_t> m_created_block_size;
+
+ public:
+  void reset_stats()
+  {
+    m_number_of_created_blocks = 0;
+    m_created_block_size.clear();
+  }
+
+  void dump_stats() const;
+#endif
 
  private:
   // Calculate the size of the new block as a function of the currently amount of buffered data.
@@ -405,6 +429,8 @@ class StreamBufProducer : public StreamBufCommon
     /*m_buffer_size_minus_unused_in_last_block(0)*/
   {
   }
+
+  ~StreamBufProducer() noexcept { }
 
   // Note that the way m_next_egptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
   [[gnu::always_inline]] void pbump(int n)
@@ -489,10 +515,7 @@ class StreamBufProducer : public StreamBufCommon
 #endif
     }
   }
-  [[gnu::always_inline]] void sync_egptr()
-  {
-    sync_egptr(std::streambuf::pptr());
-  }
+  [[gnu::always_inline]] void sync_egptr() { sync_egptr(pptr()); }
 
   char* update_put_area(std::streamsize& available);
 
@@ -505,10 +528,19 @@ class StreamBufProducer : public StreamBufCommon
   // Return the number of unused bytes in the put area of the output buffer.
   size_t unused_in_last_block() const { return epptr() - pptr(); }
 
+  // Return the amount of allocated memory currently in the buffer.
+  std::streamsize get_allocated_upper_bound() const
+  {
+    return m_total_allocated - m_total_freed.load(std::memory_order_acquire);
+  }
+
   // Return the number of bytes currently in the buffer.
   std::streamsize get_data_size_upper_bound() const
   {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block();
+    // This is an upper bound because m_total_read might be growing.
+    return m_total_allocated - unused_in_last_block() + m_total_reset - m_total_read.load(std::memory_order_acquire);
+    //     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\.
+    //                                                               this part was what is written in total to the buffer.
   }
 
  public:
@@ -567,6 +599,7 @@ class StreamBufConsumer
   inline StreamBufConsumer();
 
   [[gnu::always_inline]] inline StreamBufCommon& common();
+  [[gnu::always_inline]] inline StreamBufCommon const& common() const;
 
   // Get area / consumer thread / reading.
   [[gnu::always_inline]] inline char* eback() const;
@@ -759,7 +792,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // after returning (since we are the consumer thread too).
   size_t get_data_size() const
   {
-    return m_buffer_size_minus_unused_in_first_block.load(std::memory_order_acquire) - unused_in_last_block();
+    return m_total_allocated - unused_in_last_block() + m_total_reset - m_total_read.load(std::memory_order_relaxed);
   }
 
   // Returns `true' when this buffer currently has more then one block allocated.
@@ -908,7 +941,10 @@ char* StreamBufConsumer::egptr() const
 void StreamBufConsumer::gbump(int n)
 {
   m_input_streambuf->std::streambuf::gbump(n);
-  common().m_buffer_size_minus_unused_in_first_block.fetch_sub(n, std::memory_order_acq_rel);
+  // Update m_total_read, avoiding an expensive RMW operation. This is safe because only the consumer thread ever updates m_total_read.
+  auto new_total_read = common().m_total_read.load(std::memory_order_relaxed);
+  new_total_read += n;
+  common().m_total_read.store(new_total_read, std::memory_order_release);
 }
 
 void StreamBufConsumer::setg(char* eb, char* g, char* eg)
@@ -919,6 +955,11 @@ void StreamBufConsumer::setg(char* eb, char* g, char* eg)
 StreamBufCommon& StreamBufConsumer::common()
 {
   return static_cast<StreamBuf&>(*this);
+}
+
+StreamBufCommon const& StreamBufConsumer::common() const
+{
+  return static_cast<StreamBuf const&>(*this);
 }
 
 //

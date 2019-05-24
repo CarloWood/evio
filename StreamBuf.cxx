@@ -42,6 +42,9 @@ using namespace libcwd;
 #define buf2str std::string
 #endif
 #endif
+#ifdef DEBUGSTREAMBUFSTATS
+#include <map>
+#endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -91,13 +94,20 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
   //===========================================================
   // Create first MemoryBlock.
   m_get_area_block_node = m_put_area_block_node = MemoryBlock::create(block_size);
+  m_total_allocated = block_size;
+#ifdef DEBUGSTREAMBUFSTATS
+  ++m_number_of_created_blocks;
+  m_created_block_size.push_back(block_size);
+#endif
 #ifdef DEBUGKEEPMEMORYBLOCKS
   keep(m_put_area_block_node);
 #endif
   char* const start = m_get_area_block_node->block_start();
   setp(start, start + block_size);
+  m_total_reset = 0;
+  m_total_freed.store(0, std::memory_order_relaxed);
+  m_total_read.store(0, std::memory_order_relaxed);
   StreamBufConsumer::setg(start, start, start);
-  m_buffer_size_minus_unused_in_first_block.store(block_size, std::memory_order_relaxed);
   //===========================================================
   m_idevice = nullptr;
   m_odevice = nullptr;
@@ -125,21 +135,19 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
     //===========================================================
     // Create a new MemoryBlock.
     size_t block_size = new_block_size();
-    std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_acq_rel);
-    if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
+    if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
     {
-      size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
-      if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
-      {
-        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_acq_rel);
+      block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+      if (block_size < m_minimum_block_size)
         return static_cast<int_type>(EOF);
-      }
-      size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
-      m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_acq_rel);
-      block_size = max_block_size;
     }
     Dout(dc::evio, "overflow_a: allocating new memory block of size " << block_size);
     MemoryBlock* new_block = MemoryBlock::create(block_size);
+    m_total_allocated += block_size;
+#ifdef DEBUGSTREAMBUFSTATS
+    ++m_number_of_created_blocks;
+    m_created_block_size.push_back(block_size);
+#endif
 #ifdef DEBUGKEEPMEMORYBLOCKS
     keep(new_block);
 #endif
@@ -248,7 +256,6 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     while (!common().m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
-    common().m_buffer_size_minus_unused_in_first_block.fetch_add(cur_gptr - start, std::memory_order_acq_rel);
     cur_gptr = start;
   }
   //
@@ -302,8 +309,8 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
       // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
       // pointing to that, now newly allocated, memory!
       store_last_gptr(cur_gptr);
-      // m_buffer_size_minus_unused_in_first_block does not change.
       Dout(dc::evio, "update_get_area: freeing memory block of size " << prev_get_area_block_node->get_size());
+      common().m_total_freed += prev_get_area_block_node->get_size();
       prev_get_area_block_node->release();
     }
     //===========================================================
@@ -420,7 +427,7 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
 #else
       std::memcpy(s, cur_gptr, len);
 #endif
-      common().gbump(len);              // Do not update m_buffer_size_minus_unused_in_first_block, that happens at the end of this function.
+      common().gbump(len);              // Do not update m_total_read, that happens at the end of this function.
       s += len;
       available -= len;
       remaining -= len;
@@ -447,12 +454,13 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
       // pointing to that, now newly allocated, memory!
       store_last_gptr(start);
       Dout(dc::evio, "xsgetn_a: freeing memory block of size " << get_area_block_node->get_size());
+      common().m_total_freed += get_area_block_node->get_size();
       get_area_block_node->release();
       //===========================================================
     }
   }
-  // This RMW operation seems to take a considerable amount of CPU cycles.
-  common().m_buffer_size_minus_unused_in_first_block.fetch_sub(n - remaining, std::memory_order_acq_rel);
+  std::streamsize new_total_read = common().m_total_read.load(std::memory_order_relaxed) + n - remaining;
+  common().m_total_read.store(new_total_read, std::memory_order_release);
   Dout(dc::finish, " = " << (n - remaining));
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
@@ -498,6 +506,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
     // until the consumer thread did reset too. Nor will the producer thread reset again until that happened.
     m_next_egptr.store(nullptr, std::memory_order_release);             // Atomically signal the consumer thread that it must reset.
                                                                         // This write must be release to flush the write of m_next_egptr2.
+    m_total_reset += cur_pptr - block_start;
     std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
     cur_pptr = block_start;
   }
@@ -534,21 +543,19 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
       //===========================================================
       // Create a new MemoryBlock.
       size_t block_size = new_block_size();
-      std::streamsize previous_buffer_size_minus_unused_in_first_block = m_buffer_size_minus_unused_in_first_block.fetch_add(block_size, std::memory_order_acq_rel);
-      if (AI_UNLIKELY(previous_buffer_size_minus_unused_in_first_block + block_size > m_max_allocated_block_size)) // Max alloc reached?
+      if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
       {
-        size_t max_alloc_size = utils::max_malloc_size(m_max_allocated_block_size - previous_buffer_size_minus_unused_in_first_block + sizeof(MemoryBlock));
-        if (max_alloc_size < m_minimum_block_size + sizeof(MemoryBlock))
-        {
-          m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size, std::memory_order_acq_rel);
+        block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+        if (block_size < m_minimum_block_size)
           return static_cast<int_type>(EOF);
-        }
-        size_t max_block_size = max_alloc_size - sizeof(MemoryBlock);
-        m_buffer_size_minus_unused_in_first_block.fetch_sub(block_size - max_block_size, std::memory_order_acq_rel);
-        block_size = max_block_size;
       }
       Dout(dc::evio, "xsputn_a: allocating new memory block of size " << block_size);
       MemoryBlock* new_block = MemoryBlock::create(block_size);
+      m_total_allocated += block_size;
+#ifdef DEBUGSTREAMBUFSTATS
+      ++m_number_of_created_blocks;
+      m_created_block_size.push_back(block_size);
+#endif
 #ifdef DEBUGKEEPMEMORYBLOCKS
       keep(new_block);
 #endif
@@ -617,15 +624,24 @@ void StreamBuf::reduce_buffer()
 #endif
     MemoryBlock* get_area_block_node = m_get_area_block_node;
     m_get_area_block_node = MemoryBlock::create(m_minimum_block_size);
-    m_buffer_size_minus_unused_in_first_block.store(m_minimum_block_size, std::memory_order_acq_rel);
+    m_total_allocated += m_minimum_block_size;
+#ifdef DEBUGSTREAMBUFSTATS
+    ++m_number_of_created_blocks;
+    m_created_block_size.push_back(m_minimum_block_size);
+#endif
     m_put_area_block_node = m_get_area_block_node;
     Dout(dc::notice, "reduce_buffer: freeing memory block of size " << get_area_block_node->get_size());
+    m_total_freed += get_area_block_node->get_size();
     get_area_block_node->release();
     //===========================================================
   }
   // Reset the empty buffer.
   char* start = m_get_area_block_node->block_start();
   StreamBufConsumer::setg(start, start, start);
+  // After the call to setp, unused_in_last_block() has become m_minimum_block_size.
+  // m_total_reset keeps track of the total amount that unused_in_last_block() was incremented
+  // by resets of the buffer.
+  m_total_reset += m_minimum_block_size - unused_in_last_block();
   setp(start, start + m_minimum_block_size);
   store_last_gptr(start);
 }
@@ -903,6 +919,23 @@ std::ostream& operator<<(std::ostream& os, RecordingData const& data)
 
 #ifdef DEBUGSTREAMBUFSTATS
 
+void StreamBufProducer::dump_stats() const
+{
+  std::cout << "m_number_of_created_blocks = " << m_number_of_created_blocks << std::endl;
+  std::map<size_t, int> bsm;
+  for (size_t s : m_created_block_size)
+    bsm[s]++;
+  char const* separator = "m_created_block_size: ";
+  for (auto p : bsm)
+  {
+    std::cout << separator << p.first << ": " << p.second;
+    separator = ", ";
+  }
+  std::cout << std::endl;
+  std::cout << "m_total_allocated = " << m_total_allocated << std::endl;
+  std::cout << "m_total_reset = " << m_total_reset << std::endl;
+}
+
 void StreamBufConsumer::dump_stats() const
 {
   std::cout << "m_number_of_calls_to_update_get_area = " << m_number_of_calls_to_update_get_area << std::endl;;
@@ -912,6 +945,7 @@ void StreamBufConsumer::dump_stats() const
   std::cout << "m_number_of_calls_to_underflow_a = " << m_number_of_calls_to_underflow_a << std::endl;
   std::cout << "m_xsgetn_a_read_zero_bytes = " << m_xsgetn_a_read_zero_bytes << std::endl;
   std::cout << "m_xsgetn_a_read_all_requested_bytes = " << m_xsgetn_a_read_all_requested_bytes << std::endl;
+  std::cout << "m_total_freed = " << common().m_total_freed << std::endl;
 }
 
 #endif // DEBUGSTREAMBUFSTATS
