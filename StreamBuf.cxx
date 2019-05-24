@@ -93,15 +93,8 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
 #endif
   //===========================================================
   // Create first MemoryBlock.
-  m_get_area_block_node = m_put_area_block_node = MemoryBlock::create(block_size);
-  m_total_allocated = block_size;
-#ifdef DEBUGSTREAMBUFSTATS
-  ++m_number_of_created_blocks;
-  m_created_block_size.push_back(block_size);
-#endif
-#ifdef DEBUGKEEPMEMORYBLOCKS
-  keep(m_put_area_block_node);
-#endif
+  m_total_allocated = 0;
+  m_get_area_block_node = m_put_area_block_node = create_memory_block(block_size);
   char* const start = m_get_area_block_node->block_start();
   setp(start, start + block_size);
   m_total_reset = 0;
