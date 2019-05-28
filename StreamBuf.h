@@ -371,8 +371,18 @@ class StreamBufCommon : public std::streambuf
   StreamBufCommon() :
     m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
     m_last_gptr(nullptr)                // See update_put_area.
+#ifdef DEBUGEVENTRECORDING
+    , recording_pool(1024, sizeof(RecordingData))
+#endif
   {
   }
+
+#ifdef DEBUGEVENTRECORDING
+ public:
+  utils::NodeMemoryPool recording_pool;
+  std::vector<RecordingData*> recording_buffer;
+  std::mutex recording_mutex;
+#endif
 };
 
 //=============================================================================
@@ -564,6 +574,13 @@ class StreamBufProducer : public StreamBufCommon
   }
 #endif
 
+#ifdef DEBUGEVENTRECORDING
+ public:
+  size_t write_stream_offset;
+
+  void record_memcpy(RecordingData* data, char const* from);
+  void resetting_put_area(RecordingData* data);
+#endif
 };
 
 class StreamBufConsumer
@@ -619,10 +636,10 @@ class StreamBufConsumer
 #endif
     common().m_last_gptr.store(p, std::memory_order_release);
 #ifdef DEBUGEVENTRECORDING
-    RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, p, 0);
+    RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, p, 0);
     data->m_type = stored_last_gptr;
-    std::lock_guard<std::mutex> lock(recording_mutex);
-    recording_buffer.push_back(data);
+    std::lock_guard<std::mutex> lock(common().recording_mutex);
+    common().recording_buffer.push_back(data);
 #endif
   }
 
@@ -688,6 +705,15 @@ class StreamBufConsumer
   // Returns true if a string with length `len' is contiguous
   // in the current get area of the output buffer.
   bool is_contiguous(size_t len) const;
+
+#ifdef DEBUGEVENTRECORDING
+ public:
+  size_t read_stream_offset;
+
+  void updating_get_area(RecordingData* data);
+  void resetting_get_area(RecordingData* data);
+  void record_memcpy(RecordingData* data, char* to);
+#endif
 };
 
 class StreamBuf : public StreamBufProducer, public StreamBufConsumer
@@ -858,25 +884,6 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // Print debug information in stream `o'.
   // *undocumented*
   void printOn(std::ostream& o) const;
-#endif
-
-#ifdef DEBUGEVENTRECORDING
- public:
-  utils::NodeMemoryPool recording_pool;
-  std::vector<RecordingData*> recording_buffer;
-  std::mutex recording_mutex;
-  size_t write_stream_offset;
-  size_t read_stream_offset;
-
-  // Read from the buffer: copy data from `data->start' to `to'.
-  void record_memcpy(RecordingData* data, char* to);
-
-  // Write data to the buffer: copy data from `from' to `data->start`.
-  void record_memcpy(RecordingData* data, char const* from);
-
-  void resetting_put_area(RecordingData* data);
-  void resetting_get_area(RecordingData* data);
-  void updating_get_area(RecordingData* data);
 #endif
 
 #if defined(CWDEBUG) || defined(DEBUG)

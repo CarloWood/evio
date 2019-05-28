@@ -75,9 +75,6 @@ void StreamBuf::dump()
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
     StreamBufProducer(minimum_block_size, buffer_full_watermark, max_allocated_block_size),
     m_device_counter(0)
-#ifdef DEBUGEVENTRECORDING
-    , recording_pool(1024, sizeof(RecordingData))
-#endif
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
   size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
@@ -245,7 +242,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 
   cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
 #ifdef DEBUGEVENTRECORDING
-  RecordingData* data = new (recording_pool) RecordingData(cur_gptr - start, start, end - start);
+  RecordingData* data = new (common().recording_pool) RecordingData(cur_gptr - start, start, end - start);
   updating_get_area(data);
 #endif
   if (next_egptr == nullptr)    // Do we have to reset the get area to the beginning of the buffer?
@@ -259,7 +256,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     Dout(dc::evio, "update_get_area: resetting get area.");
     common().m_last_gptr.store(start, std::memory_order_relaxed);       // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
-    RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, start, 0);
+    RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, start, 0);
     resetting_get_area(data);
 #endif
     common().m_next_egptr.store(start, std::memory_order_seq_cst);      // Flush m_last_gptr before making m_next_egptr non-null.
@@ -423,7 +420,7 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
     {
       len = std::min(available, remaining);
 #ifdef DEBUGEVENTRECORDING
-      RecordingData* data = new (recording_pool) RecordingData(read_stream_offset, cur_gptr, len);
+      RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, cur_gptr, len);
       record_memcpy(data, s);
 #else
       std::memcpy(s, cur_gptr, len);
@@ -814,19 +811,19 @@ void StreamBuf::printOn(std::ostream& os) const
 #ifdef DEBUGEVENTRECORDING
 
 // Read from the buffer: copy data from `data->start' to `to'.
-void StreamBuf::record_memcpy(RecordingData* data, char* to)
+void StreamBufConsumer::record_memcpy(RecordingData* data, char* to)
 {
   data->m_type = memcpy_reading;
   {
-    std::lock_guard<std::mutex> lock(recording_mutex);
+    std::lock_guard<std::mutex> lock(common().recording_mutex);
     std::memcpy(to, data->m_start, data->m_length);
-    recording_buffer.push_back(data);
+    common().recording_buffer.push_back(data);
   }
   read_stream_offset += data->m_length;
 }
 
 // Write data to the buffer: copy data from `from' to `data->start`.
-void StreamBuf::record_memcpy(RecordingData* data, char const* from)
+void StreamBufProducer::record_memcpy(RecordingData* data, char const* from)
 {
   data->m_type = memcpy_writing;
   {
@@ -837,25 +834,25 @@ void StreamBuf::record_memcpy(RecordingData* data, char const* from)
   write_stream_offset += data->m_length;
 }
 
-void StreamBuf::resetting_put_area(RecordingData* data)
+void StreamBufProducer::resetting_put_area(RecordingData* data)
 {
   data->m_type = put_area_reset;
   std::lock_guard<std::mutex> lock(recording_mutex);
   recording_buffer.push_back(data);
 }
 
-void StreamBuf::resetting_get_area(RecordingData* data)
+void StreamBufConsumer::resetting_get_area(RecordingData* data)
 {
   data->m_type = get_area_reset;
-  std::lock_guard<std::mutex> lock(recording_mutex);
-  recording_buffer.push_back(data);
+  std::lock_guard<std::mutex> lock(common().recording_mutex);
+  common().recording_buffer.push_back(data);
 }
 
-void StreamBuf::updating_get_area(RecordingData* data)
+void StreamBufConsumer::updating_get_area(RecordingData* data)
 {
   data->m_type = get_area_update;
-  std::lock_guard<std::mutex> lock(recording_mutex);
-  recording_buffer.push_back(data);
+  std::lock_guard<std::mutex> lock(common().recording_mutex);
+  common().recording_buffer.push_back(data);
 }
 
 std::ostream& operator<<(std::ostream& os, RecordingData const& data)
