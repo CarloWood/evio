@@ -240,7 +240,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   //   |=========================================|
   //   ^              ^                          ^    next_egptr == nullptr
   //   |              |                          |
-  // start      m_next_egptr2                   end
+  // start      m_last_pptr                     end
   //
 
   cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
@@ -266,12 +266,12 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
                                                                         // This must be memory_order_seq_cst.
 
     // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the producer thread
-    // might have changed m_next_egptr2 but missed the write to m_next_egptr, so we have to synchronize
-    // (m_)next_egptr with the latest value of m_next_egptr2.
+    // might have changed m_last_pptr but missed the write to m_next_egptr, so we have to synchronize
+    // (m_)next_egptr with the latest value of m_last_pptr.
     char* expected_next_egptr = start;
     do
     {
-      next_egptr = common().m_next_egptr2.load(std::memory_order_seq_cst);      // Must be memory_order_seq_cst.
+      next_egptr = common().m_last_pptr.load(std::memory_order_seq_cst);      // Must be memory_order_seq_cst.
     }
     while (!common().m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
     // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
@@ -482,7 +482,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
 #endif
-    m_next_egptr2.store(block_start, std::memory_order_relaxed);        // Initialize next_egptr2 that the consumer thread will use once it resets itself.
+    m_last_pptr.store(block_start, std::memory_order_relaxed);        // Initialize next_egptr2 that the consumer thread will use once it resets itself.
                                                                         // This value will not be read by the consumer thread until after it sees next_egptr to be nullptr.
                                                                         // Therefore this write can be relaxed.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
@@ -491,7 +491,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
     // A value of nullptr means 'block_start', but will prevent the producer thread to write to it
     // until the consumer thread did reset too. Nor will the producer thread reset again until that happened.
     m_next_egptr.store(nullptr, std::memory_order_release);             // Atomically signal the consumer thread that it must reset.
-                                                                        // This write must be release to flush the write of m_next_egptr2.
+                                                                        // This write must be release to flush the write of m_last_pptr.
     m_total_reset += cur_pptr - block_start;
     std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
     cur_pptr = block_start;

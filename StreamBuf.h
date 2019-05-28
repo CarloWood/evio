@@ -354,7 +354,7 @@ class StreamBufCommon : public std::streambuf
  protected:
   friend class StreamBufConsumer;
   std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the consumer thread has to reset the get area.
-  std::atomic<char*> m_next_egptr2;     // This is used to transfer the pptr to egptr while m_next_egptr is set to nullptr.
+  std::atomic<char*> m_last_pptr;       // This is used to transfer the pptr to the consumer thread.
   std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the producer thread.
 
   // The total accumulated amount of freed memory.
@@ -503,7 +503,7 @@ class StreamBufProducer : public StreamBufCommon
   // Store the current value of pptr in m_next_egptr.
   [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
-    m_next_egptr2.store(cur_pptr, std::memory_order_seq_cst);   // Must be memory_order_seq_cst.
+    m_last_pptr.store(cur_pptr, std::memory_order_seq_cst);   // Must be memory_order_seq_cst.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
@@ -828,7 +828,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   void sanity_check() override
   {
     char* next_egptr = m_next_egptr.load(std::memory_order_relaxed);
-    char* next_egptr2 = m_next_egptr2.load(std::memory_order_relaxed);
+    char* next_egptr2 = m_last_pptr.load(std::memory_order_relaxed);
     bool r1 = next_egptr == nullptr || next_egptr == s_next_egptr_init;
     bool r2 = false;
     std::lock_guard<std::mutex> lock(get_area_release_mutex);
