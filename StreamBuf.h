@@ -353,7 +353,7 @@ class StreamBufCommon : public std::streambuf
 {
  protected:
   friend class StreamBufConsumer;
-  std::atomic<char*> m_next_egptr;      // This is used to transfer the pptr to egptr and to signal that the consumer thread has to reset the get area.
+  std::atomic<bool> m_resetting;        // This is used to signal that the consumer thread has to reset the get area.
   std::atomic<char*> m_last_pptr;       // This is used to transfer the pptr to the consumer thread.
   std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the producer thread.
 
@@ -364,12 +364,9 @@ class StreamBufCommon : public std::streambuf
   // This value only ever increases, it is not decreased when memory is freed.
   std::atomic<std::streamsize> m_total_read;
 
-  // Constructor thread.
-  static char s_next_egptr_init[1];     // Provides a random address to initialize m_next_egptr with (so it isn't nullptr).
-
-  // Constructor; m_next_egptr is initialized by a call to setp from StreamBuf(), but only when m_next_egptr != nullptr.
+  // Constructor.
   StreamBufCommon() :
-    m_next_egptr(s_next_egptr_init),    // Must be a non-null value.
+    m_resetting(false),
     m_last_gptr(nullptr)                // See update_put_area.
 #ifdef DEBUGEVENTRECORDING
     , recording_pool(1024, sizeof(RecordingData))
@@ -443,7 +440,7 @@ class StreamBufProducer : public StreamBufCommon
 
   ~StreamBufProducer() noexcept { }
 
-  // Note that the way m_next_egptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
+  // Note that the way m_last_pptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
   [[gnu::always_inline]] void pbump(int n)
   {
     std::streambuf::pbump(n);
@@ -477,7 +474,7 @@ class StreamBufProducer : public StreamBufCommon
 
 #ifndef DEBUGDBSTREAMBUF
   // Allow printing of `this' pointers.
-  friend std::ostream& operator<<(std::ostream& os, StreamBuf* sb) { return os << (void*)sb; }
+  friend std::ostream& operator<<(std::ostream& os, StreamBufProducer* sb);
 #endif
 
  protected:
@@ -510,23 +507,13 @@ class StreamBufProducer : public StreamBufCommon
   // sure that it is written out.
   void flush();
 
-  // Store the current value of pptr in m_next_egptr.
+  // Store the current value of pptr in m_last_pptr.
   [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
     m_last_pptr.store(cur_pptr, std::memory_order_seq_cst);   // Must be memory_order_seq_cst.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
-    // Do not, ourselves, overwrite a null value - that is a signal to the Consumer that the get area has to be
-    // reset to the beginning of the current block and only the Consumer may change m_next_egptr to non-null again
-    // (see sync_egptr below).
-    if (m_next_egptr.load(std::memory_order_seq_cst))           // Must be memory_order_seq_cst.
-    {
-      m_next_egptr.store(cur_pptr, std::memory_order_release);
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-      sanity_check();
-#endif
-    }
   }
   [[gnu::always_inline]] void sync_egptr() { sync_egptr(pptr()); }
 
@@ -706,6 +693,11 @@ class StreamBufConsumer
   // in the current get area of the output buffer.
   bool is_contiguous(size_t len) const;
 
+#ifndef DEBUGDBSTREAMBUF
+  // Allow printing of `this' pointers.
+  friend std::ostream& operator<<(std::ostream& os, StreamBufConsumer* sb);
+#endif
+
 #ifdef DEBUGEVENTRECORDING
  public:
   size_t read_stream_offset;
@@ -837,7 +829,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 
 #ifdef DEBUGDBSTREAMBUF
  protected:
-  bool is_resetting() const { return m_next_egptr.load(std::memory_order_relaxed) == nullptr; }
+  bool is_resetting() const { return m_resetting.load(std::memory_order_relaxed); }
 #endif
 
 #ifdef DEBUGKEEPMEMORYBLOCKS
@@ -853,29 +845,26 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 
   void sanity_check() override
   {
-    char* next_egptr = m_next_egptr.load(std::memory_order_relaxed);
-    char* next_egptr2 = m_last_pptr.load(std::memory_order_relaxed);
-    bool r1 = next_egptr == nullptr || next_egptr == s_next_egptr_init;
-    bool r2 = false;
+    char* last_pptr = m_last_pptr.load(std::memory_order_relaxed);
+    bool reachable = false;
     std::lock_guard<std::mutex> lock(get_area_release_mutex);
     MemoryBlock* volatile before_get_area_block_node = m_get_area_block_node;
     [[maybe_unused]] MemoryBlock* volatile before_next = before_get_area_block_node->m_next;
     for (MemoryBlock* block = before_get_area_block_node; block; block = block->m_next)
     {
-      r1 = r1 || (block->block_start() <= next_egptr && next_egptr <= block->block_start() + block->get_size());
-      r2 = r2 || (block->block_start() <= next_egptr2 && next_egptr2 <= block->block_start() + block->get_size());
+      reachable |= (block->block_start() <= last_pptr && last_pptr <= block->block_start() + block->get_size());
     }
     [[maybe_unused]] MemoryBlock* volatile after_get_area_block_node = m_get_area_block_node;
     [[maybe_unused]] MemoryBlock* volatile after_next = before_get_area_block_node->m_next;
-    if (!r1 || !r2)
+    if (!reachable)
     {
       for (MemoryBlock* block = m_get_area_block_node; block; block = block->m_next)
       {
         Dout(dc::notice, "Block: [" << (void*)block->block_start() << ", " << (void*)(block->block_start() + block->get_size()) << "> (size " << block->get_size() << ")");
       }
-      Dout(dc::notice, "next_egptr = " << (void*)next_egptr << "; next_egptr2 = " << (void*)next_egptr2);
+      Dout(dc::notice, "last_pptr = " << (void*)last_pptr);
     }
-    ASSERT(r1 && r2);
+    ASSERT(reachable);
   }
 #endif
 
@@ -892,6 +881,11 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   {
     return update_get_area(get_area_block_node, cur_gptr, available);
   }
+#endif
+
+#ifndef DEBUGDBSTREAMBUF
+  // Allow printing of `this' pointers.
+  friend std::ostream& operator<<(std::ostream& os, StreamBuf* sb);
 #endif
 };
 

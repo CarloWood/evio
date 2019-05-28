@@ -190,32 +190,38 @@ char* StreamBufConsumer::release_memory_block(MemoryBlock*& get_area_block_node)
   return start;
 }
 
-// If m_next_egptr == nullptr, then reset the get area to the start of get_area_block_node
-// and sync m_next_egptr with value from the last call to sync_egptr(). Then continue with
-// the following:
+// If m_resetting is true then reset the get area to the start of get_area_block_node.
+// Then continue with the following:
 //
-// If next_egptr is not inside the current get_area_block_node and both gptr and egptr point to the
+// If last_pptr is not inside the current get_area_block_node and both gptr and egptr point to the
 // end of that block (so the get area is empty) then advance the get_area_block_node to the next
 // block node in the chain and set the get area pointers to the beginning of the new block. Then
 // continue with the following:
 //
-// If next_egptr is not inside the current get_area_block_node then advance egptr to the end
-// of the current get_area_block_node. Otherwise set it to the last known pptr value ("next_egptr")
-// (from the last call to sync_egptr()).
+// If last_pptr is not inside the current get_area_block_node then advance egptr to the end
+// of the current get_area_block_node. Otherwise set egptr to m_last_pptr.
 //
 // This function updates cur_gptr to the current gptr, available to current egptr minus gptr and
 // possibly advances get_area_block_node to get_area_block_node->next.
 //
-// Returns true iff the resulting egptr points the end of the resulting get_area_block_node.
-bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available)
+// Returns true iff the resulting egptr points the end of the resulting get_area_block_node and
+// there is a next block (meaning, it is safe to read get_area_block_node->m_next; it is determined
+// if this is the case by looking at whether or not m_last_pptr falls outside the current get_area_block_node).
+bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr_ref, std::streamsize& available)
 {
 #ifdef DEBUGSTREAMBUFSTATS
   ++m_number_of_calls_to_update_get_area;
 #endif
   // Get a copy of the last 'sync-ed' pptr.
-  char* next_egptr = common().m_next_egptr.load(std::memory_order_acquire);    // Make sure all data was written to memory.
+  bool is_resetting = common().m_resetting.load(std::memory_order_acquire);
+  char* last_pptr = common().m_last_pptr.load(std::memory_order_relaxed);    // Make sure all data was written to memory.
+  char* cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
+
   char* start = get_area_block_node->block_start();
   char* end = start + get_area_block_node->get_size();
+
+  is_resetting |= last_pptr == start && last_pptr < cur_gptr;
+
   // There are several possible cases:
   //
   // 1) We're in the same block as the put area.
@@ -223,29 +229,29 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   //   |=========================================|
   //   ^        ^                    ^           ^
   //   |        |                    |           |
-  // start   cur_gptr            next_egptr     end
+  // start   cur_gptr            last_pptr      end
   //
   // 2) We're not in the same block as the put area.
   //
   //   |================get=area=================|          |==============put=area===============|
   //   ^        ^                                ^                      ^
   //   |        |                                |                      |
-  // start   cur_gptr                           end                 next_egptr
+  // start   cur_gptr                           end                 last_pptr
   //
   // 3) We're in the same block as the put area, but the buffer is empty and we need to reset to the beginning of the buffer:
   //
   //   |=========================================|
-  //   ^              ^                          ^    next_egptr == nullptr
-  //   |              |                          |
-  // start      m_last_pptr                     end
-  //
+  //   ^     ^           ^                       ^      m_resetting == true
+  //   |     |           |                       |
+  // start  last_pptr  cur_gptr                 end
+  //    <--->           egptr
+  //      \__ unread data.
 
-  cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
 #ifdef DEBUGEVENTRECORDING
   RecordingData* data = new (common().recording_pool) RecordingData(cur_gptr - start, start, end - start);
   updating_get_area(data);
 #endif
-  if (next_egptr == nullptr)    // Do we have to reset the get area to the beginning of the buffer?
+  if (is_resetting)             // Do we have to reset the get area to the beginning of the buffer?
   //---------------------------------------------------------------------------
   // Case 3
   //
@@ -259,19 +265,9 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, start, 0);
     resetting_get_area(data);
 #endif
-    common().m_next_egptr.store(start, std::memory_order_seq_cst);      // Flush m_last_gptr before making m_next_egptr non-null.
+    common().m_resetting.store(false, std::memory_order_release);       // Flush m_last_gptr before resetting m_resetting.
                                                                         // This must be memory_order_seq_cst.
 
-    // Even though we JUST set m_next_egptr to start, a concurrent call to sync_egptr by the producer thread
-    // might have changed m_last_pptr but missed the write to m_next_egptr, so we have to synchronize
-    // (m_)next_egptr with the latest value of m_last_pptr.
-    char* expected_next_egptr = start;
-    do
-    {
-      next_egptr = common().m_last_pptr.load(std::memory_order_seq_cst);      // Must be memory_order_seq_cst.
-    }
-    while (!common().m_next_egptr.compare_exchange_strong(expected_next_egptr, next_egptr, std::memory_order_acquire));
-    // The magic above guarantees that m_next_egptr will (have) pick(ed) up the last call to sync_egptr() (as opposed to skipping one).
     // Reset gptr to the beginning of the current memory block.
     cur_gptr = start;
   }
@@ -279,12 +275,14 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // 3) Here we reached the following situation:
   //
   //   |=========================================|
-  //   ^              ^                          ^
-  //   |              |                          |
-  //cur_gptr      next_egptr                    end
-  // start
+  //   ^     ^                                   ^      m_resetting == true
+  //   |     |                                   |
+  //cur_gptr |
+  // start  last_pptr                           end
+  //    <--->
+  //      \__ unread data.
   //
-  // Where the meaning of cur_gptr rather is 'next gptr', we will use cur_gptr below to change gptr.
+  // Where the meaning of cur_gptr rather is 'next gptr', we will use cur_gptr below to change gptr (and egptr will be set to last_pptr).
   // This case has now become a case 1, so we continue as normal.
   //
   //---------------------------------------------------------------------------
@@ -293,9 +291,9 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   bool case1;
   for (;;)
   {
-    case1 = start <= next_egptr && next_egptr <= end;   // Does next_egptr fall in the current get area block?
+    case1 = start <= last_pptr && last_pptr <= end;     // Does last_pptr fall in the current get area block?
     if (case1)
-      cur_egptr = next_egptr;                           // We will use cur_egptr below to change egptr.
+      cur_egptr = last_pptr;                            // We will use cur_egptr below to change egptr.
     // The immediately available number of bytes in the get area (after the update below).
     available = cur_egptr - cur_gptr;
 
@@ -306,6 +304,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     {
       // Update get area and always return false - even when gptr is at the end of the block.
       setg(start, cur_gptr, cur_egptr);
+      cur_gptr_ref = cur_gptr;
       return false;     // There isn't a next block.
     }
 
@@ -313,9 +312,8 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     // Update get_area_block_node to point to the next block and return the new start.
     cur_gptr = start = release_memory_block(get_area_block_node);
     cur_egptr = end = start + get_area_block_node->get_size();
-    // Continue from the start, but note that next_egptr is guaranteed not nullptr here.
-    // So this is now either case 1 or 2. However, since cur_gptr is now start, available
-    // will be non-null unless next_egptr == start, in which case case1 becomes true.
+    // Continue from the start of the loop.
+    // Since cur_gptr is now start, available will be non-zero unless last_pptr == start, in which case case1 becomes true.
     // So this jump back only happens once.
   }
 
@@ -325,6 +323,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   ASSERT(case1 || get_area_block_node->m_next);
 
   // Return true if the current egptr points to the end of the block and there STILL is a next block.
+  cur_gptr_ref = cur_gptr;
   return cur_egptr == end && !case1;
 }
 
@@ -352,6 +351,7 @@ int StreamBufConsumer::underflow_a()
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
+  Dout(dc::evio, "Returning 0 (available " << available << " bytes).");
   return result;
 }
 
@@ -457,37 +457,34 @@ std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
   return n - remaining;
 }
 
-char StreamBufCommon::s_next_egptr_init[1];
-
 char* StreamBufProducer::update_put_area(std::streamsize& available)
 {
   char* block_start = std::streambuf::pbase();
   char* cur_pptr = std::streambuf::pptr();
-  ASSERT(m_next_egptr.load(std::memory_order_acquire) != s_next_egptr_init);
-  if (cur_pptr != block_start &&                // Don't start a reset cycle when pptr is already at the start of the block ;).
-      m_next_egptr.load(std::memory_order_acquire) != nullptr &&        // If next_egptr is nullptr then the put area was reset, but the get area wasn't yet;
+  if (cur_pptr != block_start &&                                        // Don't start a reset cycle when pptr is already at the start of the block ;).
+      !m_resetting.load(std::memory_order_acquire) &&                   // If m_resetting then the put area was reset, but the get area wasn't yet;
                                                                         // don't reset again until it was. This read must be acquire to make sure the write
                                                                         // to last_gptr is visible too.
       // Before m_last_gptr actually gets set (to gptr when when there are no more bytes available for reading),
       // the most sensible value might be block_start - but in that case this comparison will evaluate to false
       // since cur_pptr != block_start. Therefore we might as well initialize m_last_gptr to nullptr in the
       // streambuf constructor.
-      cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while next_egptr != nullptr then the buffer is truely empty (gptr == pptr).
+      cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while m_resetting is false then the buffer is truely empty (gptr == pptr).
   {
     Dout(dc::evio, "update_put_area: resetting put area.");
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
 #endif
-    m_last_pptr.store(block_start, std::memory_order_relaxed);        // Initialize next_egptr2 that the consumer thread will use once it resets itself.
-                                                                        // This value will not be read by the consumer thread until after it sees next_egptr to be nullptr.
+    m_last_pptr.store(block_start, std::memory_order_relaxed);          // Initialize m_last_pptr that the consumer thread will use once it resets itself.
+                                                                        // This value will not be read by the consumer thread until after it sees m_resetting to be true.
                                                                         // Therefore this write can be relaxed.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
     // A value of nullptr means 'block_start', but will prevent the producer thread to write to it
     // until the consumer thread did reset too. Nor will the producer thread reset again until that happened.
-    m_next_egptr.store(nullptr, std::memory_order_release);             // Atomically signal the consumer thread that it must reset.
+    m_resetting.store(true, std::memory_order_release);                 // Atomically signal the consumer thread that it must reset.
                                                                         // This write must be release to flush the write of m_last_pptr.
     m_total_reset += cur_pptr - block_start;
     std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
@@ -872,7 +869,7 @@ std::ostream& operator<<(std::ostream& os, RecordingData const& data)
       os << "Put area reset; pptr = m_last_gptr == " << (void*)data.m_start;
       break;
     case get_area_reset:
-      os << "Get area reset; m_last_gptr = m_next_egptr = " << (void*)data.m_start;
+      os << "Get area reset; m_last_gptr = " << (void*)data.m_start;
       break;
     case stored_last_gptr:
       os << "store_last_gptr(): m_last_gptr = " << (void*)data.m_start;
@@ -918,5 +915,22 @@ void StreamBufConsumer::dump_stats() const
 }
 
 #endif // DEBUGSTREAMBUFSTATS
+
+std::ostream& operator<<(std::ostream& os, StreamBufProducer* sb)
+{
+  return os << (void*)static_cast<StreamBuf*>(sb);
+}
+
+std::ostream& operator<<(std::ostream& os, StreamBufConsumer* sb)
+{
+  return os << (void*)&static_cast<StreamBuf&>(sb->common());
+}
+
+#ifndef DEBUGDBSTREAMBUF
+std::ostream& operator<<(std::ostream& os, StreamBuf* sb)
+{
+  return os << (void*)sb;
+}
+#endif
 
 } // namespace evio
