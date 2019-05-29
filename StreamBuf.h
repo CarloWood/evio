@@ -510,7 +510,7 @@ class StreamBufProducer : public StreamBufCommon
   // Store the current value of pptr in m_last_pptr.
   [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
-    m_last_pptr.store(cur_pptr, std::memory_order_seq_cst);   // Must be memory_order_seq_cst.
+    m_last_pptr.store(cur_pptr, std::memory_order_release);
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif

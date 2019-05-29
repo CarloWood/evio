@@ -213,8 +213,8 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   ++m_number_of_calls_to_update_get_area;
 #endif
   // Get a copy of the last 'sync-ed' pptr.
-  bool is_resetting = common().m_resetting.load(std::memory_order_acquire);
-  char* last_pptr = common().m_last_pptr.load(std::memory_order_relaxed);    // Make sure all data was written to memory.
+  bool is_resetting = common().m_resetting.load(std::memory_order_acquire);     // If resetting also get a reasonable recent value of m_last_pptr (I think this could be relaxed too).
+  char* last_pptr = common().m_last_pptr.load(std::memory_order_acquire);       // Make sure all data written to memory before m_last_pptr is visible.
   char* cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
 
   char* start = get_area_block_node->block_start();
@@ -266,7 +266,6 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     resetting_get_area(data);
 #endif
     common().m_resetting.store(false, std::memory_order_release);       // Flush m_last_gptr before resetting m_resetting.
-                                                                        // This must be memory_order_seq_cst.
 
     // Reset gptr to the beginning of the current memory block.
     cur_gptr = start;
@@ -479,13 +478,13 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
     m_last_pptr.store(block_start, std::memory_order_relaxed);          // Initialize m_last_pptr that the consumer thread will use once it resets itself.
                                                                         // This value will not be read by the consumer thread until after it sees m_resetting to be true.
                                                                         // Therefore this write can be relaxed.
-#ifdef DEBUGNEXTEGPTRSANITYCHECK
-    sanity_check();
-#endif
     // A value of nullptr means 'block_start', but will prevent the producer thread to write to it
     // until the consumer thread did reset too. Nor will the producer thread reset again until that happened.
     m_resetting.store(true, std::memory_order_release);                 // Atomically signal the consumer thread that it must reset.
                                                                         // This write must be release to flush the write of m_last_pptr.
+#ifdef DEBUGNEXTEGPTRSANITYCHECK
+    sanity_check();
+#endif
     m_total_reset += cur_pptr - block_start;
     std::streambuf::pbump(block_start - cur_pptr);                      // Reset ourselves.
     cur_pptr = block_start;
