@@ -374,6 +374,11 @@ class StreamBufCommon : public std::streambuf
   {
   }
 
+
+#ifdef DEBUGSTREAMBUFSTATS
+  virtual void print_stats() const = 0;
+#endif
+
 #ifdef DEBUGEVENTRECORDING
  public:
   utils::NodeMemoryPool recording_pool;
@@ -510,7 +515,9 @@ class StreamBufProducer : public StreamBufCommon
   // Store the current value of pptr in m_last_pptr.
   [[gnu::always_inline]] void sync_egptr(char* cur_pptr)
   {
-    m_last_pptr.store(cur_pptr, std::memory_order_release);
+    m_last_pptr.store(cur_pptr, std::memory_order_release);     // This must be release, because this could make a reset pptr go beyond the non-reset gptr value
+                                                                // making it indistinguishable from a non-reset value for the consumer thread if we don't release
+                                                                // the write to m_resetting here.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
@@ -886,6 +893,14 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 #ifndef DEBUGDBSTREAMBUF
   // Allow printing of `this' pointers.
   friend std::ostream& operator<<(std::ostream& os, StreamBuf* sb);
+#endif
+
+#ifdef DEBUGSTREAMBUFSTATS
+  void print_stats() const override
+  {
+    StreamBufProducer::dump_stats();
+    StreamBufConsumer::dump_stats();
+  }
 #endif
 };
 

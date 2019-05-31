@@ -213,14 +213,74 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   ++m_number_of_calls_to_update_get_area;
 #endif
   // Get a copy of the last 'sync-ed' pptr.
-  bool is_resetting = common().m_resetting.load(std::memory_order_acquire);     // If resetting also get a reasonable recent value of m_last_pptr (I think this could be relaxed too).
+  bool is_resetting = common().m_resetting.load(std::memory_order_acquire);     // Synchronizes with the store release in update_put_area.
   char* last_pptr = common().m_last_pptr.load(std::memory_order_acquire);       // Make sure all data written to memory before m_last_pptr is visible.
+  // Also needs to be acquire for the reset-synchronization otherwise the following could happen,
+  //
+  //                                                                                    // m_resetting = false, m_last_pptr = old_value (ie, block_start + 100).
+  // [consumer_thread:update_get_area]
+  // bool is_resetting = common().m_resetting.load(std::memory_order_acquire);          // is_resetting = false          ----.
+  //                                                                                                                         |
+  // [producer_thread:update_put_area]                                                                                       |
+  // m_last_pptr.store(block_start, std::memory_order_relaxed);                         // m_last_pptr = block_start         |
+  // m_resetting.store(true, std::memory_order_release);                                // m_resetting = true                |
+  // [producer_thread:sync_egptr]                                                                                            |
+  // m_last_pptr.store(cur_pptr, std::memory_order_release);                            // m_last_pptr = block_start + 10 (wrote 10 bytes after reset).
+  //                                                           WRONG                                       |                 |
+  // [consumer_thread:update_get_area]                           v                                         v                 |
+  // char* last_pptr = common().m_last_pptr.load(std::memory_order_relaxed);            // last_pptr = block_start + 10      |
+  // is_resetting |= (last_pptr == start && cur_gptr != start);                         // is_resetting = false              |
+  // if (!is_resetting && common().m_resetting.load(std::memory_order_acquire))         // m_resetting is false           <--'
+  //
+  // Code below uses a reset value for last_pptr while is_resetting is not set.
+  //
+  // This can not happen when the read of block_start + 10 to last_pptr is acquire
+  // as that then will synchronize with the m_resetting = true that is done
+  // before the update in sync_egptr.
+
   char* cur_gptr = gptr();            // Just store the current value of gptr in cur_gptr (case 1 and 2).
 
   char* start = get_area_block_node->block_start();
   char* end = start + get_area_block_node->get_size();
 
-  is_resetting |= last_pptr == start && last_pptr < cur_gptr;
+  // The following line takes care of a reset value of m_last_pptr (to block_start) before m_resetting was set to true yet (or simply not visible yet here).
+  is_resetting |= (last_pptr == start && cur_gptr != start);
+
+  // Unlikely race condition. This takes care of the situation the initial load acquire
+  // of m_resetting was false, but the subsequent load acquire of m_last_pptr is a reset-value
+  // already larger than block_start (in sync_egptr), so is_resetting wasn't set to true in the
+  // previous line. Since sync_egptr uses store release, that is only possible when the store
+  // true to m_resetting is now visible.
+  // The load of m_resetting here must be acquire or it could still get a false value,
+  // for example,
+  //                                                                                    // m_resetting = false, m_last_pptr = old_value (ie, block_start + 100).
+  // [consumer_thread:update_get_area]                                                                                            |
+  // bool is_resetting = common().m_resetting.load(std::memory_order_acquire);          // is_resetting = false  ---------.       |
+  // char* last_pptr = common().m_last_pptr.load(std::memory_order_acquire);            // last_pptr = block_start + 100  |       |
+  // [producer_thread:update_put_area]                                                                                    |       |
+  // m_last_pptr.store(block_start, std::memory_order_relaxed);                         // m_last_pptr = block_start      |       |
+  // m_resetting.store(true, std::memory_order_release);                                // m_resetting = true     -----.  |       |
+  // [consumer_thread:update_get_area]                                                                                 |  |       |
+  // bool is_resetting = common().m_resetting.load(std::memory_order_acquire);          // is_resetting = false   <----+--'       |
+  // if (!is_resetting && common().m_resetting.load(std::memory_order_relaxed))         // m_resetting is true    <----'          |
+  // {                                                    WRONG -^                                                                |
+  //   is_resetting = true;                                                                                                       |
+  //   last_pptr = common().m_last_pptr.load(std::memory_order_relaxed);                // last_pptr = block_start + 100      <---'
+  //
+  // Code below uses an old pre-reset value for last_pptr while is_resetting is true.
+  //
+  // This can not happen when the load of m_resetting is true is acquire
+  // as that then will synchronize with the m_last_pptr = block_start that is
+  // done before that.
+  if (AI_UNLIKELY(!is_resetting && common().m_resetting.load(std::memory_order_acquire)))
+  {
+    is_resetting = true;
+    // As in the example above, here we pick up the reset value of m_last_pptr that became
+    // visible with the load acquire of m_resetting in the line above.
+    last_pptr = common().m_last_pptr.load(std::memory_order_acquire);
+    // Reading m_last_pptr must always be acquire in order to make sure that the data
+    // written to the buffer up til that value is also visible, before we attempt to read it.
+  }
 
   // There are several possible cases:
   //
@@ -241,7 +301,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // 3) We're in the same block as the put area, but the buffer is empty and we need to reset to the beginning of the buffer:
   //
   //   |=========================================|
-  //   ^     ^           ^                       ^      m_resetting == true
+  //   ^     ^           ^                       ^      is_resetting == true
   //   |     |           |                       |
   // start  last_pptr  cur_gptr                 end
   //    <--->           egptr
@@ -295,6 +355,11 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
       cur_egptr = last_pptr;                            // We will use cur_egptr below to change egptr.
     // The immediately available number of bytes in the get area (after the update below).
     available = cur_egptr - cur_gptr;
+    if (available < 0)
+    {
+      Dout(dc::warning, "cur_gptr = " << (cur_gptr - start) << "; cur_egptr = " << (cur_egptr - start) << "; last_pptr = " << (last_pptr - start) << "; is_resetting = " << is_resetting << "; m_resetting = " << common().m_resetting);
+      assert(available >= 0);
+    }
 
     if (available != 0)
       break;
@@ -476,12 +541,16 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
     resetting_put_area(data);
 #endif
     m_last_pptr.store(block_start, std::memory_order_relaxed);          // Initialize m_last_pptr that the consumer thread will use once it resets itself.
-                                                                        // This value will not be read by the consumer thread until after it sees m_resetting to be true.
-                                                                        // Therefore this write can be relaxed.
+                                                                        // This can be relaxed because there is nothing written to memory before this store
+                                                                        // that the consumer needs to see when it reads this value.
+
     // A value of nullptr means 'block_start', but will prevent the producer thread to write to it
     // until the consumer thread did reset too. Nor will the producer thread reset again until that happened.
     m_resetting.store(true, std::memory_order_release);                 // Atomically signal the consumer thread that it must reset.
-                                                                        // This write must be release to flush the write of m_last_pptr.
+                                                                        // This write must be release to flush the write of m_last_pptr, otherwise it
+                                                                        // is possible that the consumer thread would use an old (not reset) pptr value
+                                                                        // as "reset" pptr value and therefore think there is more data to read then
+                                                                        // there actually is.
 #ifdef DEBUGNEXTEGPTRSANITYCHECK
     sanity_check();
 #endif
