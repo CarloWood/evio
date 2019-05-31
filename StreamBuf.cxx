@@ -282,7 +282,11 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
     // written to the buffer up til that value is also visible, before we attempt to read it.
   }
 
-  // There are several possible cases:
+  // At this point is_resetting is set if and only if last_pptr is the (a) value of pptr *after* the reset.
+  // Thus, if is_resetting is set than bytes between start and last_pptr is valid, unread data;
+  // while if is_resetting is not set then bytes between cur_gptr and last_pptr is valid, unread data.
+
+  // There are now three possible cases:
   //
   // 1) We're in the same block as the put area.
   //
@@ -316,6 +320,8 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // Case 3
   //
   {
+    // When resetting we only have a single memory block! So this better be true.
+    ASSERT(start <= last_pptr && last_pptr < end);
 #ifdef DEBUGSTREAMBUFSTATS
     ++m_number_of_get_area_resets;
 #endif
@@ -355,11 +361,13 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
       cur_egptr = last_pptr;                            // We will use cur_egptr below to change egptr.
     // The immediately available number of bytes in the get area (after the update below).
     available = cur_egptr - cur_gptr;
-    if (available < 0)
+#ifdef CWDEBUG
+    if (AI_UNLIKELY(available < 0))
     {
-      Dout(dc::warning, "cur_gptr = " << (cur_gptr - start) << "; cur_egptr = " << (cur_egptr - start) << "; last_pptr = " << (last_pptr - start) << "; is_resetting = " << is_resetting << "; m_resetting = " << common().m_resetting);
-      assert(available >= 0);
+      DoutFatal(dc::core, "cur_gptr = " << (cur_gptr - start) << "; cur_egptr = " << (cur_egptr - start) <<
+          "; last_pptr = " << (last_pptr - start) << "; is_resetting = " << is_resetting << "; m_resetting = " << common().m_resetting);
     }
+#endif
 
     if (available != 0)
       break;
@@ -384,9 +392,11 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // Finally, update the get area.
   setg(start, cur_gptr, cur_egptr);
 
+  // Not being a 'case1' must mean that we have multiple blocks.
+  // Note that accessing m_next is only safe when case1 is false.
   ASSERT(case1 || get_area_block_node->m_next);
 
-  // Return true if the current egptr points to the end of the block and there STILL is a next block.
+  // Return true if the current egptr points to the end of the block and there is a next block.
   cur_gptr_ref = cur_gptr;
   return cur_egptr == end && !case1;
 }

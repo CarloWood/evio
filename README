@@ -1,6 +1,14 @@
-                                              std::streambuf
-                                                    |
-                                                    V
+                                   std::streambuf
+                                         |
+                                         V
+                                  StreamBufCommon. . . .
+                                         |              .  <-- 'base class' access through StreamBufConsumer::common()
+                                         V               V
+                                  StreamBufProducer   StreamBufConsumer
+                   void flush()               \           /                       .
+                   int sync() override         \         /                        .
+                                                \       /                         .
+                                                 V     V
                                       __________StreamBuf___________
                                      |                              |
                                      V                              V
@@ -9,7 +17,7 @@ size_t dev2buf_contiguous() const    |          \       .           |    size_t 
 size_t dev2buf_contiguous_forced()   |           \     .            |    size_t buf2dev_contiguous_forced()
 char*  dev2buf_ptr() const           |            \   .             |    char*  buf2dev_ptr() const 
 void   dev2buf_bump(int n)           |             \ .              |    void   buf2dev_bump(int n)
-void   reduce_buf_if_empty()         |              |               |    void   flush()
+                                     |              |               |
                                      V              |               V
                                 InputBuffer         |         OutputBuffer
                                                     V
@@ -20,20 +28,25 @@ and StreamBuf is a virtual base class (but it isn't). It has the same
 interface as Dev2Buf and Buf2Dev combined and it can be passed to
 functions that take a Dev2Buf& or a Buf2Dev&.
 
+Also StreamBufCommon isn't a virtual base class (this to avoid the
+extra dereference involved). Instead, a StreamBufConsumer has direct
+access to the StreamBufCommon through a fixed offset relative to
+its this pointer (achieved with static_cast's).
 
----
+All Dev2Buf methods (dev2buf_*()) are just inline wrappers around
+StreamBufProducer methods. Likewise, all Buf2Dev methods (buf2dev_*())
+are inline wrappers around StreamBufConsumer methods. Hence, the
+producer thread (the thread that writes to buffer) may (only) use
+methods of Dev2Buf and public methods of StreamBufProducer, while
+the consumer thread (the thread that reads from the buffer) may
+(only) use methods of Buf2Dev and public methods of StreamBufConsumer.
 
-MemoryBlocksBuffer
-  MemoryBlock* --> ...
-  MemoryBlock* --> [       ccccccxxx  ]
-       .           ^       ^     ^     ^
-       .
-       .
+StreamBufCommon contains atomics need for the synchronization of
+the two threads.
 
-
-- Writing thread        (exclusively writes to buffer memory)
-- Reading thread        (exclusively reads buffer memory)
-- Accessor threads      (does not access buffer memory)
+Public methods of StreamBuf may only be used when the StreamBuf
+is only in use by a single thread. For example immediately after
+construction or before destruction.
 
 ---
 
@@ -45,11 +58,11 @@ then increments the gptr) care must be taken that each pointer is only
 ever accessed by one thread at a time.
 
 Since we can have two threads accessing the streambuf at the same time
-(called the PutThread which writes to the buffer, and GetThread which
-reads from the buffer) it is clear that this means the PutThread is the
-only thread that may access the three pointers of the put area while
-the GetThread is the only thread that may access the three pointers of
-the get area.
+(called the producer thread which writes to the buffer, and consumer
+thread which reads from the buffer) it is clear that this means the
+producer thread is the only thread that may access the three pointers
+of the put area while the consumer thread is the only thread that may
+access the three pointers of the get area.
 
 In order to avoid excessive and unnecessary allocation of new memory
 blocks, it is desirable to "reset" both get area and put area when a
@@ -57,30 +70,31 @@ buffer runs empty.
 
 The design to achieve this is as follows:
 
-When the PutThread "flushes" written data, it makes its current pptr
-known to the GetThread by copying it to an atomic variable (m_next_egptr2
-and when m_next_egptr is not equal nullptr also to m_next_egptr.
+When the producer thread "flushes" written data, it makes its current
+pptr known to the consumer thread by copying it to an atomic variable
+(m_last_pptr).
 
-When the GetThread hits egptr (underflow() is called), or when xsgetn()
-is called, the GetThread copies the current value of m_next_egptr to
-egptr.
+When gptr hits egptr (underflow() is called), or when xsgetn()
+is called (update_get_area), the consumer thread copies the current
+value of m_last_pptr to egptr.
 
-Whenever the GetThread has nothing to read anymore, which means gptr
-and egptr became equal to that last copied value of m_next_egptr, it
-copies its current gptr/egptr value to m_last_gptr.
+Whenever the consumer thread has nothing to read anymore, which means
+gptr and egptr became equal to that last copied value of m_last_pptr,
+it copies its current gptr/egptr value to m_last_gptr.
 
-Whenever the PutThread is about to write new data, it should check
-if pptr is equal to m_last_gptr; if that is the case than necessarily
-gptr == egptr == m_last_gptr == pptr == m_next_egptr and the buffer
-is completely empty; and since we're the PutThread it will stay
+Whenever the producer thread is about to write new data, it should check
+if pptr is equal to m_last_gptr; if that is the case then necessarily
+gptr == egptr == m_last_gptr == pptr == m_last_pptr and the buffer
+is completely empty; and since we're the producer thread it will stay
 empty while we do the following:
 
-The PutThread then 'resets': it sets m_next_egptr to nullptr
-and pptr to the point to the start of the current block and
-continues writing as usual (possibly updating m_next_egptr2 again).
+The producer thread then 'resets': it sets pptr and m_last_pptr to the
+start of the current block sets the flag m_resetting, and then continues
+writing as usual (possibly updating m_last_pptr again).
 
-When the GetThread tries to read again and it sees that m_next_egptr
-equals nullptr, it moves gptr to the start of the current block,
-resets m_last_gptr to the start of the current block and then
-restores m_next_egptr to the latest m_next_egptr2 value.
-
+When the consumer thread tries to read again and it sees that m_resetting
+is set, moves gptr and m_last_gptr to the start of the current block too,
+and then resets m_resetting. All of this is done with just store release
+and load acquire, no Read-Modify-Write or sequential consistent operations
+are used in order to not slow down either thread. See update_put_area()
+and update_get_area() for the gory details.
