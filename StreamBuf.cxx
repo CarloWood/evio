@@ -320,8 +320,6 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
   // Case 3
   //
   {
-    // When resetting we only have a single memory block! So this better be true.
-    ASSERT(start <= last_pptr && last_pptr < end);
 #ifdef DEBUGSTREAMBUFSTATS
     ++m_number_of_get_area_resets;
 #endif

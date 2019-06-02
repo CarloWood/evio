@@ -1077,7 +1077,7 @@ inline void StreamBuf::reduce_buffer_if_empty()
     reduce_buffer();
 }
 
-// Program reading from a device:
+// device --> buffer --> [istream]
 
 // This class may NOT define any variables; it is merely an interface.
 // A Dev2Buf can and is cast to an InputBuffer to obtain this interface, even though
@@ -1088,7 +1088,7 @@ class InputBuffer : public Dev2Buf
   InputBuffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc) { set_input_device(input_device); }
 
-  // Stuff below reads from the input buffer and therefore should be BRT.
+  // Stuff below reads from the input buffer and therefore may only be accessed by the consumer thread.
 
   // Raw binary access (instead of using istream):
   char* raw_gptr() const { return StreamBufConsumer::gptr(); }          // Get pointer to get area.
@@ -1099,7 +1099,7 @@ class InputBuffer : public Dev2Buf
   void raw_reduce_buffer_if_empty() { reduce_buffer_if_empty(); }       // Should be called to make sure that the buffer also decreases.
 };
 
-// Program writing to a device:
+// [ostream] --> buffer --> device.
 
 class OutputBuffer : public Buf2Dev
 {
@@ -1107,7 +1107,7 @@ class OutputBuffer : public Buf2Dev
   OutputBuffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
     Buf2Dev(minimum_blocksize, buffer_full_watermark, max_alloc) { set_output_device(output_device); }
 
-  // Stuff below writes to the output buffer and therefore should be BWT.
+  // Stuff below writes to the output buffer and therefore should be accessed by the producer thread.
 
   // Raw binary access (instead of using ostream):
   char* raw_pptr() const { return pptr(); }                             // Get pointer to put area.
