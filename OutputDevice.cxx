@@ -79,7 +79,7 @@ int OutputDevice::get_output_fd() const
 
 void OutputDevice::start_output_device(PutThread)
 {
-  DoutEntering(dc::io, "OutputDevice::start_output_device() [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::start_output_device() [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(m_output_watcher.events != EV_UNDEF);
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
@@ -96,7 +96,7 @@ void OutputDevice::start_output_device(PutThread)
 
 void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::io, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(m_output_watcher.events != EV_UNDEF);
   if (EventLoopThread::instance().start_if(condition, &m_output_watcher, this))
@@ -113,7 +113,7 @@ void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& c
 // This function is thread-safe.
 RefCountReleaser OutputDevice::stop_output_device()
 {
-  DoutEntering(dc::io, "OutputDevice::stop_output_device() [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::stop_output_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
   if (EventLoopThread::instance().stop(&m_output_watcher))
   {
@@ -128,7 +128,7 @@ RefCountReleaser OutputDevice::stop_output_device()
 // GetThread only.
 RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::io, "OutputDevice::stop_output_device(" << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::stop_output_device(" << condition << ") [" << this << ']');
   RefCountReleaser need_allow_deletion;
   if (EventLoopThread::instance().stop_if(condition, &m_output_watcher))
   {
@@ -183,7 +183,7 @@ RefCountReleaser OutputDevice::close_output_device()
     need_allow_deletion = stop_output_device();
     if (!already_closed && !dont_close())
     {
-      Dout(dc::io|continued_cf, "close(" << output_fd << ") = ");
+      Dout(dc::system|continued_cf, "close(" << output_fd << ") = ");
       CWDEBUG_ONLY(int err =) ::close(output_fd);
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
       Dout(dc::finish, err);
@@ -269,7 +269,7 @@ try_again_write1:
 
 int OutputDevice::sync()
 {
-  DoutEntering(dc::io, "OutputDevice::sync() [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::sync() [" << this << ']');
   PutThread type;
   if (AI_UNLIKELY(!is_writable()))
   {

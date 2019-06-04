@@ -171,7 +171,7 @@ RefCountReleaser InputDevice::close_input_device()
     need_allow_deletion = stop_input_device();
     if (!already_closed && !dont_close())
     {
-      Dout(dc::evio|continued_cf, "close(" << input_fd << ") = ");
+      Dout(dc::system|continued_cf, "close(" << input_fd << ") = ");
       CWDEBUG_ONLY(int err =) ::close(input_fd);
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << input_fd);
       Dout(dc::finish, err);

@@ -71,7 +71,7 @@ class InputDecoder : public InputDeviceEventsHandler
       size_t max_alloc
       ) override
   {
-    DoutEntering(dc::io, "InputDecoder::create_buffer(" << input_device << ", " << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ")");
+    DoutEntering(dc::evio, "InputDecoder::create_buffer(" << input_device << ", " << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ")");
     m_input_device = input_device;
     InputBuffer* input_buffer = new InputBuffer(input_device, minimum_blocksize, buffer_full_watermark, max_alloc);
     return input_buffer;

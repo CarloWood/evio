@@ -178,7 +178,7 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 void Socket::VT_impl::connected(Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
   DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
-  // Derive from Socket to implement this.
+  // Clone VT and override to implement this.
 }
 
 RefCountReleaser Socket::VT_impl::read_returned_zero(InputDevice* _self)
@@ -208,7 +208,7 @@ RefCountReleaser Socket::VT_impl::read_error(InputDevice* _self, int CWDEBUG_ONL
 
 void Socket::VT_impl::disconnected(Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
-  DoutEntering(dc::evio, "Socket::connected(" << success << ") [" << self << "]");
+  DoutEntering(dc::evio, "Socket::disconnected(" << success << ") [" << self << "]");
   // Clone VT and override to implement this.
 }
 

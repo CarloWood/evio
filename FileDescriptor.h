@@ -146,8 +146,11 @@ class FileDescriptor : public AIRefCount
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
 boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
-#if CWDEBUG_ALLOC
-  DoutEntering(dc::evio, "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name() << ", ARGS...>(ARGS&&...)");
+#ifdef CWDEBUG
+  LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
+  LibcwDoutStream << "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
+  (LibcwDoutStream << ... << (", " + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
+  LibcwDoutScopeEnd;
 #endif
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
   AllocTag2(device, "Created with evio::create");
