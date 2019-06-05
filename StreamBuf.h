@@ -25,7 +25,6 @@
 
 #include "sys.h"
 #include "debug.h"
-#include "evio.h"
 #include "StreamBuf-threads.h"
 #include "utils/log2.h"
 #include "utils/malloc_size.h"

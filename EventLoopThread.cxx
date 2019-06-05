@@ -391,3 +391,97 @@ EventLoop::~EventLoop()
 }
 
 } // namespace evio
+
+bool ev_is_active(ev_io const*)
+{
+  return false;
+}
+
+void ev_io_init(ev_io* ev, void (*cb)(EV_P_ ev_io* watcher, int /*events_type*/ revents), int fd, events_type events)
+{
+}
+
+void ev_ref()
+{
+}
+
+void ev_unref()
+{
+}
+
+void* ev_userdata()
+{
+  return nullptr;
+}
+
+int ev_run(EV_P_ int flags)
+{
+}
+
+// EventLoopThread.cxx exclusive:
+
+unsigned int ev_pending_count(EV_P) EV_THROW
+{
+  return 0;
+}
+
+void ev_invoke_pending(EV_P)
+{
+}
+
+int ev_requested_break(EV_P) EV_THROW
+{
+  return 0;
+}
+
+void ev_set_invoke_pending_cb(EV_P_ ev_loop_callback invoke_pending_cb) EV_THROW
+{
+}
+
+void ev_break(EV_P_ int how) EV_THROW
+{
+}
+
+int ev_default_loop(unsigned int flags) EV_THROW
+{
+}
+
+void ev_set_userdata(EV_P_ void* data) EV_THROW
+{
+}
+
+void ev_set_loop_release_cb(EV_P_ void (*release)(EV_P) EV_THROW, void (*acquire)(EV_P) EV_THROW) EV_THROW
+{
+}
+
+void ev_async_init(ev_async* watcher, void (*cb)(EV_P_ ev_async* watcher, int revents)) EV_THROW
+{
+}
+
+void ev_async_start(EV_P_ ev_async* w) EV_THROW
+{
+}
+
+void ev_async_send(EV_P_ ev_async* w) EV_THROW
+{
+}
+
+void ev_async_stop(EV_P_ ev_async* w) EV_THROW
+{
+}
+
+void ev_timer_start(EV_P_ ev_timer* w) EV_THROW
+{
+}
+
+void ev_io_start(EV_P_ ev_io* w) EV_THROW
+{
+}
+
+void ev_io_stop(EV_P_ ev_io* w) EV_THROW
+{
+}
+
+void ev_timer_init(ev_timer* watcher, void (*cb)(EV_P_ ev_timer* watcher, int revents), double, double) EV_THROW
+{
+}

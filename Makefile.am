@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-SUBDIRS = libev-4.24
+SUBDIRS =
 
 noinst_LTLIBRARIES = libevio.la
 

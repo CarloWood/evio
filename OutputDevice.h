@@ -25,7 +25,6 @@
 
 #include "FileDescriptor.h"
 #include "EventLoopThread.h"
-#include "libev-4.24/ev.h"
 #include "StreamBuf.h"
 #include "utils/VTPtr.h"
 
