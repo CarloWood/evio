@@ -107,9 +107,8 @@ class Socket : public InputDevice, public OutputDevice
   // Idem for the send socket buffer (except, output buffer).
   size_t m_sndbuf_size;
 
-  // When set, call connected() as soon as fd is writable.
   int m_connected_flags;
-  static constexpr int signal_connected = 1;
+  static constexpr int signal_connected = 1;    // When set, call connected() as soon as fd is writable.
   static constexpr int is_connected = 2;
   static constexpr int is_disconnected = 4;
 

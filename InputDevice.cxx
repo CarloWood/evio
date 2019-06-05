@@ -281,7 +281,10 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
       }
       else
       {
-        MemoryBlock* memory_block = MemoryBlock::create(msg_len);
+        size_t block_size = self->m_ibuffer->m_minimum_block_size;
+        if (AI_UNLIKELY(msg_len > block_size))
+          block_size = utils::malloc_size(msg_len + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+        MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
         need_allow_deletion += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block), get_type);

@@ -166,6 +166,7 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
       }
       else
       {
+        Dout(dc::warning, "Socket::VT_impl::write_to_fd: Closing output device because it has no output buffer [" << self << "]");
         self->stop_output_device();
         return;
       }
