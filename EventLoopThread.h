@@ -135,7 +135,6 @@ class EventLoopThread : public Singleton<EventLoopThread>
     return ev_is_active(&io_watcher) ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
   }
 
-  void start(ev_timer& timeout_watcher);
   bool start(ev_io* io_watcher, evio::FileDescriptor* device);
   bool stop(ev_io* io_watcher);
   bool start_if(utils::FuzzyCondition const& condition, ev_io* io_watcher, evio::FileDescriptor* device);

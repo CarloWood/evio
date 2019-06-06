@@ -41,23 +41,14 @@ struct ev_io
   int events;
 };
 
-struct ev_timer
-{
-};
-
 bool ev_is_active(ev_io const*);
 
 void ev_io_init(ev_io* ev, void (*cb)(ev_io* watcher, int /*events_type*/ revents), int fd, events_type events);
 
 void ev_ref();
-
 void ev_unref();
-
 void* ev_userdata();
-
 int ev_run(int flags);
-
-void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double);
 
 // EventLoopThread.cxx exclusive:
 
@@ -93,6 +84,5 @@ void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents)
 void ev_async_start(ev_async* w);
 void ev_async_send(ev_async* w);
 void ev_async_stop(ev_async* w);
-void ev_timer_start(ev_timer* w);
 void ev_io_start(ev_io* w);
 void ev_io_stop(ev_io* w);

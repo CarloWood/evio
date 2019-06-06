@@ -242,13 +242,6 @@ EventLoopThread::~EventLoopThread()
   }
 }
 
-void EventLoopThread::start(ev_timer& timeout_watcher)
-{
-  std::lock_guard<std::mutex> lock(m_loop_mutex);
-  ev_timer_start(&timeout_watcher);
-  ev_async_send(&m_async_w);
-}
-
 bool EventLoopThread::start(ev_io* io_watcher, FileDescriptor* device)
 {
   // Don't start a device that is disabled.
@@ -470,18 +463,10 @@ void ev_async_stop(ev_async* w)
 {
 }
 
-void ev_timer_start(ev_timer* w)
-{
-}
-
 void ev_io_start(ev_io* w)
 {
 }
 
 void ev_io_stop(ev_io* w)
-{
-}
-
-void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double)
 {
 }
