@@ -37,18 +37,18 @@ struct ev_async
 struct ev_io
 {
   void* data;
-  int fd;
-  int events;
+  int fd;       // The file descriptor.
+  int events;   // One of the events above.
 };
 
 bool ev_is_active(ev_io const*);
 
 void ev_io_init(ev_io* ev, void (*cb)(ev_io* watcher, int /*events_type*/ revents), int fd, events_type events);
 
-void ev_ref();
-void ev_unref();
 void* ev_userdata();
 int ev_run(int flags);
+void ev_unref();        // Cause ev_run() to exit even though a device is still running.
+void ev_ref();          // Theoretically needed to balance ev_unref() calls (before stopping said devices).
 
 // EventLoopThread.cxx exclusive:
 

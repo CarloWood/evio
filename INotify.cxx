@@ -105,8 +105,8 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       // Call input() before calling add_watch(). The library should have done this!
       ASSERT(m_input_device_events_handler && m_ibuffer);
       start_input_device(type);
-      // Exit ev_run when this device is still running.
-      ev_unref();
+      // Exit ev_run even when this device is still running.
+      ev_unref();       // FIXME: This needs an ev_ref() call before calling ev_io_stop() on this device, which is currently missing!
     }
     int fd = get_input_fd();
     Dout(dc::system|continued_cf, "inotify_add_watch(" << fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");
