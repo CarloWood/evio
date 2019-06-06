@@ -106,7 +106,7 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       ASSERT(m_input_device_events_handler && m_ibuffer);
       start_input_device(type);
       // Exit ev_run when this device is still running.
-      ev_unref(EV_A);
+      ev_unref();
     }
     int fd = get_input_fd();
     Dout(dc::system|continued_cf, "inotify_add_watch(" << fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");

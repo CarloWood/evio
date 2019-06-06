@@ -85,11 +85,11 @@ class EventLoopThread : public Singleton<EventLoopThread>
   ev_async m_async_w;
   std::atomic_bool m_running;
 
-  static void acquire_cb(EV_P) EV_THROW;
-  static void release_cb(EV_P) EV_THROW;
-  static void invoke_pending_cb(EV_P);
-  static void async_cb(EV_P_ ev_async* w, int revents);
-  static void main(EV_P);
+  static void acquire_cb() EV_THROW;
+  static void release_cb() EV_THROW;
+  static void invoke_pending_cb();
+  static void async_cb(ev_async* w, int revents);
+  static void main();
 
   void run();
   void handle_invoke_pending();
@@ -159,7 +159,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
 #if EV_MULTIPLICITY
     struct ev_loop* m_loop;
    public:
-    TemporaryRelease(EV_P) : m_loop(loop) { EventLoopThread::release_cb(loop); }
+    TemporaryRelease() : m_loop(loop) { EventLoopThread::release_cb(loop); }
     ~TemporaryRelease() { EventLoopThread::acquire_cb(m_loop); }
 #else
    public:
@@ -168,9 +168,9 @@ class EventLoopThread : public Singleton<EventLoopThread>
 #endif
   };
 
-  static TemporaryRelease temporary_release(EV_P)
+  static TemporaryRelease temporary_release()
   {
-    return TemporaryRelease(EV_A);
+    return TemporaryRelease();
   }
 };
 

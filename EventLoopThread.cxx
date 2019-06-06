@@ -37,32 +37,32 @@ NAMESPACE_DEBUG_CHANNELS_END
 namespace evio {
 
 //static
-void EventLoopThread::acquire_cb(EV_P) EV_THROW
+void EventLoopThread::acquire_cb() EV_THROW
 {
-  EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
+  EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata());
   Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " returned from epoll_wait()");
   event_loop_thread->m_loop_mutex.lock();
 }
 
 //static
-void EventLoopThread::release_cb(EV_P) EV_THROW
+void EventLoopThread::release_cb() EV_THROW
 {
-  EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata(EV_A));
+  EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata());
   event_loop_thread->m_loop_mutex.unlock();
   Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " calls epoll_wait()...");
 }
 
 //static
-void EventLoopThread::invoke_pending_cb(EV_P)
+void EventLoopThread::invoke_pending_cb()
 {
-  static_cast<EventLoopThread*>(ev_userdata(EV_A))->handle_invoke_pending();
+  static_cast<EventLoopThread*>(ev_userdata())->handle_invoke_pending();
 }
 
 //static
-void EventLoopThread::main(EV_P)
+void EventLoopThread::main()
 {
   Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
-  static_cast<EventLoopThread*>(ev_userdata(EV_A))->run();
+  static_cast<EventLoopThread*>(ev_userdata())->run();
 }
 
 //static
@@ -82,7 +82,7 @@ void EventLoopThread::run()
   std::lock_guard<std::mutex> lock(m_loop_mutex);
   m_running = true;
   Dout(dc::evio, "Calling ev_run(0)");
-  ev_run(EV_A_ 0);
+  ev_run(0);
   Dout(dc::evio, "Returned from ev_run(0)");
   m_running = false;
 }
@@ -91,21 +91,21 @@ void EventLoopThread::invoke_pending()
 {
   DoutEntering(dc::evio|flush_cf, "EventLoopThread::invoke_pending()");
   std::unique_lock<std::mutex> lock(m_loop_mutex);
-  ASSERT(ev_pending_count(EV_A));
-  ev_invoke_pending(EV_A);
+  ASSERT(ev_pending_count());
+  ev_invoke_pending();
 
   // Instead of returning control to the ev_run thread immediately, do a
   // quick poll here if there already more activity in the meantime.
-  if (!m_inside_invoke_pending && !ev_requested_break(EV_A))
+  if (!m_inside_invoke_pending && !ev_requested_break())
   {
     // No recursive calls.
     m_inside_invoke_pending = true;
     // Poll for additional events that might have occurred.
-    ev_set_invoke_pending_cb(EV_A_ ev_invoke_pending);                  // Call ev_invoke_pending directly.
+    ev_set_invoke_pending_cb(ev_invoke_pending);                  // Call ev_invoke_pending directly.
     Dout(dc::evio, "Entering ev_run(EVRUN_NOWAIT).");
     ev_run(EVRUN_NOWAIT);
     Dout(dc::evio, "Leaving ev_run(EVRUN_NOWAIT).");
-    ev_set_invoke_pending_cb(EV_A_ EventLoopThread::invoke_pending_cb); // Restore normal operation.
+    ev_set_invoke_pending_cb(EventLoopThread::invoke_pending_cb); // Restore normal operation.
     m_inside_invoke_pending = false;
   }
 
@@ -120,13 +120,13 @@ void EventLoopThread::handle_invoke_pending()
   // Seriously, why does this even happen? The reason is apparently that libev
   // calls EV_INVOKE_PENDING at the beginning of ev_run, at which point it
   // obviously has nothing pending.
-  if (!ev_pending_count(EV_A))
+  if (!ev_pending_count())
     return;
 
   DoutEntering(dc::evio|flush_cf, "EventLoopThread::handle_invoke_pending()");
   // The lock is already locked when we get here.
   std::unique_lock<std::mutex> lock(m_loop_mutex, std::adopt_lock);
-  while (ev_pending_count(EV_A))
+  while (ev_pending_count())
   {
     if (AI_UNLIKELY(m_terminate == forced))
     {
@@ -189,15 +189,15 @@ void EventLoopThread::init(AIQueueHandle handler)
   ev_default_loop(EVBACKEND_EPOLL | EVFLAG_NOENV);
 
   // Associate `this` with the loop.
-  ev_set_userdata(EV_A_ this);
-  ev_set_loop_release_cb(EV_A_ EventLoopThread::release_cb, EventLoopThread::acquire_cb);
-  ev_set_invoke_pending_cb(EV_A_ EventLoopThread::invoke_pending_cb);
+  ev_set_userdata(this);
+  ev_set_loop_release_cb(EventLoopThread::release_cb, EventLoopThread::acquire_cb);
+  ev_set_invoke_pending_cb(EventLoopThread::invoke_pending_cb);
   // Add an async watcher, this is used in add() to wake up the thread.
   ev_async_init(&m_async_w, EventLoopThread::async_cb);
-  ev_async_start(EV_A_ &m_async_w);
+  ev_async_start(&m_async_w);
 
   // Create the thread running ev_run.
-  m_event_thread = std::thread([](){ EventLoopThread::main(EV_A); });
+  m_event_thread = std::thread([](){ EventLoopThread::main(); });
 
   // Wait till we're actually running.
   while (!m_running)
@@ -208,7 +208,7 @@ void EventLoopThread::bump_terminate()
 {
   std::lock_guard<std::mutex> lock(m_loop_mutex);
   if (m_terminate)
-    ev_async_send(EV_A_ &m_async_w);    // Wake up the event loop (again) if we are terminating.
+    ev_async_send(&m_async_w);    // Wake up the event loop (again) if we are terminating.
 }
 
 void EventLoopThread::terminate(bool normal_exit)
@@ -217,8 +217,8 @@ void EventLoopThread::terminate(bool normal_exit)
   {
     std::lock_guard<std::mutex> lock(m_loop_mutex);
     m_terminate = normal_exit ? cleanly : forced;
-    ev_unref(EV_A);             // Cause ev_run to exit when only m_async_w is left.
-    ev_async_send(EV_A_ &m_async_w);
+    ev_unref();             // Cause ev_run to exit when only m_async_w is left.
+    ev_async_send(&m_async_w);
   }
   if (m_event_thread.joinable())
   {
@@ -234,19 +234,19 @@ EventLoopThread::~EventLoopThread()
   // Call EventLoopThread::instance().terminate() before leaving main().
   ASSERT(!m_event_thread.joinable());
 
-  if (ev_userdata(EV_A) == this)        // Was init() called?
+  if (ev_userdata() == this)        // Was init() called?
   {
     if (m_terminate)
-      ev_ref(EV_A);
-    ev_async_stop(EV_A_ &m_async_w);
+      ev_ref();
+    ev_async_stop(&m_async_w);
   }
 }
 
 void EventLoopThread::start(ev_timer& timeout_watcher)
 {
   std::lock_guard<std::mutex> lock(m_loop_mutex);
-  ev_timer_start(EV_A_ &timeout_watcher);
-  ev_async_send(EV_A_ &m_async_w);
+  ev_timer_start(&timeout_watcher);
+  ev_async_send(&m_async_w);
 }
 
 bool EventLoopThread::start(ev_io* io_watcher, FileDescriptor* device)
@@ -264,8 +264,8 @@ bool EventLoopThread::start(ev_io* io_watcher, FileDescriptor* device)
   if (ev_is_active(io_watcher))
     return false;
 
-  ev_io_start(EV_A_ io_watcher);
-  ev_async_send(EV_A_ &m_async_w);
+  ev_io_start(io_watcher);
+  ev_async_send(&m_async_w);
   return true;
 }
 
@@ -319,8 +319,8 @@ bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io
     Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << (void*)io_watcher << ")");
 #endif
 
-  ev_io_start(EV_A_ io_watcher);
-  ev_async_send(EV_A_ &m_async_w);
+  ev_io_start(io_watcher);
+  ev_async_send(&m_async_w);
   return true;
 }
 
@@ -332,7 +332,7 @@ bool EventLoopThread::stop(ev_io* io_watcher)
   if (!ev_is_active(io_watcher))
     return false;
 
-  ev_io_stop(EV_A_ io_watcher);
+  ev_io_stop(io_watcher);
   return true;
 }
 
@@ -367,7 +367,7 @@ bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_
     Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << (void*)io_watcher << ")");
 #endif
 
-  ev_io_stop(EV_A_ io_watcher);
+  ev_io_stop(io_watcher);
   return true;
 }
 
@@ -397,7 +397,7 @@ bool ev_is_active(ev_io const*)
   return false;
 }
 
-void ev_io_init(ev_io* ev, void (*cb)(EV_P_ ev_io* watcher, int /*events_type*/ revents), int fd, events_type events)
+void ev_io_init(ev_io* ev, void (*cb)(ev_io* watcher, int /*events_type*/ revents), int fd, events_type events)
 {
 }
 
@@ -414,31 +414,31 @@ void* ev_userdata()
   return nullptr;
 }
 
-int ev_run(EV_P_ int flags)
+int ev_run(int flags)
 {
 }
 
 // EventLoopThread.cxx exclusive:
 
-unsigned int ev_pending_count(EV_P) EV_THROW
+unsigned int ev_pending_count() EV_THROW
 {
   return 0;
 }
 
-void ev_invoke_pending(EV_P)
+void ev_invoke_pending()
 {
 }
 
-int ev_requested_break(EV_P) EV_THROW
+int ev_requested_break() EV_THROW
 {
   return 0;
 }
 
-void ev_set_invoke_pending_cb(EV_P_ ev_loop_callback invoke_pending_cb) EV_THROW
+void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb) EV_THROW
 {
 }
 
-void ev_break(EV_P_ int how) EV_THROW
+void ev_break(int how) EV_THROW
 {
 }
 
@@ -446,42 +446,42 @@ int ev_default_loop(unsigned int flags) EV_THROW
 {
 }
 
-void ev_set_userdata(EV_P_ void* data) EV_THROW
+void ev_set_userdata(void* data) EV_THROW
 {
 }
 
-void ev_set_loop_release_cb(EV_P_ void (*release)(EV_P) EV_THROW, void (*acquire)(EV_P) EV_THROW) EV_THROW
+void ev_set_loop_release_cb(void (*release)() EV_THROW, void (*acquire)() EV_THROW) EV_THROW
 {
 }
 
-void ev_async_init(ev_async* watcher, void (*cb)(EV_P_ ev_async* watcher, int revents)) EV_THROW
+void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents)) EV_THROW
 {
 }
 
-void ev_async_start(EV_P_ ev_async* w) EV_THROW
+void ev_async_start(ev_async* w) EV_THROW
 {
 }
 
-void ev_async_send(EV_P_ ev_async* w) EV_THROW
+void ev_async_send(ev_async* w) EV_THROW
 {
 }
 
-void ev_async_stop(EV_P_ ev_async* w) EV_THROW
+void ev_async_stop(ev_async* w) EV_THROW
 {
 }
 
-void ev_timer_start(EV_P_ ev_timer* w) EV_THROW
+void ev_timer_start(ev_timer* w) EV_THROW
 {
 }
 
-void ev_io_start(EV_P_ ev_io* w) EV_THROW
+void ev_io_start(ev_io* w) EV_THROW
 {
 }
 
-void ev_io_stop(EV_P_ ev_io* w) EV_THROW
+void ev_io_stop(ev_io* w) EV_THROW
 {
 }
 
-void ev_timer_init(ev_timer* watcher, void (*cb)(EV_P_ ev_timer* watcher, int revents), double, double) EV_THROW
+void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double) EV_THROW
 {
 }

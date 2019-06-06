@@ -122,10 +122,10 @@ class OutputDevice : public virtual FileDescriptor
   void init_output_device(int fd) override;
 
   // The call back used by libev.
-  static void s_evio_cb(EV_P_ ev_io* w, int)
+  static void s_evio_cb(ev_io* w, int)
   {
     // Release the mutex on 'loop' while calling an external function.
-    auto release_lock = EventLoopThread::temporary_release(EV_A);
+    auto release_lock = EventLoopThread::temporary_release();
     static_cast<OutputDevice*>(w->data)->write_to_fd(w->fd);
   }
 

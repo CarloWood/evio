@@ -160,10 +160,10 @@ class InputDevice : public virtual FileDescriptor
   void init_input_device(int fd) override;
 
   // The callback used by libev.
-  static void s_evio_cb(EV_P_ ev_io* w, int)
+  static void s_evio_cb(ev_io* w, int)
   {
     // Release the mutex on 'loop' while calling an external function.
-    auto release_lock = EventLoopThread::temporary_release(EV_A);
+    auto release_lock = EventLoopThread::temporary_release();
     static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);            // This might delete both, 'w' and 'w->data'.
   }
 
