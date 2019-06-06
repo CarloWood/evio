@@ -85,8 +85,8 @@ class EventLoopThread : public Singleton<EventLoopThread>
   ev_async m_async_w;
   std::atomic_bool m_running;
 
-  static void acquire_cb() EV_THROW;
-  static void release_cb() EV_THROW;
+  static void acquire_cb();
+  static void release_cb();
   static void invoke_pending_cb();
   static void async_cb(ev_async* w, int revents);
   static void main();

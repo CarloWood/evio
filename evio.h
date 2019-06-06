@@ -30,8 +30,6 @@ enum events_type
   EV_WRITE,     // For registering a fd that is writable, or as revents when libev detected that a write will not block.
 };
 
-#define EV_THROW noexcept
-
 struct ev_async
 {
 };
@@ -59,7 +57,7 @@ void* ev_userdata();
 
 int ev_run(int flags);
 
-void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double) EV_THROW;
+void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double);
 
 // EventLoopThread.cxx exclusive:
 
@@ -82,19 +80,19 @@ enum {
   EVBACKEND_EPOLL   = 0x00000004U, /* linux */
 };
 
-unsigned int ev_pending_count() EV_THROW;
+unsigned int ev_pending_count();
 void ev_invoke_pending();
-int ev_requested_break() EV_THROW;
+int ev_requested_break();
 typedef void (*ev_loop_callback)();
-void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb) EV_THROW;
-void ev_break(int how) EV_THROW;
-int ev_default_loop(unsigned int flags) EV_THROW;
-void ev_set_userdata(void* data) EV_THROW;
-void ev_set_loop_release_cb(void (*release)() EV_THROW, void (*acquire)() EV_THROW) EV_THROW;
-void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents)) EV_THROW;
-void ev_async_start(ev_async* w) EV_THROW;
-void ev_async_send(ev_async* w) EV_THROW;
-void ev_async_stop(ev_async* w) EV_THROW;
-void ev_timer_start(ev_timer* w) EV_THROW;
-void ev_io_start(ev_io* w) EV_THROW;
-void ev_io_stop(ev_io* w) EV_THROW;
+void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb);
+void ev_break(int how);
+int ev_default_loop(unsigned int flags);
+void ev_set_userdata(void* data);
+void ev_set_loop_release_cb(void (*release)(), void (*acquire)());
+void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents));
+void ev_async_start(ev_async* w);
+void ev_async_send(ev_async* w);
+void ev_async_stop(ev_async* w);
+void ev_timer_start(ev_timer* w);
+void ev_io_start(ev_io* w);
+void ev_io_stop(ev_io* w);

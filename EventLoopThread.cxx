@@ -37,7 +37,7 @@ NAMESPACE_DEBUG_CHANNELS_END
 namespace evio {
 
 //static
-void EventLoopThread::acquire_cb() EV_THROW
+void EventLoopThread::acquire_cb()
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata());
   Dout(dc::evio|flush_cf, (event_loop_thread->m_inside_invoke_pending ? "thread pool" : "ev_run thread") << " returned from epoll_wait()");
@@ -45,7 +45,7 @@ void EventLoopThread::acquire_cb() EV_THROW
 }
 
 //static
-void EventLoopThread::release_cb() EV_THROW
+void EventLoopThread::release_cb()
 {
   EventLoopThread* event_loop_thread = static_cast<EventLoopThread*>(ev_userdata());
   event_loop_thread->m_loop_mutex.unlock();
@@ -420,7 +420,7 @@ int ev_run(int flags)
 
 // EventLoopThread.cxx exclusive:
 
-unsigned int ev_pending_count() EV_THROW
+unsigned int ev_pending_count()
 {
   return 0;
 }
@@ -429,59 +429,59 @@ void ev_invoke_pending()
 {
 }
 
-int ev_requested_break() EV_THROW
+int ev_requested_break()
 {
   return 0;
 }
 
-void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb) EV_THROW
+void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb)
 {
 }
 
-void ev_break(int how) EV_THROW
+void ev_break(int how)
 {
 }
 
-int ev_default_loop(unsigned int flags) EV_THROW
+int ev_default_loop(unsigned int flags)
 {
 }
 
-void ev_set_userdata(void* data) EV_THROW
+void ev_set_userdata(void* data)
 {
 }
 
-void ev_set_loop_release_cb(void (*release)() EV_THROW, void (*acquire)() EV_THROW) EV_THROW
+void ev_set_loop_release_cb(void (*release)(), void (*acquire)())
 {
 }
 
-void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents)) EV_THROW
+void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents))
 {
 }
 
-void ev_async_start(ev_async* w) EV_THROW
+void ev_async_start(ev_async* w)
 {
 }
 
-void ev_async_send(ev_async* w) EV_THROW
+void ev_async_send(ev_async* w)
 {
 }
 
-void ev_async_stop(ev_async* w) EV_THROW
+void ev_async_stop(ev_async* w)
 {
 }
 
-void ev_timer_start(ev_timer* w) EV_THROW
+void ev_timer_start(ev_timer* w)
 {
 }
 
-void ev_io_start(ev_io* w) EV_THROW
+void ev_io_start(ev_io* w)
 {
 }
 
-void ev_io_stop(ev_io* w) EV_THROW
+void ev_io_stop(ev_io* w)
 {
 }
 
-void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double) EV_THROW
+void ev_timer_init(ev_timer* watcher, void (*cb)(ev_timer* watcher, int revents), double, double)
 {
 }
