@@ -113,7 +113,6 @@ class InputDevice : public virtual FileDescriptor
   RefCountReleaser stop_input_device();
   void disable_input_device();
   void enable_input_device(GetThread type);
-  int get_input_fd() const override;
 
  protected:
   // Constructor.
@@ -157,15 +156,7 @@ class InputDevice : public virtual FileDescriptor
   friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
 
   // Override base class member function.
-  void init_input_device(int fd) override;
-
-  // The callback used by libev.
-  static void s_evio_cb(ev_io* w, int)
-  {
-    // Release the mutex on 'loop' while calling an external function.
-    auto release_lock = EventLoopThread::temporary_release();
-    static_cast<InputDevice*>(w->data)->read_from_fd(w->fd);            // This might delete both, 'w' and 'w->data'.
-  }
+  void init_input_device() override;
 
  protected:
   void read_from_fd(int fd) { VT_ptr->_read_from_fd(this, fd); }

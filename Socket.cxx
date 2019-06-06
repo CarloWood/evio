@@ -220,12 +220,10 @@ SocketAddress Socket::local_address() const
   SocketAddress result;
   socklen_t namelen = sizeof(result);
 
-  // Shouldn't this always be the case for a Socket?
-  ASSERT(get_output_fd() == get_input_fd());
-  if (getsockname(get_output_fd(), result, &namelen) < 0)
+  if (getsockname(m_fd, result, &namelen) < 0)
   {
     std::ostringstream descr;
-    descr << "getsockname(" << get_output_fd() << ", " << std::hex << &result << ", [" << std::dec << namelen << "])";
+    descr << "getsockname(" << m_fd << ", " << std::hex << &result << ", [" << std::dec << namelen << "])";
     // This makes a copy of the string to AIAlert::Line::mXmlDesc before throwing.
     THROW_FALERTE(descr.str());
   }

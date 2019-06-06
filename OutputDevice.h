@@ -108,7 +108,6 @@ class OutputDevice : public virtual FileDescriptor
   RefCountReleaser stop_output_device();
   void disable_output_device();
   void enable_output_device(PutThread type);
-  int get_output_fd() const override;
 
  protected:
   OutputDevice();
@@ -119,15 +118,7 @@ class OutputDevice : public virtual FileDescriptor
 
  private:
   // Override base class member function.
-  void init_output_device(int fd) override;
-
-  // The call back used by libev.
-  static void s_evio_cb(ev_io* w, int)
-  {
-    // Release the mutex on 'loop' while calling an external function.
-    auto release_lock = EventLoopThread::temporary_release();
-    static_cast<OutputDevice*>(w->data)->write_to_fd(w->fd);
-  }
+  void init_output_device() override;
 
  public:
   //---------------------------------------------------------------------------

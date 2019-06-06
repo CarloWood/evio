@@ -37,7 +37,7 @@ OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obu
   // Mark that OutputDevice is a derived class.
   m_flags |= FDS_W;
   // Give m_output_watcher known values; cause is_active() to return false.
-  ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, -1, EV_UNDEF);
+//  ev_io_init(&m_output_watcher, ..., -1, EV_UNDEF);
 }
 
 // Destructor.
@@ -57,24 +57,18 @@ OutputDevice::~OutputDevice()
   Debug(m_output_watcher.data = nullptr);
 }
 
-void OutputDevice::init_output_device(int fd)
+void OutputDevice::init_output_device()
 {
-  DoutEntering(dc::io, "OutputDevice::init_output_device(" << fd << ") [" << this << ']');
+  DoutEntering(dc::io, "OutputDevice::init_output_device() [" << this << ']');
   // Don't call init() while the OutputDevice is already active.
   ASSERT(!is_active(SingleThread()));
-  ev_io_init(&m_output_watcher, OutputDevice::s_evio_cb, fd, EV_WRITE);
+//  ev_io_init(&m_output_watcher, OutputDevice::write_to_fd, m_fd, EV_WRITE);
   m_output_watcher.data = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   m_flags |= FDS_W_OPEN;
-  // Keep track of whether or not the output device, if any, has the same fd.
-  if ((m_flags & FDS_R_OPEN) && get_input_fd() == fd)
+  // Keep track of whether there is an output device (that will have the same fd).
+  if ((m_flags & FDS_R_OPEN))
     m_flags |= FDS_SAME;
-}
-
-int OutputDevice::get_output_fd() const
-{
-  // Return the raw fd as passed to init_output_device.
-  return m_output_watcher.fd;
 }
 
 void OutputDevice::start_output_device(PutThread)
@@ -166,7 +160,6 @@ RefCountReleaser OutputDevice::close_output_device()
 {
   DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
-  int output_fd = m_output_watcher.fd;
   if (AI_LIKELY(is_open_w()))
   {
     // FDS_SAME is set when this is both, an input device and an output device and is
@@ -177,15 +170,15 @@ RefCountReleaser OutputDevice::close_output_device()
     // descriptor was closed as a result of a call to close_input_device().
     bool already_closed = (m_flags & (FDS_SAME | FDS_R_OPEN)) == FDS_SAME;
 #ifdef CWDEBUG
-    if (!already_closed && !is_valid(output_fd))
-      Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << output_fd << ".");
+    if (!already_closed && !is_valid(m_fd))
+      Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
 #endif
     need_allow_deletion = stop_output_device();
     if (!already_closed && !dont_close())
     {
-      Dout(dc::system|continued_cf, "close(" << output_fd << ") = ");
-      CWDEBUG_ONLY(int err =) ::close(output_fd);
-      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << output_fd);
+      Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
+      CWDEBUG_ONLY(int err =) ::close(m_fd);
+      Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
       Dout(dc::finish, err);
     }
     m_flags &= ~FDS_W_OPEN;

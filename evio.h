@@ -33,7 +33,6 @@ enum events_type
 struct ev_io
 {
   void* data;
-  int fd;       // The file descriptor.
   int events;   // One of the events above.
 };
 

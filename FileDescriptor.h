@@ -60,6 +60,9 @@ class FileDescriptor : public AIRefCount
 #endif
 
   std::atomic<flags_t> m_flags;
+  int m_fd;                             // The file descriptor. In the case of a device that is derived from both,
+                                        // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                        // used for both input and output.
 
  public:
   // Return true if this object is a base class of OutputDevice.
@@ -96,6 +99,9 @@ class FileDescriptor : public AIRefCount
   // Returns true if this object is used for debug output.
   // If it is, then no new debug output will be produced by the kernel while handling it.
   bool is_debug_channel() const { return m_flags & FDS_DEBUG; }
+
+  // For inspection only.
+  int get_fd() const { return m_fd; }
 #endif
 
   // (Re)Initialize the Device using filedescriptor fd.
@@ -104,17 +110,11 @@ class FileDescriptor : public AIRefCount
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
   // Both are called by init().
-  virtual void init_input_device(int UNUSED_ARG(fd)) { }
-  virtual void init_output_device(int UNUSED_ARG(fd)) { }
+  virtual void init_input_device() { }
+  virtual void init_output_device() { }
 
  protected:
-  FileDescriptor() : m_flags(0) { }
-
-  // Queries.
-  // Called to obtain the fd that init_input_device() was called with if that actually did initialize an input device; otherwise -1 is returned.
-  virtual int get_input_fd() const { return -1; }
-  // Called to obtain the fd that init_output_device() was called with if that actually did initialize an output device; otherwise -1 is returned.
-  virtual int get_output_fd() const { return -1; }
+  FileDescriptor() : m_flags(0), m_fd(-1) { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }

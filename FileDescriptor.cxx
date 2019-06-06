@@ -98,8 +98,9 @@ void FileDescriptor::init(int fd)
 
   // Reset all flags except FDS_RW.
   m_flags &= FDS_RW;
-  init_input_device(fd);
-  init_output_device(fd);
+  m_fd = fd;
+  init_input_device();
+  init_output_device();
 }
 
 } // namespace evio

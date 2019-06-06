@@ -108,13 +108,12 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       // Exit ev_run even when this device is still running.
       ev_unref();       // FIXME: This needs an ev_ref() call before calling ev_io_stop() on this device, which is currently missing!
     }
-    int fd = get_input_fd();
-    Dout(dc::system|continued_cf, "inotify_add_watch(" << fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");
-    wd = inotify_add_watch(fd, pathname, mask);
+    Dout(dc::system|continued_cf, "inotify_add_watch(" << m_fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");
+    wd = inotify_add_watch(m_fd, pathname, mask);
     Dout(dc::finish|cond_error_cf(wd == -1), wd);
     if (AI_UNLIKELY(wd == -1))
       THROW_FALERTE("inotify_add_watch([FD], \"[PATHNAME]\", [MASK])",
-          AIArgs("[FD]", fd)("[PATHNAME]", pathname)("[MASK]", mask));
+          AIArgs("[FD]", m_fd)("[PATHNAME]", pathname)("[MASK]", mask));
   }
   wd_to_inotify_map_ts::wat wd_to_inotify_map_w(m_wd_to_inotify_map);
   auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
@@ -151,15 +150,14 @@ INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify
 void INotifyDevice::rm_watch(int wd)
 {
   [[maybe_unused]] int result;
-  int fd = get_input_fd();
   {
     std::lock_guard<std::mutex> lock(m_inotify_mutex);
-    Dout(dc::system|continued_cf, "inotify_rm_watch(" << fd << ", " << wd << ") = ");
-    result = inotify_rm_watch(fd, wd);
+    Dout(dc::system|continued_cf, "inotify_rm_watch(" << m_fd << ", " << wd << ") = ");
+    result = inotify_rm_watch(m_fd, wd);
     int err = errno;
     Dout(dc::finish|cond_error_cf(result == -1), result);
     if (AI_UNLIKELY(result == -1))
-      THROW_FALERTC(err, "inotify_rm_watch([FD], [WD])", AIArgs("[FD]", fd)("[WD]", wd));
+      THROW_FALERTC(err, "inotify_rm_watch([FD], [WD])", AIArgs("[FD]", m_fd)("[WD]", wd));
   }
   {
     // Although a write lock is only necessary for the erase; the AIReadWriteSpinLock that
