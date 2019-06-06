@@ -66,11 +66,7 @@ void EventLoopThread::main()
 }
 
 //static
-void EventLoopThread::async_cb(
-#if EV_MULTIPLICITY
-    struct ev_loop* UNUSED_ARG(loop),
-#endif
-    ev_async* UNUSED_ARG(w), int UNUSED_ARG(revents))
+void EventLoopThread::async_cb(ev_async* UNUSED_ARG(w), int UNUSED_ARG(revents))
 {
   // Just used to wake up the main loop.
   Dout(dc::evio, "Calling async_cb()");
@@ -183,9 +179,6 @@ void EventLoopThread::init(AIQueueHandle handler)
   DoutEntering(dc::evio, "EventLoopThread::init(" << handler << ')');
   m_handler = handler;
 
-#if EV_MULTIPLICITY
-  loop =
-#endif
   ev_default_loop(EVBACKEND_EPOLL | EVFLAG_NOENV);
 
   // Associate `this` with the loop.

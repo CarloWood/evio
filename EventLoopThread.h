@@ -73,9 +73,6 @@ class EventLoopThread : public Singleton<EventLoopThread>
   std::thread m_event_thread;
   AIQueueHandle m_handler;
 
-#if EV_MULTIPLICITY
-  struct ev_loop* loop;
-#endif
   std::mutex m_loop_mutex;
   std::condition_variable m_invoke_handled_cv;
   bool m_invoke_handled;
@@ -155,16 +152,9 @@ class EventLoopThread : public Singleton<EventLoopThread>
 
   class TemporaryRelease
   {
-#if EV_MULTIPLICITY
-    struct ev_loop* m_loop;
-   public:
-    TemporaryRelease() : m_loop(loop) { EventLoopThread::release_cb(loop); }
-    ~TemporaryRelease() { EventLoopThread::acquire_cb(m_loop); }
-#else
    public:
     TemporaryRelease() { EventLoopThread::release_cb(); }
     ~TemporaryRelease() { EventLoopThread::acquire_cb(); }
-#endif
   };
 
   static TemporaryRelease temporary_release()
