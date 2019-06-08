@@ -22,11 +22,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "sys.h"
-#include "evio/EventLoopThread.h"
-#include "evio/FileDescriptor.h"
+#include "EventLoopThread.h"
+#include "FileDescriptor.h"
 #include "threadpool/AIThreadPool.h"
 #include "debug.h"
 #include <chrono>
+
+#include "evio.h"
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -63,13 +65,6 @@ void EventLoopThread::main()
 {
   Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
   static_cast<EventLoopThread*>(ev_userdata())->run();
-}
-
-//static
-void EventLoopThread::async_cb(ev_async* UNUSED_ARG(w), int UNUSED_ARG(revents))
-{
-  // Just used to wake up the main loop.
-  Dout(dc::evio, "Calling async_cb()");
 }
 
 void EventLoopThread::run()
@@ -169,8 +164,8 @@ void EventLoopThread::handle_invoke_pending()
   }
   // Leave the mutex locked.
   lock.release();
-  if (AI_UNLIKELY(m_terminate == forced))
-    ev_break(EVBREAK_ALL);
+//  if (AI_UNLIKELY(m_terminate == forced)) FIXME
+//    ev_break(EVBREAK_ALL);
   Dout(dc::evio|flush_cf, "Leaving EventLoopThread::handle_invoke_pending()");
 }
 
@@ -186,8 +181,8 @@ void EventLoopThread::init(AIQueueHandle handler)
   ev_set_loop_release_cb(EventLoopThread::release_cb, EventLoopThread::acquire_cb);
   ev_set_invoke_pending_cb(EventLoopThread::invoke_pending_cb);
   // Add an async watcher, this is used in add() to wake up the thread.
-  ev_async_init(&m_async_w, EventLoopThread::async_cb);
-  ev_async_start(&m_async_w);
+//  ev_async_init(&m_async_w, EventLoopThread::async_cb);
+//  ev_async_start(&m_async_w);
 
   // Create the thread running ev_run.
   m_event_thread = std::thread([](){ EventLoopThread::main(); });
@@ -200,8 +195,8 @@ void EventLoopThread::init(AIQueueHandle handler)
 void EventLoopThread::bump_terminate()
 {
   std::lock_guard<std::mutex> lock(m_loop_mutex);
-  if (m_terminate)
-    ev_async_send(&m_async_w);    // Wake up the event loop (again) if we are terminating.
+//  if (m_terminate)
+//    ev_async_send(&m_async_w);    // Wake up the event loop (again) if we are terminating.
 }
 
 void EventLoopThread::terminate(bool normal_exit)
@@ -211,7 +206,7 @@ void EventLoopThread::terminate(bool normal_exit)
     std::lock_guard<std::mutex> lock(m_loop_mutex);
     m_terminate = normal_exit ? cleanly : forced;
     ev_unref();             // Cause ev_run to exit when only m_async_w is left.
-    ev_async_send(&m_async_w);
+//    ev_async_send(&m_async_w);
   }
   if (m_event_thread.joinable())
   {
@@ -231,43 +226,48 @@ EventLoopThread::~EventLoopThread()
   {
     if (m_terminate)
       ev_ref();
-    ev_async_stop(&m_async_w);
+//    ev_async_stop(&m_async_w);
   }
 }
 
-bool EventLoopThread::start(ev_io* io_watcher, FileDescriptor* device)
+bool EventLoopThread::start(FileDescriptor::flags_t::wat const& flags_w, InputDevice* input_device)
 {
   // Don't start a device that is disabled.
-  if (device->is_disabled())
+  if (flags_w->is_r_disabled())
   {
-    Dout(dc::warning, "Calling EventLoopThread::start(" << (void*)io_watcher << ") for a device that is disabled.");
+    Dout(dc::warning, "Calling EventLoopThread::start(" << input_device << ") for a device that is disabled [" << this << "]");
     return false;
   }
 
   std::lock_guard<std::mutex> lock(m_loop_mutex);
 
   // Don't start a device that is already active.
-  if (ev_is_active(io_watcher))
+  if (flags_w->is_active_input_device())
     return false;
 
-  ev_io_start(io_watcher);
-  ev_async_send(&m_async_w);
+//  ev_io_start();
+//  ev_async_send(&m_async_w);
   return true;
 }
 
-bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io_watcher, FileDescriptor* device)
+bool EventLoopThread::start(FileDescriptor::flags_t::wat const& flags_w, OutputDevice* output_device)
+{
+  return true;
+}
+
+bool EventLoopThread::start_if(FileDescriptor::flags_t::wat const& flags_w, utils::FuzzyCondition const& condition, InputDevice* input_device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
-    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << (void*)io_watcher << ")");
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << input_device << ")");
     return false;
   }
 
   // Don't start a device that is disabled.
-  if (AI_UNLIKELY(device->is_disabled()))
+  if (AI_UNLIKELY(flags_w->is_r_disabled()))
   {
-    Dout(dc::warning, "Calling EventLoopThread::start(" << condition << ", " << (void*)io_watcher << ") for a device that is disabled.");
+    Dout(dc::warning, "Calling EventLoopThread::start(" << condition << ", " << input_device << ") for a device that is disabled.");
     return false;
   }
 
@@ -289,7 +289,7 @@ bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io
   std::lock_guard<std::mutex> lock(m_loop_mutex);
 
   // Don't start a device that is already active.
-  if (ev_is_active(io_watcher))
+  if (flags_w->is_active_input_device())
     return false;
 
   // This is likely because otherwise we shouldn't be using a construction with
@@ -302,32 +302,41 @@ bool EventLoopThread::start_if(utils::FuzzyCondition const& condition, ev_io* io
   }
 #ifdef CWDEBUG
   else
-    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << (void*)io_watcher << ")");
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << input_device << ")");
 #endif
 
-  ev_io_start(io_watcher);
-  ev_async_send(&m_async_w);
+//  ev_io_start(io_watcher);
+//  ev_async_send(&m_async_w);
   return true;
 }
 
-bool EventLoopThread::stop(ev_io* io_watcher)
+bool EventLoopThread::start_if(FileDescriptor::flags_t::wat const& flags_w, utils::FuzzyCondition const& condition, OutputDevice* output_device)
+{
+  return true;
+}
+
+bool EventLoopThread::stop(FileDescriptor::flags_t::wat const& flags_w, InputDevice* input_device)
 {
   std::lock_guard<std::mutex> lock(m_loop_mutex);
 
   // Don't stop a device that is already non-active.
-  if (!ev_is_active(io_watcher))
+  if (!flags_w->is_active_input_device())
     return false;
 
-  ev_io_stop(io_watcher);
+//  ev_io_stop(io_watcher);
   return true;
 }
 
-bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_watcher)
+bool EventLoopThread::stop(FileDescriptor::flags_t::wat const& flags_w, OutputDevice* output_device)
+{
+}
+
+bool EventLoopThread::stop_if(FileDescriptor::flags_t::wat const& flags_w, utils::FuzzyCondition const& condition, InputDevice* input_device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
-    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << (void*)io_watcher << ")");
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << input_device << ")");
     return false;
   }
 
@@ -337,7 +346,7 @@ bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_
   std::lock_guard<std::mutex> lock(m_loop_mutex);
 
   // Don't stop a device that is already non-active.
-  if (!ev_is_active(io_watcher))
+  if (!flags_w->is_active_input_device())
     return false;
 
   // This is likely because otherwise we shouldn't be using a construction with
@@ -350,10 +359,15 @@ bool EventLoopThread::stop_if(utils::FuzzyCondition const& condition, ev_io* io_
   }
 #ifdef CWDEBUG
   else
-    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << (void*)io_watcher << ")");
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << input_device << ")");
 #endif
 
-  ev_io_stop(io_watcher);
+//  ev_io_stop(io_watcher);
+  return true;
+}
+
+bool EventLoopThread::stop_if(FileDescriptor::flags_t::wat const& flags_w, utils::FuzzyCondition const& condition, OutputDevice* output_device)
+{
   return true;
 }
 
@@ -376,16 +390,11 @@ EventLoop::~EventLoop()
   EventLoopThread::instance().terminate(m_normal_exit);
 }
 
+void EventLoopThread::ev_break()
+{
+}
+
 } // namespace evio
-
-bool ev_is_active(ev_io const*)
-{
-  return false;
-}
-
-void ev_io_init(ev_io* ev, void (*cb)(ev_io* watcher, int /*events_type*/ revents), int fd, events_type events)
-{
-}
 
 void ev_ref()
 {
@@ -424,10 +433,6 @@ void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb)
 {
 }
 
-void ev_break(int how)
-{
-}
-
 int ev_default_loop(unsigned int flags)
 {
 }
@@ -437,22 +442,6 @@ void ev_set_userdata(void* data)
 }
 
 void ev_set_loop_release_cb(void (*release)(), void (*acquire)())
-{
-}
-
-void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents))
-{
-}
-
-void ev_async_start(ev_async* w)
-{
-}
-
-void ev_async_send(ev_async* w)
-{
-}
-
-void ev_async_stop(ev_async* w)
 {
 }
 

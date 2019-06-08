@@ -94,19 +94,20 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
   int wd;
   {
     std::lock_guard<std::mutex> lock(m_inotify_mutex);
-    if (AI_UNLIKELY(!is_open_r()))
+    if (AI_UNLIKELY(!flags_t::rat(m_flags)->is_open_r()))
     {
       // Set up the inotify device.
       int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
       if (fd == -1)
         THROW_FALERTE("with pathname = \"[PATHNAME]\"; inotify_init1");
       init(fd);
+      flags_t::wat flags_w(m_flags);
       SingleThread type;
       // Call input() before calling add_watch(). The library should have done this!
       ASSERT(m_input_device_events_handler && m_ibuffer);
-      start_input_device(type);
       // Exit ev_run even when this device is still running.
-      ev_unref();       // FIXME: This needs an ev_ref() call before calling ev_io_stop() on this device, which is currently missing!
+      flags_w->set_r_daemon();
+      start_input_device(flags_w, type);
     }
     Dout(dc::system|continued_cf, "inotify_add_watch(" << m_fd << ", \"" << pathname << "\", 0x" << std::hex << mask << ") = ");
     wd = inotify_add_watch(m_fd, pathname, mask);

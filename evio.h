@@ -23,33 +23,8 @@
 
 #pragma once
 
-enum events_type
-{
-  EV_UNDEF,     // Guaranteed to be invalid.
-  EV_READ,      // For registering a fd that is readble, or as revents when libev detected that a read will not block.
-  EV_WRITE,     // For registering a fd that is writable, or as revents when libev detected that a write will not block.
-};
-
-struct ev_io
-{
-  void* data;
-  int events;   // One of the events above.
-};
-
-void ev_io_init(ev_io* ev, void (*cb)(ev_io* watcher, int /*events_type*/ revents), int fd, events_type events);
-
 void ev_unref();        // Cause ev_run() to exit even though a device is still running.
 void ev_ref();          // Theoretically needed to balance ev_unref() calls (before stopping said devices).
-
-// EventLoopThread(.h) exclusive:
-
-struct ev_async
-{
-};
-
-bool ev_is_active(ev_io const*);
-
-// EventLoopThread.cxx exclusive:
 
 enum {
   EVRUN_NOWAIT = 1, /* do not block/wait */
@@ -70,19 +45,18 @@ enum {
   EVBACKEND_EPOLL   = 0x00000004U, /* linux */
 };
 
+struct ev_io
+{
+};
+
 unsigned int ev_pending_count();
 void ev_invoke_pending();
 int ev_requested_break();
 typedef void (*ev_loop_callback)();
 void ev_set_invoke_pending_cb(ev_loop_callback invoke_pending_cb);
-void ev_break(int how);
 int ev_default_loop(unsigned int flags);
 void ev_set_userdata(void* data);
 void ev_set_loop_release_cb(void (*release)(), void (*acquire)());
-void ev_async_init(ev_async* watcher, void (*cb)(ev_async* watcher, int revents));
-void ev_async_start(ev_async* w);
-void ev_async_send(ev_async* w);
-void ev_async_stop(ev_async* w);
 void ev_io_start(ev_io* w);
 void ev_io_stop(ev_io* w);
 void* ev_userdata();

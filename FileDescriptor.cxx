@@ -97,10 +97,11 @@ void FileDescriptor::init(int fd)
   set_nonblocking(fd);
 
   // Reset all flags except FDS_RW.
-  m_flags &= FDS_RW;
+  flags_t::wat flags_w(m_flags);
+  flags_w->reset();
   m_fd = fd;
-  init_input_device();
-  init_output_device();
+  init_input_device(flags_w);
+  init_output_device(flags_w);
 }
 
 } // namespace evio

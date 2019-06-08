@@ -24,6 +24,7 @@
 #pragma once
 
 #include "utils/AIRefCount.h"
+#include "threadsafe/aithreadsafe.h"
 #include "RefCountReleaser.h"
 #include <cstdint>
 #include <atomic>
@@ -39,67 +40,162 @@ namespace evio {
 // Return true if fd is a valid open filedescriptor.
 bool is_valid(int fd);
 
-class FileDescriptor : public AIRefCount
+class FileDescriptorFlags
 {
- protected:
-  using flags_t = uint32_t;
+ public:
+  using mask_t = uint32_t;
+
   static int constexpr disabled_shft = 2;
   static int constexpr open_shft = 4;
-  static flags_t constexpr FDS_W                   = 0x80000000;
-  static flags_t constexpr FDS_R                   = 0x40000000;
-  static flags_t constexpr FDS_RW                  = FDS_R | FDS_W;
-  static flags_t constexpr FDS_W_DISABLED          = 0x20000000;        // Must be FDS_W >> disabled_shft.
-  static flags_t constexpr FDS_R_DISABLED          = 0x10000000;        // Must be FDS_R >> disabled_shft.
-  static flags_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
-  static flags_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
-  static flags_t constexpr FDS_SAME                = 0x02000000;
-  static flags_t constexpr FDS_DEAD                = 0x00800000;
-  static flags_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
+  static mask_t constexpr FDS_W                   = 0x80000000;
+  static mask_t constexpr FDS_R                   = 0x40000000;
+  static mask_t constexpr FDS_RW                  = FDS_R | FDS_W;
+  static mask_t constexpr FDS_W_DISABLED          = 0x20000000;        // Must be FDS_W >> disabled_shft.
+  static mask_t constexpr FDS_R_DISABLED          = 0x10000000;        // Must be FDS_R >> disabled_shft.
+  static mask_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
+  static mask_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
+  static mask_t constexpr FDS_SAME                = 0x02000000;
+  static mask_t constexpr FDS_R_DAEMON            = 0x01000000;
+  static mask_t constexpr FDS_DEAD                = 0x00800000;
+  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
 #ifdef CWDEBUG
-  static flags_t constexpr FDS_DEBUG               = 0x00100000;
+  static mask_t constexpr FDS_DEBUG               = 0x00100000;
 #endif
+  static mask_t constexpr FDS_W_ACTIVE            = 0x00000002;        // Set when epoll is using a pointer to this object (is watching this fd for output activity).
+  static mask_t constexpr FDS_R_ACTIVE            = 0x00000001;        // Set when epoll is using a pointer to this object (is watching this fd for input activity).
 
-  std::atomic<flags_t> m_flags;
-  int m_fd;                             // The file descriptor. In the case of a device that is derived from both,
-                                        // InputDevice and OutputDevice using multiple inheritance -- this fd is
-                                        // used for both input and output.
+ private:
+  mask_t m_mask;
 
  public:
   // Return true if this object is a base class of OutputDevice.
-  bool writable_type() const { return m_flags & FDS_W; }
+  bool writable_type() const { return m_mask & FDS_W; }
 
   // Return true if this object is a base class of InputDevice.
-  bool readable_type() const { return m_flags & FDS_R; }
+  bool readable_type() const { return m_mask & FDS_R; }
 
   // Returns true if this object is a writable device.
-  bool is_writable() const { return (m_flags & (FDS_W|FDS_W_DISABLED|FDS_W_OPEN|FDS_DEAD)) == (FDS_W|FDS_W_OPEN); }
+  bool is_writable() const { return (m_mask & (FDS_W|FDS_W_DISABLED|FDS_W_OPEN|FDS_DEAD)) == (FDS_W|FDS_W_OPEN); }
 
   // Returns true if this object is a readable device.
-  bool is_readable() const { return (m_flags & (FDS_R|FDS_R_DISABLED|FDS_R_OPEN|FDS_DEAD)) == (FDS_R|FDS_R_OPEN); }
+  bool is_readable() const { return (m_mask & (FDS_R|FDS_R_DISABLED|FDS_R_OPEN|FDS_DEAD)) == (FDS_R|FDS_R_OPEN); }
 
   // Return true if this object is marked that it should not close its fd.
-  bool dont_close() const { return m_flags & INTERNAL_FDS_DONT_CLOSE; }
+  bool dont_close() const { return m_mask & INTERNAL_FDS_DONT_CLOSE; }
 
   // Return true if this object has at least one open filedescriptor.
-  bool is_open() const { return m_flags & ((m_flags & FDS_RW) >> open_shft); }
+  bool is_open() const { return m_mask & ((m_mask & FDS_RW) >> open_shft); }
 
   // Return true if this object is marked as having an open fd for writing.
-  bool is_open_w() const { return m_flags & FDS_W_OPEN; }
+  bool is_open_w() const { return m_mask & FDS_W_OPEN; }
 
   // Return true if this object is marked as having an open fd for reading.
-  bool is_open_r() const { return m_flags & FDS_R_OPEN; }
+  bool is_open_r() const { return m_mask & FDS_R_OPEN; }
+
+  // Return true if the main event loop must return even when this device is still active.
+  bool is_r_daemon() const { return m_mask & FDS_R_DAEMON; }
 
   // Returns true if this object is not associated with a working fd.
-  bool is_dead() const { return m_flags & FDS_DEAD; }
+  bool is_dead() const { return m_mask & FDS_DEAD; }
 
   // Returns true if this object is disabled at this moment.
-  bool is_disabled() const { return m_flags & ((m_flags & FDS_RW) >> disabled_shft); }
+  bool is_disabled() const { return m_mask & ((m_mask & FDS_RW) >> disabled_shft); }
+
+  // Return true if this object is disabled for reading.
+  bool is_r_disabled() const { return m_mask & FDS_R_DISABLED; }
+
+  // Return true if this object is disabled fro writing.
+  bool is_w_disabled() const { return m_mask & FDS_W_DISABLED; }
+
+  // Returns true if this object is being watched for writability.
+  bool is_active_output_device() const { return m_mask & FDS_W_ACTIVE; }
+
+  // Returns true if this object is being watched for readability.
+  bool is_active_input_device() const { return m_mask & FDS_R_ACTIVE; }
+
+  // Return true if this object has or had a fd that is open for both reading and writing.
+  bool is_same() const { return m_mask & FDS_SAME; }
 
 #ifdef CWDEBUG
   // Returns true if this object is used for debug output.
   // If it is, then no new debug output will be produced by the kernel while handling it.
-  bool is_debug_channel() const { return m_flags & FDS_DEBUG; }
+  bool is_debug_channel() const { return m_mask & FDS_DEBUG; }
+#endif
 
+  // Reset all flags except FDS_RW.
+  void reset() { m_mask &= FDS_RW; }
+
+  // Mark this object as being derived from OutputDevice.
+  void set_writeable_type() { m_mask |= FDS_W; }
+
+  // Mark this object as being derived from InputDevice.
+  void set_readable_type() { m_mask |= FDS_R; }
+
+  // Set the FDS_R_DISABLED flag.
+  void disable_r() { m_mask |= FDS_R_DISABLED; }
+
+  // Set the FDS_W_DISABLED flag.
+  void disable_w() { m_mask |= FDS_W_DISABLED; }
+
+  // Reset the FDS_R_DISABLED flag.
+  void enable_r() { m_mask &= ~FDS_R_DISABLED; }
+
+  // Reset the FDS_W_DISABLED flag.
+  void enable_w() { m_mask &= ~FDS_W_DISABLED; }
+
+  // Mark this object as having a fd open for reading.
+  void set_open_r()
+  {
+    m_mask |= FDS_R_OPEN;
+    // Keep track of whether or not there is an output device (that will have the same fd).
+    if ((m_mask & FDS_W_OPEN))
+      m_mask |= FDS_SAME;
+  }
+
+  // Mark this object as having its (read) fd closed.
+  void unset_open_r()
+  {
+    m_mask &= ~FDS_R_OPEN;
+  }
+
+  // Mark this object as having a fd open for writing.
+  void set_open_w()
+  {
+    m_mask |= FDS_W_OPEN;
+    // Keep track of whether or not there is an input device (that will have the same fd).
+    if ((m_mask & FDS_R_OPEN))
+      m_mask |= FDS_SAME;
+  }
+
+  // Mark this object as having its (write) fd closed.
+  void unset_open_w()
+  {
+    m_mask &= ~FDS_W_OPEN;
+  }
+
+  void set_r_daemon()
+  {
+    m_mask |= FDS_R_DAEMON;
+  }
+
+  // Mark this object as dead.
+  void set_dead() { m_mask |= FDS_DEAD; }
+
+  FileDescriptorFlags() : m_mask(0) { }
+};
+
+class FileDescriptor : public AIRefCount
+{
+ public:
+  using flags_t = aithreadsafe::Wrapper<FileDescriptorFlags, aithreadsafe::policy::Primitive<std::mutex>>;
+
+ protected:
+  int m_fd;                             // The file descriptor. In the case of a device that is derived from both,
+                                        // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                        // used for both input and output.
+  flags_t m_flags;
+
+#ifdef CWDEBUG
   // For inspection only.
   int get_fd() const { return m_fd; }
 #endif
@@ -110,11 +206,11 @@ class FileDescriptor : public AIRefCount
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
   // Both are called by init().
-  virtual void init_input_device() { }
-  virtual void init_output_device() { }
+  virtual void init_input_device(flags_t::wat const& UNUSED_ARG(flags_w)) { }
+  virtual void init_output_device(flags_t::wat const& UNUSED_ARG(flags_w)) { }
 
  protected:
-  FileDescriptor() : m_flags(0), m_fd(-1) { }
+  FileDescriptor() : m_fd(-1) { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }

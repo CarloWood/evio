@@ -42,8 +42,9 @@ class OutputDevicePtr
 
   void start_output_device(PutThread type)
   {
-    if (m_output_device->is_active(type).is_false())
-      m_output_device->start_output_device(type);
+    FileDescriptor::flags_t::wat flags_w(m_output_device->m_flags);
+    if (!flags_w->is_active_output_device())
+      m_output_device->start_output_device(flags_w, type);
   }
 
   friend class OutputDevice;

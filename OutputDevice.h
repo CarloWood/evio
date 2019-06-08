@@ -79,7 +79,7 @@ class OutputDevice : public virtual FileDescriptor
   // Inferface with libev.
   //
 
-  ev_io m_output_watcher;               // The watcher.
+  //ev_io m_output_watcher;               // The watcher.
   using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
 
@@ -102,10 +102,10 @@ class OutputDevice : public virtual FileDescriptor
   // no put thread is running -- aka nobody is writing to the device -- when this
   // function is being called.
   friend class OutputDevicePtr;
-  void start_output_device(PutThread, utils::FuzzyCondition const& condition);
-  void start_output_device(PutThread);
-  RefCountReleaser stop_output_device(GetThread type, utils::FuzzyCondition const& condition);
-  RefCountReleaser stop_output_device();
+  void start_output_device(flags_t::wat const& flags_w, PutThread, utils::FuzzyCondition const& condition);
+  void start_output_device(flags_t::wat const& flags_w, PutThread);
+  RefCountReleaser stop_output_device(flags_t::wat const& flags_w, GetThread type, utils::FuzzyCondition const& condition);
+  RefCountReleaser stop_output_device(flags_t::wat const& flags_w);
   void disable_output_device();
   void enable_output_device(PutThread type);
 
@@ -118,7 +118,7 @@ class OutputDevice : public virtual FileDescriptor
 
  private:
   // Override base class member function.
-  void init_output_device() override;
+  void init_output_device(flags_t::wat const& flags_w) override;
 
  public:
   //---------------------------------------------------------------------------
@@ -130,16 +130,32 @@ class OutputDevice : public virtual FileDescriptor
   Buf2Dev* rddbbuf() const { return m_obuffer; }
 #endif
 
-  // Returns true if our watcher is linked in with libev.
+  // Returns true if the output device is registered with epoll.
   template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active_output_device(m_output_watcher, type); }
+  utils::FuzzyBool is_active(ThreadType) const
+  {
+    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
+    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
+    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
+                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
+
+    bool is_active = flags_t::crat(m_flags)->is_active_output_device();
+
+    // Basically we need the following table to hold:
+    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
+    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
+    //        no          False           WasFalse        WasFalse        False
+    //
+    return is_active ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
+  }
 
   void restart_if_non_active(PutThread type)
   {
-    // This function should be called only from Buf2Dev::flush, and therefore be an output device.
-    ASSERT(writable_type());
-    if (is_writable() && is_active(type).is_false())
-      start_output_device(type);
+    // This function should be called only from Buf2Dev::flush and OutputDevice::enable_output_device, and therefore be an output device.
+    flags_t::wat flags_w(m_flags);
+    ASSERT(flags_w->writable_type());
+    if (flags_w->is_writable() && !flags_w->is_active_output_device())
+      start_output_device(flags_w, type);
   }
 
  public:

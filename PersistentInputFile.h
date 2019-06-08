@@ -68,7 +68,7 @@ class PersistentInputFile : public File, private INotify
   void event_occurred(GetThread type, inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
-      start_input_device(type);
+      start_input_device(flags_t::wat(m_flags), type);
   }
 
  public:

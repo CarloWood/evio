@@ -35,7 +35,7 @@ InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
-  m_flags |= FDS_R;
+  flags_t::wat(m_flags)->set_readable_type();
   // Give m_input_watcher known values; cause is_active() to return false.
 //  ev_io_init(&m_input_watcher, ..., -1, EV_UNDEF);
 }
@@ -43,40 +43,40 @@ InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr
 InputDevice::~InputDevice()
 {
   DoutEntering(dc::evio, "InputDevice::~InputDevice() [" << this << ']');
-  // Don't delete a device?! At most close() it and delete all boost::intrusive_ptr's to it.
-  ASSERT(is_active(SingleThread()).is_false());
-  if (is_open_r())
-    close_input_device();     // This will not delete the object (again) because it isn't active.
+  bool is_open_r;
+  {
+    flags_t::wat flags_w(m_flags);
+    // Don't delete a device?! At most close() it and delete all boost::intrusive_ptr's to it.
+    ASSERT(!flags_w->is_active_input_device());
+    is_open_r = flags_w->is_open_r();
+  }
+  if (is_open_r)
+    close_input_device();       // This will not delete the object (again) because it isn't active.
   if (m_ibuffer)
   {
     // Delete the input buffer if it is no longer needed.
     m_ibuffer->release(this);
   }
-  // Make sure we detect it if this watcher is used again.
-  Debug(m_input_watcher.data = nullptr);
 }
 
-void InputDevice::init_input_device()
+void InputDevice::init_input_device(flags_t::wat const& flags_w)
 {
   DoutEntering(dc::evio, "InputDevice::init_input_device() [" << this << ']');
   // Don't call init() while the InputDevice is already active.
-  ASSERT(is_active(SingleThread()).is_momentary_false());
+  ASSERT(!flags_w->is_active_input_device());
 //  ev_io_init(&m_input_watcher, InputDevice::read_from_fd, m_fd, EV_READ);
-  m_input_watcher.data = this;
+//  m_input_watcher.data2 = this;
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
-  m_flags |= FDS_R_OPEN;
-  // Keep track of whether or not there is an output device (that will have the same fd).
-  if ((m_flags & FDS_W_OPEN))
-    m_flags |= FDS_SAME;
+  flags_w->set_open_r();
 }
 
-void InputDevice::start_input_device(GetThread)
+void InputDevice::start_input_device(flags_t::wat const& flags_w, GetThread)
 {
   DoutEntering(dc::evio, "InputDevice::start_input_device() [" << this << ']');
   // Call InputDevice::init before calling InputDevice::start.
-  ASSERT(m_input_watcher.events != EV_UNDEF);
+  ASSERT(flags_w->is_open_r());
   // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
   // Did you use boost::intrusive_ptr at all? The recommended way to create a new device is
   // by using evio::create. For example:
@@ -85,7 +85,7 @@ void InputDevice::start_input_device(GetThread)
   ASSERT(!is_destructed());
   // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
   // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
-  if (EventLoopThread::instance().start(&m_input_watcher, this))
+  if (EventLoopThread::instance().start(flags_w, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until the destruction of the RefCountReleaser returned
@@ -95,7 +95,7 @@ void InputDevice::start_input_device(GetThread)
   }
 }
 
-RefCountReleaser InputDevice::stop_input_device()
+RefCountReleaser InputDevice::stop_input_device(flags_t::wat const& flags_w)
 {
   RefCountReleaser need_allow_deletion;
   // We assume that stop_input_device can be called from another thread (than start_output_device)
@@ -104,9 +104,9 @@ RefCountReleaser InputDevice::stop_input_device()
   // true.
   // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
   // therefore only print that we enter this function when we're actually still active.
-  bool currently_active = is_active(AnyThread()).is_momentary_true();
+  bool currently_active = flags_w->is_active_input_device();
   DoutEntering(dc::evio(currently_active), "InputDevice::stop_input_device() [" << this << ']');
-  if (currently_active && EventLoopThread::instance().stop(&m_input_watcher))
+  if (currently_active && EventLoopThread::instance().stop(flags_w, this))
   {
     Dout(dc::evio, "Passing device " << this << " to RefCountReleaser.");
     need_allow_deletion = this;
@@ -119,36 +119,40 @@ RefCountReleaser InputDevice::stop_input_device()
 void InputDevice::disable_input_device()
 {
   DoutEntering(dc::evio, "InputDevice::disable_input_device()");
-  flags_t flags = m_flags.fetch_or(FDS_R_DISABLED);
-  if ((flags & FDS_R_DISABLED) == 0)
+  flags_t::wat flags_w(m_flags);
+  bool was_enabled = !flags_w->is_r_disabled();
+  flags_w->disable_r();
+  if (was_enabled)
   {
     // Keep a disabled device alive (assuming it was started).
     disable_release_t::wat disable_release_w(m_disable_release);
-    *disable_release_w = stop_input_device();
+    *disable_release_w = stop_input_device(flags_w);
   }
 }
 
 void InputDevice::enable_input_device(GetThread type)
 {
   DoutEntering(dc::evio, "InputDevice::enable_input_device()");
-  int flags = m_flags.fetch_and(~FDS_R_DISABLED);
-  if ((flags & FDS_R_DISABLED) != 0)
+  flags_t::wat flags_w(m_flags);
+  bool was_disabled = flags_w->is_r_disabled();
+  flags_w->enable_r();
+  if (was_disabled)
   {
-    // If the device was started when it was disabled, restart it now.
-    if (is_readable())
-      start_input_device(type);
+    // If the device was started while it was disabled, restart it now.
+    if (flags_w->is_readable())
+      start_input_device(flags_w, type);
     // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
     disable_release_t::wat disable_release_w(m_disable_release);
     disable_release_w->execute();
   }
 }
 
-// FIXME: make this thread-safe
 RefCountReleaser InputDevice::close_input_device()
 {
   DoutEntering(dc::evio, "InputDevice::close_input_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
-  if (AI_LIKELY(is_open_r()))
+  flags_t::wat flags_w(m_flags);
+  if (AI_LIKELY(flags_w->is_open_r()))
   {
     // FDS_SAME is set when this is both, an input device and an output device and is
     // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
@@ -156,30 +160,34 @@ RefCountReleaser InputDevice::close_input_device()
     //
     // Therefore, if FDS_W_OPEN is no longer set then that means that the file
     // descriptor was closed as a result of a call to close_output_device().
-    bool already_closed = (m_flags & (FDS_SAME | FDS_W_OPEN)) == FDS_SAME;
+    bool already_closed = flags_w->is_same() && !flags_w->is_open_w();
+
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(m_fd))
       Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << m_fd << ".");
 #endif
-    need_allow_deletion = stop_input_device();
-    if (!already_closed && !dont_close())
+    need_allow_deletion = stop_input_device(flags_w);
+    if (!already_closed && !flags_w->dont_close())
     {
       Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
       CWDEBUG_ONLY(int err =) ::close(m_fd);
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
       Dout(dc::finish, err);
     }
-    m_flags &= ~FDS_R_OPEN;
+    flags_w->unset_open_r();
     // Remove any pending disable, if any (see the code in enable_input_device).
-    if ((m_flags.fetch_and(~FDS_R_DISABLED) & FDS_R_DISABLED) != 0)
-      disable_release_t::wat(m_disable_release)->execute();
-    // Mark the device as dead when it has no longer any open file descriptor.
-    if (!is_open())
+    if (flags_w->is_r_disabled())
     {
-      m_flags |= FDS_DEAD;
+      flags_w->enable_r();
+      disable_release_t::wat(m_disable_release)->execute();
+    }
+    // Mark the device as dead when it has no longer any open file descriptor.
+    if (!flags_w->is_open())
+    {
+      flags_w->set_dead();
       need_allow_deletion += closed();
     }
-    else if ((m_flags & FDS_SAME))
+    else if (flags_w->is_same())
       need_allow_deletion += close_output_device();
   }
   return need_allow_deletion;
@@ -198,7 +206,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
         (space = self->m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
       // The buffer is full!
-      self->stop_input_device();        // Stop reading the filedescriptor.
+      self->stop_input_device(FileDescriptor::flags_t::wat(self->m_flags));     // Stop reading the filedescriptor.
       return;                           // Next time better.
     }
 
@@ -287,7 +295,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (self->is_disabled())
+      if (FileDescriptor::flags_t::wat(self->m_flags)->is_r_disabled())
         return need_allow_deletion;
       rlen -= len;
       if (rlen == 0)
@@ -309,7 +317,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (self->is_disabled())
+      if (FileDescriptor::flags_t::wat(self->m_flags)->is_r_disabled())
         return need_allow_deletion;
       rlen -= len;
       if (rlen == 0)

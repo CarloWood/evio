@@ -12,8 +12,8 @@ SOURCES = FileDescriptor.cxx \
 	  OutputDevice.h \
 	  StreamBuf.cxx \
 	  StreamBuf.h \
-	  EventLoopThread.cxx \
 	  EventLoopThread.h \
+	  EventLoopThread.cxx \
 	  Socket.cxx \
 	  Socket.h \
 	  ListenSocket.h \

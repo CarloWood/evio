@@ -35,7 +35,7 @@ OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obu
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
-  m_flags |= FDS_W;
+  flags_t::wat(m_flags)->set_writeable_type();
   // Give m_output_watcher known values; cause is_active() to return false.
 //  ev_io_init(&m_output_watcher, ..., -1, EV_UNDEF);
 }
@@ -44,41 +44,41 @@ OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obu
 OutputDevice::~OutputDevice()
 {
   DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
-  // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
-  ASSERT(!is_active(SingleThread()));
-  if (is_open_w())
+  bool is_open_w;
+  {
+    flags_t::rat flags_r(m_flags);
+    // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
+    ASSERT(!flags_r->is_active_output_device());
+    is_open_w = flags_r->is_open_w();
+  }
+  if (is_open_w)
     close_output_device();    // This will not delete the object (again) because it isn't active.
   if (m_obuffer)
   {
     // Delete the output buffer if it is no longer needed.
     m_obuffer->release(this);
   }
-  // Make sure we detect it if this watcher is used again.
-  Debug(m_output_watcher.data = nullptr);
 }
 
-void OutputDevice::init_output_device()
+void OutputDevice::init_output_device(flags_t::wat const& flags_w)
 {
   DoutEntering(dc::io, "OutputDevice::init_output_device() [" << this << ']');
   // Don't call init() while the OutputDevice is already active.
-  ASSERT(!is_active(SingleThread()));
+  ASSERT(!flags_w->is_active_output_device());
 //  ev_io_init(&m_output_watcher, OutputDevice::write_to_fd, m_fd, EV_WRITE);
-  m_output_watcher.data = this;
+//  m_output_watcher.data2 = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
-  m_flags |= FDS_W_OPEN;
-  // Keep track of whether there is an output device (that will have the same fd).
-  if ((m_flags & FDS_R_OPEN))
-    m_flags |= FDS_SAME;
+  flags_w->set_open_w();
 }
 
-void OutputDevice::start_output_device(PutThread)
+void OutputDevice::start_output_device(flags_t::wat const& flags_w, PutThread)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device() [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
-  ASSERT(m_output_watcher.events != EV_UNDEF);
+  ASSERT(flags_w->is_open_w());
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
-  if (EventLoopThread::instance().start(&m_output_watcher, this))
+  if (EventLoopThread::instance().start(flags_w, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until the destruction of the RefCountReleaser returned
@@ -88,12 +88,12 @@ void OutputDevice::start_output_device(PutThread)
   }
 }
 
-void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& condition)
+void OutputDevice::start_output_device(flags_t::wat const& flags_w, PutThread, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
-  ASSERT(m_output_watcher.events != EV_UNDEF);
-  if (EventLoopThread::instance().start_if(condition, &m_output_watcher, this))
+  ASSERT(flags_w->is_open_w());
+  if (EventLoopThread::instance().start_if(flags_w, condition, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until the destruction of the RefCountReleaser returned
@@ -105,11 +105,11 @@ void OutputDevice::start_output_device(PutThread, utils::FuzzyCondition const& c
 
 // Read and write threads; possibly other threads.
 // This function is thread-safe.
-RefCountReleaser OutputDevice::stop_output_device()
+RefCountReleaser OutputDevice::stop_output_device(flags_t::wat const& flags_w)
 {
   DoutEntering(dc::evio, "OutputDevice::stop_output_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
-  if (EventLoopThread::instance().stop(&m_output_watcher))
+  if (EventLoopThread::instance().stop(flags_w, this))
   {
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
     need_allow_deletion = this;
@@ -120,11 +120,11 @@ RefCountReleaser OutputDevice::stop_output_device()
 }
 
 // GetThread only.
-RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyCondition const& condition)
+RefCountReleaser OutputDevice::stop_output_device(flags_t::wat const& flags_w, GetThread, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::evio, "OutputDevice::stop_output_device(" << condition << ") [" << this << ']');
   RefCountReleaser need_allow_deletion;
-  if (EventLoopThread::instance().stop_if(condition, &m_output_watcher))
+  if (EventLoopThread::instance().stop_if(flags_w, condition, this))
   {
     Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
     need_allow_deletion = this;
@@ -136,19 +136,26 @@ RefCountReleaser OutputDevice::stop_output_device(GetThread, utils::FuzzyConditi
 
 void OutputDevice::disable_output_device()
 {
-  int flags = m_flags.fetch_or(FDS_W_DISABLED);
-  if ((flags & FDS_W_DISABLED) == 0)
+  flags_t::wat flags_w(m_flags);
+  bool was_enabled = !flags_w->is_w_disabled();
+  flags_w->disable_w();
+  if (was_enabled)
   {
     disable_release_t::wat disable_release_w(m_disable_release);
-    *disable_release_w = stop_output_device();
+    *disable_release_w = stop_output_device(flags_w);
   }
 }
 
 void OutputDevice::enable_output_device(PutThread type)
 {
   DoutEntering(dc::evio, "OutputDevice::enable_output_device()");
-  int flags = m_flags.fetch_and(~FDS_W_DISABLED);
-  if ((flags & FDS_W_DISABLED) != 0)
+  bool was_disabled;
+  {
+    flags_t::wat flags_w(m_flags);
+    was_disabled = flags_w->is_w_disabled();
+    flags_w->enable_w();
+  }
+  if (was_disabled)
   {
     restart_if_non_active(type);
     disable_release_t::wat disable_release_w(m_disable_release);
@@ -160,7 +167,8 @@ RefCountReleaser OutputDevice::close_output_device()
 {
   DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
-  if (AI_LIKELY(is_open_w()))
+  flags_t::wat flags_w(m_flags);
+  if (AI_LIKELY(flags_w->is_open_w()))
   {
     // FDS_SAME is set when this is both, an input device and an output device and is
     // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
@@ -168,29 +176,32 @@ RefCountReleaser OutputDevice::close_output_device()
     //
     // Therefore, if FDS_R_OPEN is no longer set then that means that the file
     // descriptor was closed as a result of a call to close_input_device().
-    bool already_closed = (m_flags & (FDS_SAME | FDS_R_OPEN)) == FDS_SAME;
+    bool already_closed = flags_w->is_same() && !flags_w->is_open_r();
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(m_fd))
       Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
 #endif
-    need_allow_deletion = stop_output_device();
-    if (!already_closed && !dont_close())
+    need_allow_deletion = stop_output_device(flags_w);
+    if (!already_closed && !flags_w->dont_close())
     {
       Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
       CWDEBUG_ONLY(int err =) ::close(m_fd);
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
       Dout(dc::finish, err);
     }
-    m_flags &= ~FDS_W_OPEN;
+    flags_w->unset_open_w();
     // Remove any pending disable (see the code in close_output_device).
-    if ((m_flags.fetch_and(~FDS_W_DISABLED) & FDS_W_DISABLED) != 0)
-      disable_release_t::wat(m_disable_release)->execute();
-    if (!is_open())
+    if (flags_w->is_w_disabled())
     {
-      m_flags |= FDS_DEAD;
+      flags_w->enable_w();
+      disable_release_t::wat(m_disable_release)->execute();
+    }
+    if (!flags_w->is_open())
+    {
+      flags_w->set_dead();
       need_allow_deletion += closed();
     }
-    else if ((m_flags & FDS_SAME))
+    else if (flags_w->is_same())
       need_allow_deletion += close_input_device();
   }
   return need_allow_deletion;
@@ -213,7 +224,7 @@ void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
       // which only returns 0 when `underflow_a' returned EOF in which case that already
       // reduced the buffer if necessary.
-      self->stop_output_device();	// Buffer is empty; stop watching the fd.
+      self->stop_output_device(FileDescriptor::flags_t::wat(self->m_flags));	// Buffer is empty; stop watching the fd.
       return;
     }
 #if EWOULDBLOCK != EAGAIN
@@ -225,7 +236,7 @@ try_again_write1:
     {
       int err = errno;
 #ifdef CWDEBUG
-      if (!self->is_debug_channel())
+      if (!FileDescriptor::flags_t::wat(self->m_flags)->is_debug_channel())
       {
         Dout(dc::warning|error_cf,
             "write(" << fd << ", " << buf2str(obuffer->buf2dev_ptr(), obuffer->buf2dev_contiguous()) << ", " << len << ')');
@@ -264,7 +275,7 @@ int OutputDevice::sync()
 {
   DoutEntering(dc::evio, "OutputDevice::sync() [" << this << ']');
   PutThread type;
-  if (AI_UNLIKELY(!is_writable()))
+  if (AI_UNLIKELY(!flags_t::rat(m_flags)->is_writable()))
   {
     Dout(dc::warning, "The device is not writable!");
     return -1;
@@ -275,7 +286,7 @@ int OutputDevice::sync()
         return !m_obuffer->StreamBufProducer::buffer_empty();
       });
   if ((condition_not_empty && !is_active(type)).is_momentary_true())
-    start_output_device(type, condition_not_empty);
+    start_output_device(flags_t::wat(m_flags), type, condition_not_empty);
   return 0;
 }
 

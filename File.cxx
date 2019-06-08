@@ -76,7 +76,7 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
     posix_mode = O_RDONLY;
 
   // Do not call open() on a device that is already initialized with a fd (see FileDescriptor::init) or call close() first.
-  ASSERT(!is_open());
+  ASSERT(!flags_t::rat(m_flags)->is_open());
 
   // Meant to be used for things like O_CLOEXEC, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOATIME, O_NOFOLLOW, O_NONBLOCK, O_SYNC, O_TMPFILE, ...
   posix_mode |= additional_posix_modes;
@@ -107,9 +107,10 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
 
   // Success.
   init(fd, filename);
+  flags_t::wat flags_w(m_flags);
   SingleThread type;
   if (m_ibuffer)
-    start_input_device(type);
+    start_input_device(flags_w, type);
   if (m_obuffer)
   {
     // This condition assumes we are the PutThread (no other thread is writing
@@ -120,7 +121,7 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
           return !m_obuffer->StreamBufProducer::buffer_empty();
         });
     if (condition_not_empty.is_momentary_true())
-      start_output_device(type, condition_not_empty);
+      start_output_device(flags_w, type, condition_not_empty);
   }
 }
 

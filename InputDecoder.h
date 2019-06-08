@@ -43,8 +43,8 @@ class InputDeviceEventsHandler
  protected:
   InputDevice* m_input_device;
 
-  void start_input_device(GetThread type) { m_input_device->start_input_device(type); }
-  RefCountReleaser stop_input_device() { return m_input_device->stop_input_device(); }
+  void start_input_device(GetThread type) { m_input_device->start_input_device(FileDescriptor::flags_t::wat(m_input_device->m_flags), type); }
+  RefCountReleaser stop_input_device() { return m_input_device->stop_input_device(FileDescriptor::flags_t::wat(m_input_device->m_flags)); }
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)

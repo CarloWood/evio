@@ -95,7 +95,7 @@ class InputDevice : public virtual FileDescriptor
   // Inferface with libev.
   //
 
-  ev_io m_input_watcher;                // The watcher.
+  //ev_io m_input_watcher;                // The watcher.
   using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
 
@@ -109,8 +109,8 @@ class InputDevice : public virtual FileDescriptor
 
  protected:
   friend class InputDeviceEventsHandler;
-  void start_input_device(GetThread);
-  RefCountReleaser stop_input_device();
+  void start_input_device(flags_t::wat const& flags_w, GetThread);
+  RefCountReleaser stop_input_device(flags_t::wat const& flags_w);
   void disable_input_device();
   void enable_input_device(GetThread type);
 
@@ -134,9 +134,24 @@ class InputDevice : public virtual FileDescriptor
   Dev2Buf* rddbbuf() const { return m_ibuffer; }
 #endif
 
-  // Returns true if our watcher is linked in with libev.
+  // Returns true if the input device is registered with epoll.
   template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType type) const { return EventLoopThread::instance().is_active_input_device(m_input_watcher, type); }
+  utils::FuzzyBool is_active(ThreadType) const
+  {
+    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
+    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
+    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
+                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
+
+    bool is_active = flags_t::crat(m_flags)->is_active_input_device();
+
+    // Basically we need the following table to hold:
+    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
+    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
+    //        no          False           WasFalse        False           WasFalse
+    //
+    return is_active ? fuzzy::WasTrue : (get_thread ? fuzzy::False : fuzzy::WasFalse);
+  }
 
  public:
   //---------------------------------------------------------------------------
@@ -156,7 +171,7 @@ class InputDevice : public virtual FileDescriptor
   friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
 
   // Override base class member function.
-  void init_input_device() override;
+  void init_input_device(flags_t::wat const& flags_w) override;
 
  protected:
   void read_from_fd(int fd) { VT_ptr->_read_from_fd(this, fd); }
