@@ -30,7 +30,7 @@ namespace evio {
 void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
 {
   // Don't call listen() twice on a row. First close() the listen socket again.
-  ASSERT(!flags_t::rat(m_flags)->is_open());
+  ASSERT(!flags_t::rat(m_flags)->is_r_open());
 
   Dout(dc::system|continued_cf, "socket(" << bind_addr.family() << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
   int fd = socket(bind_addr.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);

@@ -35,7 +35,7 @@ InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
-  flags_t::wat(m_flags)->set_readable_type();
+  flags_t::wat(m_flags)->set_input_device();
   // Give m_input_watcher known values; cause is_active() to return false.
 //  ev_io_init(&m_input_watcher, ..., -1, EV_UNDEF);
 }
@@ -43,14 +43,14 @@ InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr
 InputDevice::~InputDevice()
 {
   DoutEntering(dc::evio, "InputDevice::~InputDevice() [" << this << ']');
-  bool is_open_r;
+  bool is_r_open;
   {
     flags_t::wat flags_w(m_flags);
     // Don't delete a device?! At most close() it and delete all boost::intrusive_ptr's to it.
     ASSERT(!flags_w->is_active_input_device());
-    is_open_r = flags_w->is_open_r();
+    is_r_open = flags_w->is_r_open();
   }
-  if (is_open_r)
+  if (is_r_open)
     close_input_device();       // This will not delete the object (again) because it isn't active.
   if (m_ibuffer)
   {
@@ -69,14 +69,14 @@ void InputDevice::init_input_device(flags_t::wat const& flags_w)
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
-  flags_w->set_open_r();
+  flags_w->set_r_open();
 }
 
 void InputDevice::start_input_device(flags_t::wat const& flags_w, GetThread)
 {
   DoutEntering(dc::evio, "InputDevice::start_input_device() [" << this << ']');
   // Call InputDevice::init before calling InputDevice::start.
-  ASSERT(flags_w->is_open_r());
+  ASSERT(flags_w->is_r_open());
   // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
   // Did you use boost::intrusive_ptr at all? The recommended way to create a new device is
   // by using evio::create. For example:
@@ -121,7 +121,7 @@ void InputDevice::disable_input_device()
   DoutEntering(dc::evio, "InputDevice::disable_input_device()");
   flags_t::wat flags_w(m_flags);
   bool was_enabled = !flags_w->is_r_disabled();
-  flags_w->disable_r();
+  flags_w->set_r_disabled();
   if (was_enabled)
   {
     // Keep a disabled device alive (assuming it was started).
@@ -135,7 +135,7 @@ void InputDevice::enable_input_device(GetThread type)
   DoutEntering(dc::evio, "InputDevice::enable_input_device()");
   flags_t::wat flags_w(m_flags);
   bool was_disabled = flags_w->is_r_disabled();
-  flags_w->enable_r();
+  flags_w->unset_r_disabled();
   if (was_disabled)
   {
     // If the device was started while it was disabled, restart it now.
@@ -152,7 +152,7 @@ RefCountReleaser InputDevice::close_input_device()
   DoutEntering(dc::evio, "InputDevice::close_input_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
   flags_t::wat flags_w(m_flags);
-  if (AI_LIKELY(flags_w->is_open_r()))
+  if (AI_LIKELY(flags_w->is_r_open()))
   {
     // FDS_SAME is set when this is both, an input device and an output device and is
     // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
@@ -160,7 +160,7 @@ RefCountReleaser InputDevice::close_input_device()
     //
     // Therefore, if FDS_W_OPEN is no longer set then that means that the file
     // descriptor was closed as a result of a call to close_output_device().
-    bool already_closed = flags_w->is_same() && !flags_w->is_open_w();
+    bool already_closed = flags_w->is_same() && !flags_w->is_w_open();
 
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(m_fd))
@@ -174,11 +174,11 @@ RefCountReleaser InputDevice::close_input_device()
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
       Dout(dc::finish, err);
     }
-    flags_w->unset_open_r();
+    flags_w->unset_r_open();
     // Remove any pending disable, if any (see the code in enable_input_device).
     if (flags_w->is_r_disabled())
     {
-      flags_w->enable_r();
+      flags_w->unset_r_disabled();
       disable_release_t::wat(m_disable_release)->execute();
     }
     // Mark the device as dead when it has no longer any open file descriptor.

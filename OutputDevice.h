@@ -153,7 +153,7 @@ class OutputDevice : public virtual FileDescriptor
   {
     // This function should be called only from Buf2Dev::flush and OutputDevice::enable_output_device, and therefore be an output device.
     flags_t::wat flags_w(m_flags);
-    ASSERT(flags_w->writable_type());
+    ASSERT(flags_w->is_output_device());
     if (flags_w->is_writable() && !flags_w->is_active_output_device())
       start_output_device(flags_w, type);
   }

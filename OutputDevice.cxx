@@ -35,7 +35,7 @@ OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obu
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
-  flags_t::wat(m_flags)->set_writeable_type();
+  flags_t::wat(m_flags)->set_output_device();
   // Give m_output_watcher known values; cause is_active() to return false.
 //  ev_io_init(&m_output_watcher, ..., -1, EV_UNDEF);
 }
@@ -44,14 +44,14 @@ OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obu
 OutputDevice::~OutputDevice()
 {
   DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
-  bool is_open_w;
+  bool is_w_open;
   {
     flags_t::rat flags_r(m_flags);
     // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
     ASSERT(!flags_r->is_active_output_device());
-    is_open_w = flags_r->is_open_w();
+    is_w_open = flags_r->is_w_open();
   }
-  if (is_open_w)
+  if (is_w_open)
     close_output_device();    // This will not delete the object (again) because it isn't active.
   if (m_obuffer)
   {
@@ -68,14 +68,14 @@ void OutputDevice::init_output_device(flags_t::wat const& flags_w)
 //  ev_io_init(&m_output_watcher, OutputDevice::write_to_fd, m_fd, EV_WRITE);
 //  m_output_watcher.data2 = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
-  flags_w->set_open_w();
+  flags_w->set_w_open();
 }
 
 void OutputDevice::start_output_device(flags_t::wat const& flags_w, PutThread)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device() [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
-  ASSERT(flags_w->is_open_w());
+  ASSERT(flags_w->is_w_open());
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
   if (EventLoopThread::instance().start(flags_w, this))
@@ -92,7 +92,7 @@ void OutputDevice::start_output_device(flags_t::wat const& flags_w, PutThread, u
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
-  ASSERT(flags_w->is_open_w());
+  ASSERT(flags_w->is_w_open());
   if (EventLoopThread::instance().start_if(flags_w, condition, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
@@ -138,7 +138,7 @@ void OutputDevice::disable_output_device()
 {
   flags_t::wat flags_w(m_flags);
   bool was_enabled = !flags_w->is_w_disabled();
-  flags_w->disable_w();
+  flags_w->set_w_disabled();
   if (was_enabled)
   {
     disable_release_t::wat disable_release_w(m_disable_release);
@@ -153,7 +153,7 @@ void OutputDevice::enable_output_device(PutThread type)
   {
     flags_t::wat flags_w(m_flags);
     was_disabled = flags_w->is_w_disabled();
-    flags_w->enable_w();
+    flags_w->unset_w_disabled();
   }
   if (was_disabled)
   {
@@ -168,7 +168,7 @@ RefCountReleaser OutputDevice::close_output_device()
   DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
   RefCountReleaser need_allow_deletion;
   flags_t::wat flags_w(m_flags);
-  if (AI_LIKELY(flags_w->is_open_w()))
+  if (AI_LIKELY(flags_w->is_w_open()))
   {
     // FDS_SAME is set when this is both, an input device and an output device and is
     // only set after both FDS_R_OPEN and FDS_W_OPEN are set and the file descriptor
@@ -176,7 +176,7 @@ RefCountReleaser OutputDevice::close_output_device()
     //
     // Therefore, if FDS_R_OPEN is no longer set then that means that the file
     // descriptor was closed as a result of a call to close_input_device().
-    bool already_closed = flags_w->is_same() && !flags_w->is_open_r();
+    bool already_closed = flags_w->is_same() && !flags_w->is_r_open();
 #ifdef CWDEBUG
     if (!already_closed && !is_valid(m_fd))
       Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
@@ -189,11 +189,11 @@ RefCountReleaser OutputDevice::close_output_device()
       Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
       Dout(dc::finish, err);
     }
-    flags_w->unset_open_w();
+    flags_w->unset_w_open();
     // Remove any pending disable (see the code in close_output_device).
     if (flags_w->is_w_disabled())
     {
-      flags_w->enable_w();
+      flags_w->unset_w_disabled();
       disable_release_t::wat(m_disable_release)->execute();
     }
     if (!flags_w->is_open())

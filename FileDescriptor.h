@@ -55,7 +55,7 @@ class FileDescriptorFlags
   static mask_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
   static mask_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
   static mask_t constexpr FDS_SAME                = 0x02000000;
-  static mask_t constexpr FDS_R_DAEMON            = 0x01000000;
+  static mask_t constexpr FDS_R_INFERIOR          = 0x01000000;
   static mask_t constexpr FDS_DEAD                = 0x00800000;
   static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
 #ifdef CWDEBUG
@@ -69,10 +69,10 @@ class FileDescriptorFlags
 
  public:
   // Return true if this object is a base class of OutputDevice.
-  bool writable_type() const { return m_mask & FDS_W; }
+  bool is_output_device() const { return m_mask & FDS_W; }
 
   // Return true if this object is a base class of InputDevice.
-  bool readable_type() const { return m_mask & FDS_R; }
+  bool is_input_device() const { return m_mask & FDS_R; }
 
   // Returns true if this object is a writable device.
   bool is_writable() const { return (m_mask & (FDS_W|FDS_W_DISABLED|FDS_W_OPEN|FDS_DEAD)) == (FDS_W|FDS_W_OPEN); }
@@ -83,17 +83,17 @@ class FileDescriptorFlags
   // Return true if this object is marked that it should not close its fd.
   bool dont_close() const { return m_mask & INTERNAL_FDS_DONT_CLOSE; }
 
-  // Return true if this object has at least one open filedescriptor.
+  // Return true if this object has an open filedescriptor.
   bool is_open() const { return m_mask & ((m_mask & FDS_RW) >> open_shft); }
 
   // Return true if this object is marked as having an open fd for writing.
-  bool is_open_w() const { return m_mask & FDS_W_OPEN; }
+  bool is_w_open() const { return m_mask & FDS_W_OPEN; }
 
   // Return true if this object is marked as having an open fd for reading.
-  bool is_open_r() const { return m_mask & FDS_R_OPEN; }
+  bool is_r_open() const { return m_mask & FDS_R_OPEN; }
 
-  // Return true if the main event loop must return even when this device is still active.
-  bool is_r_daemon() const { return m_mask & FDS_R_DAEMON; }
+  // Return true if the main event loop must return even when this input device is still active.
+  bool is_r_inferior() const { return m_mask & FDS_R_INFERIOR; }
 
   // Returns true if this object is not associated with a working fd.
   bool is_dead() const { return m_mask & FDS_DEAD; }
@@ -101,11 +101,11 @@ class FileDescriptorFlags
   // Returns true if this object is disabled at this moment.
   bool is_disabled() const { return m_mask & ((m_mask & FDS_RW) >> disabled_shft); }
 
-  // Return true if this object is disabled for reading.
-  bool is_r_disabled() const { return m_mask & FDS_R_DISABLED; }
-
   // Return true if this object is disabled fro writing.
   bool is_w_disabled() const { return m_mask & FDS_W_DISABLED; }
+
+  // Return true if this object is disabled for reading.
+  bool is_r_disabled() const { return m_mask & FDS_R_DISABLED; }
 
   // Returns true if this object is being watched for writability.
   bool is_active_output_device() const { return m_mask & FDS_W_ACTIVE; }
@@ -126,40 +126,25 @@ class FileDescriptorFlags
   void reset() { m_mask &= FDS_RW; }
 
   // Mark this object as being derived from OutputDevice.
-  void set_writeable_type() { m_mask |= FDS_W; }
+  void set_output_device() { m_mask |= FDS_W; }
 
   // Mark this object as being derived from InputDevice.
-  void set_readable_type() { m_mask |= FDS_R; }
-
-  // Set the FDS_R_DISABLED flag.
-  void disable_r() { m_mask |= FDS_R_DISABLED; }
+  void set_input_device() { m_mask |= FDS_R; }
 
   // Set the FDS_W_DISABLED flag.
-  void disable_w() { m_mask |= FDS_W_DISABLED; }
+  void set_w_disabled() { m_mask |= FDS_W_DISABLED; }
 
-  // Reset the FDS_R_DISABLED flag.
-  void enable_r() { m_mask &= ~FDS_R_DISABLED; }
+  // Set the FDS_R_DISABLED flag.
+  void set_r_disabled() { m_mask |= FDS_R_DISABLED; }
 
   // Reset the FDS_W_DISABLED flag.
-  void enable_w() { m_mask &= ~FDS_W_DISABLED; }
+  void unset_w_disabled() { m_mask &= ~FDS_W_DISABLED; }
 
-  // Mark this object as having a fd open for reading.
-  void set_open_r()
-  {
-    m_mask |= FDS_R_OPEN;
-    // Keep track of whether or not there is an output device (that will have the same fd).
-    if ((m_mask & FDS_W_OPEN))
-      m_mask |= FDS_SAME;
-  }
-
-  // Mark this object as having its (read) fd closed.
-  void unset_open_r()
-  {
-    m_mask &= ~FDS_R_OPEN;
-  }
+  // Reset the FDS_R_DISABLED flag.
+  void unset_r_disabled() { m_mask &= ~FDS_R_DISABLED; }
 
   // Mark this object as having a fd open for writing.
-  void set_open_w()
+  void set_w_open()
   {
     m_mask |= FDS_W_OPEN;
     // Keep track of whether or not there is an input device (that will have the same fd).
@@ -168,15 +153,22 @@ class FileDescriptorFlags
   }
 
   // Mark this object as having its (write) fd closed.
-  void unset_open_w()
+  void unset_w_open() { m_mask &= ~FDS_W_OPEN; }
+
+  // Mark this object as having a fd open for reading.
+  void set_r_open()
   {
-    m_mask &= ~FDS_W_OPEN;
+    m_mask |= FDS_R_OPEN;
+    // Keep track of whether or not there is an output device (that will have the same fd).
+    if ((m_mask & FDS_W_OPEN))
+      m_mask |= FDS_SAME;
   }
 
-  void set_r_daemon()
-  {
-    m_mask |= FDS_R_DAEMON;
-  }
+  // Mark this object as having its (read) fd closed.
+  void unset_r_open() { m_mask &= ~FDS_R_OPEN; }
+
+  // Mark this device as inferior input; that is - the appliction will terminate even if this input device is still active.
+  void set_r_inferior() { m_mask |= FDS_R_INFERIOR; }
 
   // Mark this object as dead.
   void set_dead() { m_mask |= FDS_DEAD; }
