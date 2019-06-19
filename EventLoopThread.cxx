@@ -145,18 +145,24 @@ void EventLoopThread::main()
     {
       epoll_event& event(s_events[--ready]);
       FileDescriptor* device = static_cast<FileDescriptor*>(event.data.ptr);
+      int need_allow_deletion;
       if ((event.events & EPOLLIN))
-        device->read_event();
+        device->read_event(need_allow_deletion);
       if ((event.events & EPOLLOUT))
-        device->write_event();
+        device->write_event(need_allow_deletion);
       if (AI_UNLIKELY(event.events & ~(EPOLLIN|EPOLLOUT)))
       {
         if ((event.events & EPOLLHUP))
-          device->hup_event();
+          device->hup_event(need_allow_deletion);
         else if ((event.events & EPOLLERR))
-          device->exceptional_event();
+          device->exceptional_event(need_allow_deletion);
         else
           DoutFatal(dc::core, "event.events = " << std::hex << event.events);
+      }
+      if (AI_UNLIKELY(need_allow_deletion != 0))
+      {
+        for (int i = 0; i < need_allow_deletion; ++i)
+          device->allow_deletion();
       }
     }
   }

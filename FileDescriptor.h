@@ -359,8 +359,8 @@ class FileDescriptor : public AIRefCount
   ~FileDescriptor() noexcept { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
-  virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }
-  virtual RefCountReleaser close_output_device() { return RefCountReleaser(); }
+  virtual RefCountReleaser close_input_device() { return {}; }
+  virtual RefCountReleaser close_output_device() { return {}; }
 
   RefCountReleaser close()
   {

@@ -209,7 +209,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
     {
       // The buffer is full!
       self->stop_input_device();        // Stop reading the filedescriptor.
-      return;                           // Next time better.
+      break;                            // Next time better.
     }
 
     ssize_t rlen;
@@ -221,7 +221,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
     {
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
       self->read_returned_zero();
-      return;                           // Next time better.
+      break;                            // Next time better.
     }
 
     if (rlen == -1)                     // A read error occured ?
@@ -233,7 +233,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
       //  goto try_again_read1;
       if (err != EAGAIN && err != EWOULDBLOCK)
         self->read_error(err);
-      return;                           // Next time better.
+      break;                            // Next time better.
     }
 
     self->m_ibuffer->dev2buf_bump(rlen);
@@ -247,7 +247,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
     // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
     // read so far). Perhaps we should just try to continue to read until EAGAIN.
     if (rlen < space)   // Did we read everything, or process at least
-      return;           //  one message ?
+      break;            //  one message ?
 
     space = 0;
   }
