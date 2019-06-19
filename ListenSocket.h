@@ -69,12 +69,11 @@ class ListenSocketDevice : public InputDevice
     DoutEntering(dc::evio, "listen(" << fd << ", " << bind_addr << ") [" << this << ']');
     // The socket family of bind_addr must be specified.
     // The ListenSocket must be closed before you can reuse it.
-    ASSERT(!bind_addr.is_unspecified() && (m_bind_addr.is_unspecified() || flags_t::rat(m_flags)->is_dead()));
+    ASSERT(!bind_addr.is_unspecified() && (m_bind_addr.is_unspecified() || state_t::rat(m_state)->m_flags.is_dead()));
     m_bind_addr = std::move(bind_addr);
     init(fd);
-    flags_t::wat flags_w(m_flags);
-    evio::SingleThread type;
-    start_input_device(flags_w, type);
+    state_t::wat state_w(m_state);
+    start_input_device(state_w);
   }
 
   // Close the socket associated with this object.
@@ -118,6 +117,8 @@ class ListenSocketDevice : public InputDevice
         /*InputDevice*/
       { nullptr,
         read_from_fd,
+        hup,
+        exceptional,
         read_returned_zero,
         read_error,
         data_received },
@@ -182,6 +183,8 @@ class ListenSocket : public ListenSocketDevice
       {   /*InputDevice*/
         { nullptr,
           read_from_fd,
+          hup,
+          exceptional,
           read_returned_zero,
           read_error,
           data_received },

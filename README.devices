@@ -1,0 +1,120 @@
+Devices are either derived from InputDevice, OutputDevice or both.
+Both InputDevice and OutputDevice are derived from FileDescriptor,
+but FileDescriptor is a virtual base class, so input/output devices
+will have the typical diamond shape inheritance structure:
+
+                 FileDescriptor
+                 /            \.
+        InputDevice          OutputDevice
+                 \            /
+                  SomeIODevice
+
+For an InputDevice, FileDescriptorFlags::is_input_device() always
+returns true. For an OutputDevice FileDescriptorFlags::is_output_device()
+returns true.
+
+InputDevice reads from the file descriptor, while OutputDevice
+writes to the file descriptor.
+
+After initialization the file descriptor is 'open', so that respectively
+FileDescriptorFlags::is_w_open() and FileDescriptorFlags::is_r_open()
+return true. FileDescriptorFlags::is_open() returns true when either is
+still true.
+
+A file descriptor is closed when is_open() doesn't return true anymore.
+That is, when both InputDevice::close_input_device() and
+OutputDevice::close_output_device() have been called (in the case of a
+I/O device that is derived from both).
+
+Initialization also starts a device: if there is something in the output
+buffer then start_output_device() is called; start_input_device() is
+always called.
+
+When just looking at the InputDevice or OutputDevice, there are
+four common states:
+
+    1. Active
+    2. Added
+    3. Removed
+    4. Closed
+
+An output device also has a fifth state:
+
+    5. Flushing
+
+The meaning of these states is as follows.
+
+1. Active
+
+In this state the fd is added to the epoll interest list and its
+is being watched for its event (EPOLLIN for InputDevice and EPOLLOUT
+for OutputDevice). This is the typical state that an input device
+would be in directly after initialization (and an output device
+when there is already data in its output buffer).
+
+2. Added
+
+In this state the fd is also added to the epoll interest list, but
+it is not being watched for its event.
+
+3. Removed
+
+In this state the fd is not (anymore) in the epoll interest list.
+Most notably this means there isn't a void* userdata that contains
+a pointer to the device object, so it is safe to delete it.
+
+4. Closed
+
+In this state the fd is also Removed, but it might mean that the
+fd is closed: if this is a device that is inherited from just
+InputDevice or just OutputDevice then the fd will be closed.
+Otherwise, when it is derived from both InputDevice and OutputDevice,
+then the fd is only closed when its counter part is also in the
+Closed state. If that is the case, then the state of the Device
+becomes 'Dead'.
+
+As long as a device is not Dead, Closed is the almost the same
+as Removed and it may in principle returned to the Active state;
+however - that is not what should happen. The Closed state should
+more or less be final and just waiting for the counter part to
+be closed as well - if it exists and wasn't closed yet.
+
+5. Flushing
+
+In this state the OutputDevice is basically Active, but a transition
+from Active to Added is no longer possible. Instead it can only
+go from Active to Closed.
+
+
+Transitions are made by calls to the member functions start(),
+stop(), remove(), close() and flush().
+
+                 init_input_device()
+                          |
+.-----------------------. |                                        
+|                       v v                                                           .--------------------------. 
+'-stop_input_device()--Removed------------------start_input_device()----------------. |                          |
+                          | .------------------------.                              v v                          |
+                          | |                        v  .--start_input_device()--->Active---start_input_device()-'
+                          | '-stop_input_device()---Added<---stop_input_device()---' |
+                          |                           |                              |
+                 close_input_device()        close_input_device()           close_input_device()
+                          |                           |                              |
+                          |                           v                              |
+                          `------------------------>Closed<--------------------------'
+
+
+                 init_output_device()
+                          |
+.-----------------------. |                                        
+|                       v v                                                           .--------------------------. 
+'-stop_output_device()-Removed-----------------start_output_device()----------------. |                          |
+                          | .------------------------.                              v v                          |       .--------------------------------------------------.
+                          | |                        v  .--start_output_device()-->Active--start_output_device()-'       v                                                  |
+                          | '-stop_output_device()--Added<--stop_output_device()---' | '---flush_output_device()--->Flushing---flush_output_device()/start_output_device()--'
+                          |                           |                              |                                 |
+                 close_output_device()/      close_output_device()/         close_output_device()              stop_output_device()/
+                 flush_output_device()       flush_output_device()                   |                         close_output_device()
+                          |                           v                              |                                 |
+                          `------------------------>Closed<--------------------------'<--------------------------------'
+

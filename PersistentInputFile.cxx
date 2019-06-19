@@ -43,7 +43,7 @@ RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _
 {
   PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
   DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero() [" << self << ']');
-  RefCountReleaser need_allow_deletion = self->stop_input_device(flags_t::wat(self->m_flags));
+  self->stop_input_device();
   // Add an inotify watch for modification of the corresponding path (if not already watched).
   if (!self->is_watched() && !self->open_filename().empty())
   {
@@ -53,7 +53,7 @@ RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _
                                                         // by PersistentInputFile::closed() after that called `need_allow_deletion = this`.
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << self << ']');
   }
-  return need_allow_deletion;
+  return {};
 }
 
 } // namespace evio

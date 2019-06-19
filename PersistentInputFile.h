@@ -48,6 +48,8 @@ class PersistentInputFile : public File, private INotify
         /*InputDevice*/
       { nullptr,
         read_from_fd,
+        hup,
+        exceptional,
         read_returned_zero,
         read_error,
         data_received },
@@ -65,10 +67,10 @@ class PersistentInputFile : public File, private INotify
 
  protected:
   // Override method of INotify.
-  void event_occurred(GetThread type, inotify_event const* event) override
+  void event_occurred(inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
-      start_input_device(flags_t::wat(m_flags), type);
+      start_input_device(state_t::wat(m_state));
   }
 
  public:

@@ -698,8 +698,7 @@ int StreamBufProducer::sync()
 void StreamBufProducer::flush()
 {
   // m_odevice points to the device whose constructor this buffer was passed to.
-  PutThread type;
-  m_odevice->restart_if_non_active(type);
+  m_odevice->restart_if_non_active();
 }
 
 bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
@@ -719,19 +718,10 @@ bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
 
-#ifdef CWDEBUG
-    m_odevice->inhibit_deletion();      // Allow Debug output below to still use this object.
-    int count =
-#endif
-    m_odevice->allow_deletion();
-
-    Dout(dc::io, "this = " << this << "; Calling StreamBuf::release(" << (void*)device << "), " <<
-        m_device_counter << " output device left: " << m_odevice <<
-        "; decrementing ref count of that device (now " << (count - 2) << ").");
-
-#ifdef CWDEBUG
-    m_odevice->allow_deletion();
-#endif
+    Dout(dc::io|continued_cf, "this = " << this << "; StreamBuf::release(" << (void*)device << "), " <<
+        m_device_counter << " output device left: " << m_odevice << "; decrementing ref count of that device ");
+    CWDEBUG_ONLY(int count =) m_odevice->allow_deletion();
+    Dout(dc::finish, "(now " << (count - 1) << ").");
 
     return false;
   }

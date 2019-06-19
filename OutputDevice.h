@@ -24,9 +24,12 @@
 #pragma once
 
 #include "FileDescriptor.h"
-#include "EventLoopThread.h"
 #include "StreamBuf.h"
 #include "utils/VTPtr.h"
+
+namespace utils {
+class FuzzyCondition;
+} // namespace utils
 
 namespace evio {
 
@@ -102,12 +105,19 @@ class OutputDevice : public virtual FileDescriptor
   // no put thread is running -- aka nobody is writing to the device -- when this
   // function is being called.
   friend class OutputDevicePtr;
-  void start_output_device(flags_t::wat const& flags_w, PutThread, utils::FuzzyCondition const& condition);
-  void start_output_device(flags_t::wat const& flags_w, PutThread);
-  RefCountReleaser stop_output_device(flags_t::wat const& flags_w, GetThread type, utils::FuzzyCondition const& condition);
-  RefCountReleaser stop_output_device(flags_t::wat const& flags_w);
+  void start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  void start_output_device(state_t::wat const& state_w);
+  RefCountReleaser stop_output_device();
+  RefCountReleaser stop_output_device(utils::FuzzyCondition const& condition);
+  [[gnu::always_inline]] inline void stop_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  [[gnu::always_inline]] inline void stop_output_device(state_t::wat const& state_w);
+
+  RefCountReleaser remove_output_device(state_t::wat const& state_w);
   void disable_output_device();
-  void enable_output_device(PutThread type);
+  void enable_output_device();
+
+  [[gnu::always_inline]] void start_output_device() { start_output_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] RefCountReleaser remove_output_device() { return remove_output_device(state_t::wat(m_state)); }
 
  protected:
   OutputDevice();
@@ -118,7 +128,7 @@ class OutputDevice : public virtual FileDescriptor
 
  private:
   // Override base class member function.
-  void init_output_device(flags_t::wat const& flags_w) override;
+  void init_output_device(state_t::wat const& state_w) override;
 
  public:
   //---------------------------------------------------------------------------
@@ -139,7 +149,7 @@ class OutputDevice : public virtual FileDescriptor
     static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
                   "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
 
-    bool is_active = flags_t::crat(m_flags)->is_active_output_device();
+    bool is_active = state_t::crat(m_state)->m_flags.is_active_output_device();
 
     // Basically we need the following table to hold:
     //  Currently active  SingleThread    AnyThread       GetThread       PutThread
@@ -149,13 +159,13 @@ class OutputDevice : public virtual FileDescriptor
     return is_active ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
   }
 
-  void restart_if_non_active(PutThread type)
+  void restart_if_non_active()
   {
     // This function should be called only from Buf2Dev::flush and OutputDevice::enable_output_device, and therefore be an output device.
-    flags_t::wat flags_w(m_flags);
-    ASSERT(flags_w->is_output_device());
-    if (flags_w->is_writable() && !flags_w->is_active_output_device())
-      start_output_device(flags_w, type);
+    state_t::wat state_w(m_state);
+    ASSERT(state_w->m_flags.is_output_device());
+    if (state_w->m_flags.is_writable() && !state_w->m_flags.is_active_output_device())
+      start_output_device(state_w);
   }
 
  public:
@@ -169,6 +179,7 @@ class OutputDevice : public virtual FileDescriptor
   template<typename DEVICE, typename... Args>
   void output(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
 
+  RefCountReleaser flush_output_device();
   RefCountReleaser close_output_device() override;
 
  private:
@@ -179,7 +190,7 @@ class OutputDevice : public virtual FileDescriptor
   }
 
  protected:
-  void write_to_fd(int fd) { VT_ptr->_write_to_fd(this, fd); }
+  void write_event() override { VT_ptr->_write_to_fd(this, m_fd); }
   void write_error(int err) { VT_ptr->_write_error(this, err); }
 
   // Called from the streambuf associated with this device when pubsync() is called on it.

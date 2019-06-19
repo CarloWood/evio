@@ -43,6 +43,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
  public:
   void execute()
   {
+    DoutEntering(dc::notice, "RefCountReleaser::execute() [with m_ptr = " << m_ptr << "]");
     if (m_ptr)
     {
       // Cancel the call to inhibit_deletion().
@@ -52,17 +53,33 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     m_ptr = nullptr;
   }
   RefCountReleaser() : m_ptr(nullptr) { }
-  ~RefCountReleaser() { execute(); }
-  RefCountReleaser(RefCountReleaser&& releaser) : m_ptr(releaser.m_ptr) { releaser.m_ptr = nullptr; }
-  RefCountReleaser& operator=(RefCountReleaser&& releaser) { ASSERT(!m_ptr); m_ptr = releaser.m_ptr; releaser.m_ptr = nullptr; return *this; }
+  ~RefCountReleaser()
+  {
+    DoutEntering(dc::notice, "~RefCountReleaser()");
+    execute();
+  }
+  RefCountReleaser(RefCountReleaser&& releaser) : m_ptr(releaser.m_ptr)
+  {
+    DoutEntering(dc::notice, "RefCountReleaser::RefCountReleaser({RefCountReleaser&&:" << releaser.m_ptr << "})");
+    releaser.m_ptr = nullptr;
+  }
+  RefCountReleaser& operator=(RefCountReleaser&& releaser)
+  {
+    DoutEntering(dc::notice, "RefCountReleaser::operator=({RefCountReleaser&&:" << releaser.m_ptr << "})");
+    ASSERT(!m_ptr);
+    m_ptr = releaser.m_ptr;
+    releaser.m_ptr = nullptr;
+    return *this;
+  }
   RefCountReleaser& operator+=(RefCountReleaser&& releaser)
   {
+    DoutEntering(dc::notice, "RefCountReleaser::operator+=(" << releaser.m_ptr << ") [with this m_ptr = " << m_ptr << "]");
     if (AI_LIKELY(releaser.m_ptr))
     {
       if (m_ptr)
       {
         ASSERT(m_ptr == releaser.m_ptr);
-        ASSERT(m_ptr->unique().is_momentary_false()); // If momentary false than fuzzy::False because neither this nor releaser will call execute() before the next line.
+        ASSERT(m_ptr->unique().is_momentary_false()); // If momentary false then fuzzy::False because neither this nor releaser will call execute() before the next line.
         // It is safe to call this because it won't delete the underlaying object (m_ptr);
         // it is from now on kept alive by this RefCountReleaser.
         releaser.execute();
@@ -76,8 +93,16 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     }
     return *this;
   }
-  void operator=(AIRefCount* ptr) { ASSERT(!m_ptr); m_ptr = ptr; }
-  void reset() { m_ptr = nullptr; }
+  void operator=(AIRefCount* ptr)
+  {
+    DoutEntering(dc::notice, "RefCountReleaser::operator=(" << m_ptr << ")");
+    ASSERT(!m_ptr); m_ptr = ptr;
+  }
+  void reset()
+  {
+    DoutEntering(dc::notice, "RefCountReleaser::reset() [changing m_ptr from " << m_ptr << " to nullptr]");
+    m_ptr = nullptr;
+  }
   operator bool() const { return m_ptr; }
 };
 

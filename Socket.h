@@ -73,6 +73,8 @@ class Socket : public InputDevice, public OutputDevice
         /*InputDevice*/
       { nullptr,
         read_from_fd,
+        hup,
+        exceptional,
         read_returned_zero,
         read_error,
         data_received },

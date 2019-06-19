@@ -40,11 +40,11 @@ class OutputDevicePtr
  protected:
   OutputDevice* m_output_device;
 
-  void start_output_device(PutThread type)
+  void start_output_device()
   {
-    FileDescriptor::flags_t::wat flags_w(m_output_device->m_flags);
-    if (!flags_w->is_active_output_device())
-      m_output_device->start_output_device(flags_w, type);
+    FileDescriptor::state_t::wat state_w(m_output_device->m_state);
+    if (!state_w->m_flags.is_active_output_device())
+      m_output_device->start_output_device(state_w);
   }
 
   friend class OutputDevice;

@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "Socket.h"
+#include "EventLoopThread.h"
 #include "utils/AIAlert.h"
 #include <netdb.h>
 #include <sys/socket.h>
@@ -35,7 +36,7 @@ namespace evio {
 
 bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
 {
-  if (flags_t::rat(m_flags)->is_open())
+  if (state_t::rat(m_state)->m_flags.is_open())
     return false;
 
   // The address to connect needs to make sense.
@@ -76,7 +77,7 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
 void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, bool signal_connected)
 {
 #ifdef CWDEBUG
-  if (flags_t::wat(m_flags)->is_open())
+  if (get_flags().is_open())
     DoutFatal(dc::core, "Trying to `init' a Socket that is already open.");
 #endif
 
@@ -114,16 +115,15 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   }
 
   FileDescriptor::init(fd);     // link in
-  flags_t::wat flags_w(m_flags);
-  SingleThread type;
+  state_t::wat state_w(m_state);
   if (m_ibuffer)
-    start_input_device(flags_w, type);
+    start_input_device(state_w);
   if (signal_connected)
-    start_output_device(flags_w, type);
+    start_output_device(state_w);
   else if (m_obuffer)
   {
     if (!m_obuffer->buffer_empty())   // Must be the same thread as the thread that created the buffer.
-      start_output_device(flags_w, type);
+      start_output_device(state_w);
   }
 }
 
@@ -144,7 +144,6 @@ void Socket::VT_impl::read_from_fd(InputDevice* _self, int fd)
 // Read thread.
 void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
 {
-  GetThread type;
   Socket* self = static_cast<Socket*>(_self);
   if (AI_UNLIKELY(!(self->m_connected_flags & is_connected)))
   {
@@ -161,14 +160,14 @@ void Socket::VT_impl::write_to_fd(OutputDevice* _self, int fd)
         });
         if (condition_empty_buffer.is_momentary_true())
         {
-          self->stop_output_device(FileDescriptor::flags_t::wat(self->m_flags), type, condition_empty_buffer);
+          self->stop_output_device(condition_empty_buffer);
           return;
         }
       }
       else
       {
         Dout(dc::warning, "Socket::VT_impl::write_to_fd: Closing output device because it has no output buffer [" << self << "]");
-        self->stop_output_device(FileDescriptor::flags_t::wat(self->m_flags));
+        self->stop_output_device();
         return;
       }
     }
@@ -217,7 +216,7 @@ void Socket::VT_impl::disconnected(Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY
 SocketAddress Socket::local_address() const
 {
   // Don't call this function when !is_open() (aka, init() was called).
-  ASSERT(flags_t::crat(m_flags)->is_open());
+  ASSERT(state_t::crat(m_state)->m_flags.is_open());
   SocketAddress result;
   socklen_t namelen = sizeof(result);
 

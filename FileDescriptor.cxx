@@ -33,6 +33,54 @@
 #include <fcntl.h>
 #endif
 
+char const* epoll_op_str(int op)
+{
+  switch (op)
+  {
+    AI_CASE_RETURN(EPOLL_CTL_ADD);
+    AI_CASE_RETURN(EPOLL_CTL_MOD);
+    AI_CASE_RETURN(EPOLL_CTL_DEL);
+  }
+  return "Unknown epoll op";
+}
+
+char const* epoll_event_str(uint32_t event)
+{
+  switch (event)
+  {
+    AI_CASE_RETURN(EPOLLIN);
+    AI_CASE_RETURN(EPOLLOUT);
+    AI_CASE_RETURN(EPOLLRDHUP);
+    AI_CASE_RETURN(EPOLLPRI);
+    AI_CASE_RETURN(EPOLLERR);
+    AI_CASE_RETURN(EPOLLHUP);
+    AI_CASE_RETURN(EPOLLET);
+    AI_CASE_RETURN(EPOLLONESHOT);
+    AI_CASE_RETURN(EPOLLWAKEUP);
+    AI_CASE_RETURN(EPOLLEXCLUSIVE);
+  }
+  return "Unknown epoll event";
+}
+
+std::string epoll_events_str(uint32_t events)
+{
+  std::string result;
+  char const* separator = "";
+  for (uint32_t event = 1; event != 0; event <<= 1)
+    if ((events & event))
+    {
+      result += separator;
+      result += epoll_event_str(event);
+      separator = "|";
+    }
+  return result;
+}
+
+std::ostream& operator<<(std::ostream& os, epoll_event const& event)
+{
+  return os << "{events:" << epoll_events_str(event.events) << ", data:" << event.data.ptr << "}";
+}
+
 namespace evio {
 
 void set_nonblocking(int fd)
@@ -90,6 +138,8 @@ bool is_valid(int fd)
 void FileDescriptor::init(int fd)
 {
   DoutEntering(dc::io, "FileDescriptor::init(" << fd << ") [" << (void*)this << ']');
+  // Close the device before opening it again.
+  ASSERT(!is_valid(m_fd));
   // Only call init() with a valid, open filedescriptor.
   ASSERT(is_valid(fd));
 
@@ -97,11 +147,11 @@ void FileDescriptor::init(int fd)
   set_nonblocking(fd);
 
   // Reset all flags except FDS_RW.
-  flags_t::wat flags_w(m_flags);
-  flags_w->reset();
+  state_t::wat state_w(m_state);
+  state_w->m_flags.reset();
   m_fd = fd;
-  init_input_device(flags_w);
-  init_output_device(flags_w);
+  init_input_device(state_w);
+  init_output_device(state_w);
 }
 
 } // namespace evio

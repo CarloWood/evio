@@ -24,16 +24,21 @@
 #pragma once
 
 #include "utils/AIRefCount.h"
+#include "utils/log2.h"
 #include "threadsafe/aithreadsafe.h"
 #include "RefCountReleaser.h"
 #include <cstdint>
 #include <atomic>
+#include <sys/epoll.h>
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 extern channel_ct evio;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
+
+char const* epoll_op_str(int op);
+std::ostream& operator<<(std::ostream& os, epoll_event const& event);
 
 namespace evio {
 
@@ -43,26 +48,69 @@ bool is_valid(int fd);
 class FileDescriptorFlags
 {
  public:
-  using mask_t = uint32_t;
+  using mask_t = uint64_t;
 
-  static int constexpr disabled_shft = 2;
-  static int constexpr open_shft = 4;
-  static mask_t constexpr FDS_W                   = 0x80000000;
-  static mask_t constexpr FDS_R                   = 0x40000000;
+  // .-FDS_SAME
+  // |    .-FDS_DEAD
+  // |    |.-INTERNAL_FDS_DONT_CLOSE
+  // |    ||.-FDS_DEBUG        <-infer->
+  // |    |||                  <--disabled_shft->                       _ epoll_width
+  // |    |||                  <--------open_shft-------->             /
+  // v    vvv                  <-----------------added_shft-------><------->
+  // 10000111 00000000 00000101 00000101 00000101 00000101 00000101 00000101
+  //                        ^ ^      ^ ^      ^ ^      ^ ^      ^ ^      ^ ^
+  //                        | |      | |      | |      | |      | |      |  \_ FDS_R_ACTIVE = EPOLLIN
+  //                        | |      | |      | |      | |      | |       \___ FDS_W_ACTIVE = EPOLLOUT
+  //                        | |      | |      | |      | |      | `-FDS_R_ADDED
+  //                        | |      | |      | |      | |      `-FDS_W_ADDED
+  //                        | |      | |      | |      | `-FDS_R_OPEN
+  //                        | |      | |      | |      `-FDS_W_OPEN
+  //                        | |      | |      | `-FDS_R_DISABLED
+  //                        | |      | |      `-FDS_W_DISABLED
+  //                        | |      | `-FDS_R_INFERIOR
+  //                        | |      `-FDS_W_INFERIOR
+  //                        | `-FDS_R
+  //                        `-FDS_W
+
+  static int constexpr epoll_width = utils::log2(EPOLLIN | EPOLLOUT) + 1;
+  static int constexpr inferior_shft = epoll_width;
+  static int constexpr disabled_shft = 2 * epoll_width;
+  static int constexpr open_shft = 3 * epoll_width;
+  static int constexpr added_shft = 4 * epoll_width;
+
+  static mask_t constexpr FDS_R_ACTIVE            = EPOLLIN;                    // Set when epoll is using a pointer to this object (is watching this fd for input activity).
+  static mask_t constexpr FDS_W_ACTIVE            = EPOLLOUT;                   // Set when epoll is using a pointer to this object (is watching this fd for output activity).
+
+  static int constexpr active_to_type_shft = added_shft + epoll_width;
+  static mask_t constexpr FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;
+  static mask_t constexpr FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;
   static mask_t constexpr FDS_RW                  = FDS_R | FDS_W;
-  static mask_t constexpr FDS_W_DISABLED          = 0x20000000;        // Must be FDS_W >> disabled_shft.
-  static mask_t constexpr FDS_R_DISABLED          = 0x10000000;        // Must be FDS_R >> disabled_shft.
-  static mask_t constexpr FDS_W_OPEN              = 0x08000000;        // Must be FDS_W >> open_shft.
-  static mask_t constexpr FDS_R_OPEN              = 0x04000000;        // Must be FDS_R >> open_shft.
-  static mask_t constexpr FDS_SAME                = 0x02000000;
-  static mask_t constexpr FDS_R_INFERIOR          = 0x01000000;
-  static mask_t constexpr FDS_DEAD                = 0x00800000;
-  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x00400000;
+
+  static mask_t constexpr FDS_R_ADDED             = FDS_R >> added_shft;
+  static mask_t constexpr FDS_W_ADDED             = FDS_W >> added_shft;
+  static mask_t constexpr FDS_ADDED               = FDS_R_ADDED | FDS_W_ADDED;
+  static int constexpr active_to_added_shft = active_to_type_shft - added_shft;
+
+  static mask_t constexpr FDS_R_OPEN              = FDS_R >> open_shft;         // See is_open() below.
+  static mask_t constexpr FDS_W_OPEN              = FDS_W >> open_shft;
+  static int constexpr active_to_open_shft = active_to_type_shft - open_shft;
+
+  static mask_t constexpr FDS_R_DISABLED          = FDS_R >> disabled_shft;     // See is_disabled() below.
+  static mask_t constexpr FDS_W_DISABLED          = FDS_W >> disabled_shft;
+  static int constexpr active_to_disabled_shft = active_to_type_shft - disabled_shft;
+
+  static mask_t constexpr FDS_R_INFERIOR          = FDS_R >> inferior_shft;
+  static mask_t constexpr FDS_W_INFERIOR          = FDS_W >> inferior_shft;
+  static int constexpr active_to_inferior_shft = active_to_type_shft - inferior_shft;
+
+  static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;
+  static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;
+  static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;
+  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;
 #ifdef CWDEBUG
-  static mask_t constexpr FDS_DEBUG               = 0x00100000;
+  static mask_t constexpr FDS_DEBUG               = 0x0100000000000000UL;
 #endif
-  static mask_t constexpr FDS_W_ACTIVE            = 0x00000002;        // Set when epoll is using a pointer to this object (is watching this fd for output activity).
-  static mask_t constexpr FDS_R_ACTIVE            = 0x00000001;        // Set when epoll is using a pointer to this object (is watching this fd for input activity).
+  static_assert(FDS_W < FDS_DEBUG, "epoll_width is too large!");
 
  private:
   mask_t m_mask;
@@ -95,6 +143,12 @@ class FileDescriptorFlags
   // Return true if the main event loop must return even when this input device is still active.
   bool is_r_inferior() const { return m_mask & FDS_R_INFERIOR; }
 
+  // Return true if this output device is 'flushing'.
+  bool is_w_flushing() const { return m_mask & FDS_W_FLUSHING; }
+
+  // Return true if this object is inferior for the action passed in active_flag.
+  bool test_inferior(mask_t active_flag) const { return m_mask & (active_flag << active_to_inferior_shft); }
+
   // Returns true if this object is not associated with a working fd.
   bool is_dead() const { return m_mask & FDS_DEAD; }
 
@@ -106,6 +160,18 @@ class FileDescriptorFlags
 
   // Return true if this object is disabled for reading.
   bool is_r_disabled() const { return m_mask & FDS_R_DISABLED; }
+
+  // Return true if this object is disabled for the action passed in active_flag.
+  bool test_disabled(mask_t active_flag) const { return m_mask & (active_flag << active_to_disabled_shft); }
+
+  // Return true if this object is added to the kernel epoll structure because it is an input device.
+  bool is_r_added() const { return m_mask & FDS_R_ADDED; }
+
+  // Return true if this object is added to the kernel epoll structure because it is an output device.
+  bool is_w_added() const { return m_mask & FDS_W_ADDED; }
+
+  // Return true if this object was added to the kernel epoll structure.
+  bool is_added() const { return m_mask & FDS_ADDED; }
 
   // Returns true if this object is being watched for writability.
   bool is_active_output_device() const { return m_mask & FDS_W_ACTIVE; }
@@ -143,6 +209,9 @@ class FileDescriptorFlags
   // Reset the FDS_R_DISABLED flag.
   void unset_r_disabled() { m_mask &= ~FDS_R_DISABLED; }
 
+  // Set the INTERNAL_FDS_DONT_CLOSE flag.
+  void set_dont_close() { m_mask |= INTERNAL_FDS_DONT_CLOSE; }
+
   // Mark this object as having a fd open for writing.
   void set_w_open()
   {
@@ -170,8 +239,64 @@ class FileDescriptorFlags
   // Mark this device as inferior input; that is - the appliction will terminate even if this input device is still active.
   void set_r_inferior() { m_mask |= FDS_R_INFERIOR; }
 
+  // Mark this device as flushing: the next call to stop_output_device() will have the same effect as close_output_device().
+  void set_w_flushing() { m_mask |= FDS_W_FLUSHING; }
+
+  // Remove the flushing flag.
+  void unset_w_flushing() { m_mask &= ~FDS_W_FLUSHING; }
+
   // Mark this object as dead.
   void set_dead() { m_mask |= FDS_DEAD; }
+
+  // Return true iff the device was active. Clears active flag.
+  bool test_and_clear_active(mask_t active_flag)
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    mask_t prev_mask = m_mask;
+    mask_t need_change = prev_mask & active_flag;
+    m_mask = prev_mask ^ need_change;
+    return need_change;
+  }
+
+  void set_active(mask_t active_flag)
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    m_mask |= active_flag;
+  }
+
+  void clear_active(mask_t active_flag)
+  {
+    m_mask &= ~active_flag;
+  }
+
+  bool test_and_set_active(mask_t active_flag)
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    mask_t prev_mask = m_mask;
+    mask_t need_change = ~prev_mask & active_flag;
+    m_mask = prev_mask | need_change;
+    return need_change;
+  }
+
+  // Clear the ADDED flag; return true on change (aka, originally the flag was set).
+  bool test_and_clear_added(mask_t active_flag)
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    mask_t added_flag = active_flag << active_to_added_shft;
+    bool was_added = m_mask & FDS_ADDED;
+    m_mask &= ~added_flag;
+    return was_added;
+  }
+
+  // Set the ADDED flag; return true on change (aka, originally the flag was unset).
+  bool test_and_set_added(mask_t active_flag)
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    mask_t added_flag = active_flag << active_to_added_shft;
+    bool already_added = m_mask & FDS_ADDED;
+    m_mask |= added_flag;
+    return !already_added;
+  }
 
   FileDescriptorFlags() : m_mask(0) { }
 };
@@ -179,30 +304,60 @@ class FileDescriptorFlags
 class FileDescriptor : public AIRefCount
 {
  public:
-  using flags_t = aithreadsafe::Wrapper<FileDescriptorFlags, aithreadsafe::policy::Primitive<std::mutex>>;
+  struct State
+  {
+    FileDescriptorFlags m_flags;
+    struct epoll_event m_epoll_event;
+  };
+  using state_t = aithreadsafe::Wrapper<State, aithreadsafe::policy::Primitive<std::mutex>>;
 
  protected:
-  int m_fd;                             // The file descriptor. In the case of a device that is derived from both,
-                                        // InputDevice and OutputDevice using multiple inheritance -- this fd is
-                                        // used for both input and output.
-  flags_t m_flags;
-
-#ifdef CWDEBUG
-  // For inspection only.
-  int get_fd() const { return m_fd; }
-#endif
+  state_t m_state;
+  int m_fd;                           // The file descriptor. In the case of a device that is derived from both,
+                                      // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                      // used for both input and output.
 
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
 
+#ifdef CWDEBUG
+  // For inspection only.
+  int get_fd() const { return m_fd; }
+  FileDescriptorFlags const get_flags() { return state_t::wat(m_state)->m_flags; }
+#endif
+
+ public:
+  void start_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_adding)
+  {
+    state_w->m_epoll_event.events |= events;
+    int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+    Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
+    CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
+    Dout(dc::finish|cond_error_cf(ret == -1), ret);
+  }
+
+  void stop_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_removal)
+  {
+    state_w->m_epoll_event.events &= ~events;
+    int op = needs_removal ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
+    Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
+    CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
+    Dout(dc::finish|cond_error_cf(ret == -1), ret);
+  }
+
+  virtual void read_event() { DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object that isn't an InputDevice."); }
+  virtual void write_event() { DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object that isn't an OutputDevice."); }
+  virtual void hup_event() { DoutFatal(dc::core, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
+  virtual void exceptional_event() { DoutFatal(dc::core, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
+
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
   // Both are called by init().
-  virtual void init_input_device(flags_t::wat const& UNUSED_ARG(flags_w)) { }
-  virtual void init_output_device(flags_t::wat const& UNUSED_ARG(flags_w)) { }
+  virtual void init_input_device(state_t::wat const& UNUSED_ARG(state_w)) { }
+  virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptor() : m_fd(-1) { }
+  FileDescriptor() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, this}; }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }
@@ -217,8 +372,8 @@ class FileDescriptor : public AIRefCount
   }
 
   // Events.
-  // The filedescriptor(s) of this device were just closed (close_fds() was called).
-  // If INTERNAL_FDS_DONT_CLOSE is set then the fd(s) weren't really closed, but this method is still called.
+  // The filedescriptor of this device was just closed.
+  // If INTERNAL_FDS_DONT_CLOSE is set then the fd wasn't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
   virtual RefCountReleaser closed() { return RefCountReleaser(); }
 

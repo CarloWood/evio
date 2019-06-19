@@ -30,7 +30,7 @@ namespace evio {
 void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
 {
   // Don't call listen() twice on a row. First close() the listen socket again.
-  ASSERT(!flags_t::rat(m_flags)->is_r_open());
+  ASSERT(!state_t::rat(m_state)->m_flags.is_r_open());
 
   Dout(dc::system|continued_cf, "socket(" << bind_addr.family() << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
   int fd = socket(bind_addr.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -100,9 +100,8 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   Dout(dc::notice, "Added listen socket " << fd << " at " << m_bind_addr);
 
   // input() does not need to be called here, because we override read_from_fd.
-  flags_t::wat flags_w(m_flags);
-  SingleThread type;
-  start_input_device(m_flags, type);
+  state_t::wat state_w(m_state);
+  start_input_device(state_w);
 }
 
 void ListenSocketDevice::VT_impl::read_from_fd(InputDevice* _self, int fd)

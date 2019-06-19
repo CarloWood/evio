@@ -28,7 +28,6 @@
 #define EVIO_INPUT_DEVICE_H
 
 #include "FileDescriptor.h"
-#include "EventLoopThread.h"
 #include "StreamBuf.h"
 #include "utils/VTPtr.h"
 
@@ -46,6 +45,8 @@ class InputDevice : public virtual FileDescriptor
   {
     void* _input_user_data;     // Only use this after cloning a virtual table.
     void (*_read_from_fd)(InputDevice* self, int fd);
+    void (*_hup)(InputDevice* self, int fd);
+    void (*_exceptional)(InputDevice* self, int fd);
     RefCountReleaser (*_read_returned_zero)(InputDevice* self);
     RefCountReleaser (*_read_error)(InputDevice* self, int err);
     RefCountReleaser (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
@@ -65,6 +66,12 @@ class InputDevice : public virtual FileDescriptor
     // it calls the virtual function read_error, see below.
     static void read_from_fd(InputDevice* self, int fd);
 
+    // Stream socket peer closed connection, or shut down writing half of connection.
+    static void hup(InputDevice* self, int fd);
+
+    // There is some exceptional condition on the file descriptor. For example out-of-band data on a TCP socket.
+    static void exceptional(InputDevice* self, int fd);
+
     // The default behaviour is to close() the filedescriptor.
     static RefCountReleaser read_returned_zero(InputDevice* self) { return self->close_input_device(); }        // Read thread.
 
@@ -79,6 +86,8 @@ class InputDevice : public virtual FileDescriptor
       /*InputDevice*/
       nullptr,
       read_from_fd,
+      hup,
+      exceptional,
       read_returned_zero,
       read_error,
       data_received
@@ -91,11 +100,6 @@ class InputDevice : public virtual FileDescriptor
   utils::VTPtr<InputDevice> VT_ptr;
 
  private:
-  //---------------------------------------------------------------------------
-  // Inferface with libev.
-  //
-
-  //ev_io m_input_watcher;                // The watcher.
   using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
 
@@ -109,10 +113,15 @@ class InputDevice : public virtual FileDescriptor
 
  protected:
   friend class InputDeviceEventsHandler;
-  void start_input_device(flags_t::wat const& flags_w, GetThread);
-  RefCountReleaser stop_input_device(flags_t::wat const& flags_w);
+  void start_input_device(state_t::wat const& state_w);
+  void stop_input_device(state_t::wat const& state_w);
+  RefCountReleaser remove_input_device(state_t::wat const& state_w);
   void disable_input_device();
-  void enable_input_device(GetThread type);
+  void enable_input_device();
+
+  [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] void stop_input_device() { stop_input_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] RefCountReleaser remove_input_device() { return remove_input_device(state_t::wat(m_state)); }
 
  protected:
   // Constructor.
@@ -143,7 +152,7 @@ class InputDevice : public virtual FileDescriptor
     static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
                   "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
 
-    bool is_active = flags_t::crat(m_flags)->is_active_input_device();
+    bool is_active = state_t::crat(m_state)->m_flags.is_active_input_device();
 
     // Basically we need the following table to hold:
     //  Currently active  SingleThread    AnyThread       GetThread       PutThread
@@ -171,10 +180,12 @@ class InputDevice : public virtual FileDescriptor
   friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
 
   // Override base class member function.
-  void init_input_device(flags_t::wat const& flags_w) override;
+  void init_input_device(state_t::wat const& state_w) override;
 
  protected:
-  void read_from_fd(int fd) { VT_ptr->_read_from_fd(this, fd); }
+  void read_event() override { VT_ptr->_read_from_fd(this, m_fd); }
+  void hup_event() override { VT_ptr->_hup(this, m_fd); }
+  void exceptional_event() override { VT_ptr->_exceptional(this, m_fd); }
   RefCountReleaser read_returned_zero() { return VT_ptr->_read_returned_zero(this); }
   RefCountReleaser read_error(int err) { return VT_ptr->_read_error(this, err); }
   RefCountReleaser data_received(char const* new_data, size_t rlen) { return VT_ptr->_data_received(this, new_data, rlen); }
