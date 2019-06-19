@@ -356,6 +356,7 @@ class FileDescriptor : public AIRefCount
 
  protected:
   FileDescriptor() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, this}; }
+  ~FileDescriptor() noexcept { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual RefCountReleaser close_input_device() { return RefCountReleaser(); }
