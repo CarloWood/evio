@@ -107,9 +107,7 @@ class FileDescriptorFlags
   static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;
   static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;
   static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;
-#ifdef CWDEBUG
   static mask_t constexpr FDS_DEBUG               = 0x0100000000000000UL;
-#endif
   static_assert(FDS_W < FDS_DEBUG, "epoll_width is too large!");
 
  private:

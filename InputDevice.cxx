@@ -253,12 +253,12 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
   }
 }
 
-void InputDevice::VT_impl::hup(InputDevice* self, int fd)
+void InputDevice::VT_impl::hup(InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "InputDevice::hup(" << fd << ") [" << self << ']');
 }
 
-void InputDevice::VT_impl::exceptional(InputDevice* self, int fd)
+void InputDevice::VT_impl::exceptional(InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "InputDevice::exceptional(" << fd << ") [" << self << ']');
 }
