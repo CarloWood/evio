@@ -82,7 +82,8 @@ StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, si
   if (block_size != m_minimum_block_size)
   {
     Dout(dc::warning, "Using a minimum block size of " << block_size << " bytes instead of requested " << m_minimum_block_size << ". "
-         "To suppress this warning use a power of two minus " << (sizeof(MemoryBlock) + CW_MALLOC_OVERHEAD) << " bytes for the minimum block size.");
+         "To suppress this warning use a power of two minus evio::block_overhead_c (" << block_overhead_c <<
+         " bytes) for the minimum block size.");
   }
   // I just think this is a bit on the small side.
   if (block_size < 64)

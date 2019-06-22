@@ -44,12 +44,12 @@ class InputDevice : public virtual FileDescriptor
   struct VT_type
   {
     void* _input_user_data;     // Only use this after cloning a virtual table.
-    void (*_read_from_fd)(InputDevice* self, int fd);
-    void (*_hup)(InputDevice* self, int fd);
-    void (*_exceptional)(InputDevice* self, int fd);
-    RefCountReleaser (*_read_returned_zero)(InputDevice* self);
-    RefCountReleaser (*_read_error)(InputDevice* self, int err);
-    RefCountReleaser (*_data_received)(InputDevice* self, char const* new_data, size_t rlen);
+    NAD_DECL((*_read_from_fd), InputDevice* self, int fd);
+    NAD_DECL((*_hup), InputDevice* self, int fd);
+    NAD_DECL((*_exceptional), InputDevice* self, int fd);
+    NAD_DECL((*_read_returned_zero), InputDevice* self);
+    NAD_DECL((*_read_error), InputDevice* self, int err);
+    NAD_DECL((*_data_received), InputDevice* self, char const* new_data, size_t rlen);
   };
 
   struct VT_impl
@@ -64,22 +64,22 @@ class InputDevice : public virtual FileDescriptor
     // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
     // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
     // it calls the virtual function read_error, see below.
-    static void read_from_fd(InputDevice* self, int fd);
+    static NAD_DECL(read_from_fd, InputDevice* self, int fd);
 
     // Stream socket peer closed connection, or shut down writing half of connection.
-    static void hup(InputDevice* self, int fd);
+    static NAD_DECL(hup, InputDevice* self, int fd);
 
     // There is some exceptional condition on the file descriptor. For example out-of-band data on a TCP socket.
-    static void exceptional(InputDevice* self, int fd);
+    static NAD_DECL(exceptional, InputDevice* self, int fd);
 
     // The default behaviour is to close() the filedescriptor.
-    static RefCountReleaser read_returned_zero(InputDevice* self) { return self->close_input_device(); }        // Read thread.
+    static NAD_DECL(read_returned_zero, InputDevice* self) { NAD_CALL(self->close_input_device); }        // Read thread.
 
     // The default behaviour is to close() the filedescriptor.
-    static RefCountReleaser read_error(InputDevice* self, int UNUSED_ARG(err)) { return self->close(); }        // Read thread.
+    static NAD_DECL(read_error, InputDevice* self, int UNUSED_ARG(err)) { return self->close(need_allow_deletion); } // Read thread.
 
     // The default behavior is to do nothing.
-    static RefCountReleaser data_received(InputDevice* self, char const* new_data, size_t rlen);
+    static NAD_DECL(data_received, InputDevice* self, char const* new_data, size_t rlen);
 
     // Virtual table of InputDevice.
     static constexpr VT_type VT{
@@ -100,7 +100,7 @@ class InputDevice : public virtual FileDescriptor
   utils::VTPtr<InputDevice> VT_ptr;
 
  private:
-  using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
+  using disable_release_t = aithreadsafe::Wrapper<int, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
 
  protected:
@@ -115,13 +115,13 @@ class InputDevice : public virtual FileDescriptor
   friend class InputDeviceEventsHandler;
   void start_input_device(state_t::wat const& state_w);
   void stop_input_device(state_t::wat const& state_w);
-  RefCountReleaser remove_input_device(state_t::wat const& state_w);
+  NAD_DECL(remove_input_device, state_t::wat const& state_w);
   void disable_input_device();
   void enable_input_device();
 
   [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }
   [[gnu::always_inline]] void stop_input_device() { stop_input_device(state_t::wat(m_state)); }
-  [[gnu::always_inline]] RefCountReleaser remove_input_device() { return remove_input_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] NAD_DECL(remove_input_device) { NAD_CALL(remove_input_device, state_t::wat(m_state)); }
 
  protected:
   // Constructor.
@@ -170,7 +170,14 @@ class InputDevice : public virtual FileDescriptor
   template<typename... Args>
   void input(InputDecoder& input_decoder, Args... input_buffer_arguments);
 
-  RefCountReleaser close_input_device() override;
+  NAD_DECL(close_input_device) override final;
+
+  NAD_DECL_PUBLIC(close_input_device)
+  {
+    NAD_PUBLIC_BEGIN;
+    NAD_CALL_FROM_PUBLIC(close_input_device);
+    NAD_PUBLIC_END;
+  }
 
  private:
   // This function is called by OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
@@ -179,16 +186,16 @@ class InputDevice : public virtual FileDescriptor
   template<typename INPUT_DEVICE, typename... Args>
   friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
 
-  // Override base class member function.
+  // Override base class virtual functions.
   void init_input_device(state_t::wat const& state_w) override;
+  NAD_DECL(read_event) override final { NAD_CALL(VT_ptr->_read_from_fd, this, m_fd); }
+  NAD_DECL(hup_event) override { NAD_CALL(VT_ptr->_hup, this, m_fd); }
+  NAD_DECL(exceptional_event) override { NAD_CALL(VT_ptr->_exceptional, this, m_fd); }
 
- protected:
-  void read_event() override { VT_ptr->_read_from_fd(this, m_fd); }
-  void hup_event() override { VT_ptr->_hup(this, m_fd); }
-  void exceptional_event() override { VT_ptr->_exceptional(this, m_fd); }
-  RefCountReleaser read_returned_zero() { return VT_ptr->_read_returned_zero(this); }
-  RefCountReleaser read_error(int err) { return VT_ptr->_read_error(this, err); }
-  RefCountReleaser data_received(char const* new_data, size_t rlen) { return VT_ptr->_data_received(this, new_data, rlen); }
+  // Events, called from VT_impl::read_from_fd.
+  NAD_DECL(read_returned_zero) { NAD_CALL(VT_ptr->_read_returned_zero, this); }
+  NAD_DECL(read_error, int err) { NAD_CALL(VT_ptr->_read_error, this, err); }
+  NAD_DECL(data_received, char const* new_data, size_t rlen) { NAD_CALL(VT_ptr->_data_received, this, new_data, rlen); }
 };
 
 } // namespace evio

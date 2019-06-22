@@ -26,34 +26,31 @@
 
 namespace evio {
 
-RefCountReleaser PersistentInputFile::closed()
+NAD_DECL(PersistentInputFile::closed)
 {
-  RefCountReleaser need_allow_deletion;
-  DoutEntering(dc::evio, "PersistentInputFile::closed() [" << this << ']');
+  DoutEntering(dc::evio, "PersistentInputFile::closed(" NAD_DoutEntering_ARG ") [" << this << ']');
   if (is_watched())
   {
     rm_watch();
-    need_allow_deletion = this;         // It is now no longer needed to keep this object alive, see below.
+    ++need_allow_deletion;      // It is now no longer needed to keep this object alive, see below.
   }
-  return need_allow_deletion;
 }
 
 // Read thread.
-RefCountReleaser PersistentInputFile::VT_impl::read_returned_zero(InputDevice* _self)
+NAD_DECL_CWDEBUG_ONLY(PersistentInputFile::VT_impl::read_returned_zero, InputDevice* _self)
 {
   PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
-  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero() [" << self << ']');
+  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero(" NAD_DoutEntering_ARG ") [" << self << ']');
   self->stop_input_device();
   // Add an inotify watch for modification of the corresponding path (if not already watched).
   if (!self->is_watched() && !self->open_filename().empty())
   {
     self->add_watch(self->open_filename().c_str(), IN_MODIFY);
     CWDEBUG_ONLY(int count =) self->inhibit_deletion(); // Keep this object alive because the call to add_watch registered m_inotify as callback object.
-                                                        // Object is kept alive until the destruction of the RefCountReleaser returned
-                                                        // by PersistentInputFile::closed() after that called `need_allow_deletion = this`.
+                                                        // Object is kept alive until a call to allow_deletion() caused by a call to
+                                                        // PersistentInputFile::closed(). See NAD.h for more info.
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << self << ']');
   }
-  return {};
 }
 
 } // namespace evio

@@ -42,8 +42,8 @@ class OutputDevice : public virtual FileDescriptor
   struct VT_type
   {
     void* _output_user_data;    // Only use this after cloning a virtual table.
-    void (*_write_to_fd)(OutputDevice*, int);
-    void (*_write_error)(OutputDevice*, int);
+    NAD_DECL((*_write_to_fd), OutputDevice*, int);
+    NAD_DECL((*_write_error), OutputDevice*, int);
   };
 
   struct VT_impl
@@ -58,10 +58,10 @@ class OutputDevice : public virtual FileDescriptor
     // 5) write(2) returned EINTR caused by SIGPIPE.
     // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
     // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-    static void write_to_fd(OutputDevice* self, int fd);
+    static NAD_DECL(write_to_fd, OutputDevice* self, int fd);
 
     // This default implementation `close's the object (which removes it).
-    static void write_error(OutputDevice* self, int UNUSED_ARG(err)) { self->close(); }
+    static NAD_DECL(write_error, OutputDevice* self, int UNUSED_ARG(err)) { NAD_CALL(self->close); }
 
     // Virtual table of OutputDevice.
     static constexpr VT_type VT{
@@ -83,7 +83,7 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   //ev_io m_output_watcher;               // The watcher.
-  using disable_release_t = aithreadsafe::Wrapper<RefCountReleaser, aithreadsafe::policy::Primitive<std::mutex>>;
+  using disable_release_t = aithreadsafe::Wrapper<int, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
 
  protected:
@@ -98,26 +98,25 @@ class OutputDevice : public virtual FileDescriptor
   // The default condition just checks if the output device is not already active.
   // When that is used, you are responsible to not call start_output_device when
   // (in the current thread) the device is already active, also in the case of
-  // races (aka, there are no possible races allowed). Passing PutThread here
-  // should take care of that in most cases, think "only the put thread will start
-  // an output device (automatically)". However, of course that means that either
-  // the caller *is* the put thread, or you are certain the device is stopped and
-  // no put thread is running -- aka nobody is writing to the device -- when this
-  // function is being called.
+  // races (aka, there are no possible races allowed).
+  // Only the producer thread will start an output device automatically. Which means
+  // that either the caller *is* the producer thread, or is certain the device is
+  // stopped and producer thread is running -- aka nobody is writing to the device
+  // when this function is being called.
   friend class OutputDevicePtr;
   void start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void start_output_device(state_t::wat const& state_w);
-  RefCountReleaser stop_output_device();
-  RefCountReleaser stop_output_device(utils::FuzzyCondition const& condition);
-  [[gnu::always_inline]] inline void stop_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
-  [[gnu::always_inline]] inline void stop_output_device(state_t::wat const& state_w);
+  NAD_DECL(stop_output_device, utils::FuzzyCondition const& condition);
+  NAD_DECL(stop_output_device);
+  [[gnu::always_inline]] inline void stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  [[gnu::always_inline]] inline void stop_not_flushing_output_device(state_t::wat const& state_w);
 
-  RefCountReleaser remove_output_device(state_t::wat const& state_w);
+  NAD_DECL(remove_output_device, state_t::wat const& state_w);
   void disable_output_device();
   void enable_output_device();
 
   [[gnu::always_inline]] void start_output_device() { start_output_device(state_t::wat(m_state)); }
-  [[gnu::always_inline]] RefCountReleaser remove_output_device() { return remove_output_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] NAD_DECL(remove_output_device) { NAD_CALL(remove_output_device, state_t::wat(m_state)); }
 
  protected:
   OutputDevice();
@@ -125,10 +124,6 @@ class OutputDevice : public virtual FileDescriptor
 
   // Disallow copy constructing.
   OutputDevice(OutputDevice const&) = delete;
-
- private:
-  // Override base class member function.
-  void init_output_device(state_t::wat const& state_w) override;
 
  public:
   //---------------------------------------------------------------------------
@@ -179,8 +174,13 @@ class OutputDevice : public virtual FileDescriptor
   template<typename DEVICE, typename... Args>
   void output(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
 
-  RefCountReleaser flush_output_device();
-  RefCountReleaser close_output_device() override;
+  NAD_DECL_PUBLIC(flush_output_device);
+  NAD_DECL_PUBLIC(close_output_device)
+  {
+    NAD_PUBLIC_BEGIN;
+    NAD_CALL_FROM_PUBLIC(close_output_device);
+    NAD_PUBLIC_END;
+  }
 
  private:
   // Called by the second output above.
@@ -189,13 +189,17 @@ class OutputDevice : public virtual FileDescriptor
     m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
   }
 
- protected:
-  void write_event() override { VT_ptr->_write_to_fd(this, m_fd); }
-  void write_error(int err) { VT_ptr->_write_error(this, err); }
-
   // Called from the streambuf associated with this device when pubsync() is called on it.
   friend class StreamBufProducer;
   virtual int sync();
+
+  // Override base class virtual functions.
+  void init_output_device(state_t::wat const& state_w) override;
+  NAD_DECL(close_output_device) override final;
+  NAD_DECL(write_event) override final { NAD_CALL(VT_ptr->_write_to_fd, this, m_fd); }
+
+  // Events, called from VT_impl::write_to_fd.
+  NAD_DECL(write_error, int err) { NAD_CALL(VT_ptr->_write_error, this, err); }
 };
 
 } // namespace evio

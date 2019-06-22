@@ -45,7 +45,7 @@ class InputDeviceEventsHandler
 
   void start_input_device() { m_input_device->start_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
   void stop_input_device() { m_input_device->stop_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
-  RefCountReleaser close_input_device() { return m_input_device->close_input_device(); }
+  NAD_DECL(close_input_device) { m_input_device->close_input_device(need_allow_deletion); }
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)
@@ -90,7 +90,7 @@ class InputDecoder : public InputDeviceEventsHandler
   }
 
   friend class InputDevice;
-  virtual RefCountReleaser decode(MsgBlock&& msg) = 0;
+  virtual NAD_DECL(decode, MsgBlock&& msg) = 0;
 };
 
 } // namespace evio

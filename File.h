@@ -96,7 +96,13 @@ class File : public InputDevice, public OutputDevice
   void open(std::string const& filename, std::ios_base::openmode mode, int prot = 0664, int additional_posix_modes = O_CLOEXEC);
 
   // Call the `close' of the base class, which does the real work.
-  void close() { m_filename.clear(); FileDescriptor::close(); }
+  NAD_DECL_PUBLIC(close)
+  {
+    NAD_PUBLIC_BEGIN;
+    m_filename.clear();
+    NAD_CALL_FROM_PUBLIC(FileDescriptor::close);
+    NAD_PUBLIC_END;
+  }
 
   //---------------------------------------------------------------------------
   // Accessors.

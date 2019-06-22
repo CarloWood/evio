@@ -137,7 +137,7 @@ bool is_valid(int fd)
 
 void FileDescriptor::init(int fd)
 {
-  DoutEntering(dc::io, "FileDescriptor::init(" << fd << ") [" << (void*)this << ']');
+  DoutEntering(dc::evio, "FileDescriptor::init(" << fd << ") [" << (void*)this << ']');
   // Close the device before opening it again.
   ASSERT(!is_valid(m_fd));
   // Only call init() with a valid, open filedescriptor.
@@ -146,12 +146,68 @@ void FileDescriptor::init(int fd)
   // Make file descriptor non-blocking by default.
   set_nonblocking(fd);
 
-  // Reset all flags except FDS_RW.
+  // Reset all flags except FDS_RW and FDS_REGULAR_FILE.
   state_t::wat state_w(m_state);
   state_w->m_flags.reset();
   m_fd = fd;
   init_input_device(state_w);
   init_output_device(state_w);
+}
+
+std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
+{
+  if (flags.is_output_device())
+    os << (flags.is_input_device() ? "FDS_RW" : "FDS_W");
+  else if (flags.is_input_device())
+    os << "FDS_R";
+
+  if (flags.dont_close())
+    os << "|INTERNAL_FDS_DONT_CLOSE";
+
+  if (flags.is_r_inferior())
+    os << "|FDS_R_INFERIOR";
+  if (flags.is_w_inferior())
+    os << "|FDS_W_INFERIOR";
+
+  if (flags.is_w_flushing())
+    os << "|FDS_W_FLUSHING";
+
+  if (flags.is_r_disabled())
+    os << "|FDS_R_DISABLED";
+  if (flags.is_w_disabled())
+    os << "|FDS_W_DISABLED";
+
+  if (flags.is_r_open())
+    os << "|FDS_R_OPEN";
+  if (flags.is_w_open())
+    os << "|FDS_W_OPEN";
+  if (flags.is_same())
+    os << "|FDS_SAME";
+
+  if (flags.is_dead())
+    os << "|FDS_DEAD";
+
+  if (flags.is_r_added())
+    os << "|FDS_R_ADDED";
+  if (flags.is_w_added())
+    os << "|FDS_W_ADDED";
+
+  if (flags.is_active_input_device())
+    os << "|FDS_R_ACTIVE";
+  if (flags.is_active_output_device())
+    os << "|FDS_W_ACTIVE";
+
+#ifdef CWDEBUG
+  if (flags.is_debug_channel())
+    os << "|FDS_DEBUG";
+#endif
+
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state)
+{
+  return os << "{m_flags:" << state.m_flags << ", m_epoll_event:" << state.m_epoll_event << "}";
 }
 
 } // namespace evio

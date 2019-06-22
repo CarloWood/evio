@@ -76,12 +76,6 @@ class ListenSocketDevice : public InputDevice
     start_input_device(state_w);
   }
 
-  // Close the socket associated with this object.
-  void close()
-  {
-    close_input_device();
-  }
-
   //---------------------------------------------------------------------------
   // Accessor:
   //
@@ -101,7 +95,7 @@ class ListenSocketDevice : public InputDevice
     // Called when the listen socket is ready to accept a new client.
     //
     // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
-    static void read_from_fd(InputDevice* self, int fd);                        // override
+    static NAD_DECL(read_from_fd, InputDevice* self, int fd);                   // override
 
     // This method is called when we are possibly out of filedescriptors.
     // It should return `true' when this is true, and can optionally take
@@ -194,9 +188,7 @@ class ListenSocket : public ListenSocketDevice
     };
   };
 
-  // Make a deep copy of VT_ptr.
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }   // Make a deep copy of VT_ptr.
   utils::VTPtr<ListenSocket, ListenSocketDevice> VT_ptr;
 
  protected:

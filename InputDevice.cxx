@@ -50,7 +50,11 @@ InputDevice::~InputDevice()
     is_r_open = state_w->m_flags.is_r_open();
   }
   if (is_r_open)
-    close_input_device();       // This will not delete the object (again) because it isn't active.
+  {
+    int need_allow_deletion = 0;
+    close_input_device(need_allow_deletion);       // This will not delete the object (again) because it isn't active.
+    ASSERT(need_allow_deletion == 0);
+  }
   if (m_ibuffer)
   {
     // Delete the input buffer if it is no longer needed.
@@ -73,8 +77,8 @@ void InputDevice::init_input_device(state_t::wat const& state_w)
 
 void InputDevice::start_input_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::start_input_device() [" << this << ']');
-  // Call InputDevice::init before calling InputDevice::start.
+  DoutEntering(dc::evio, "InputDevice::start_input_device({" << *state_w << "}) [" << this << ']');
+  // Call InputDevice::init before calling InputDevice::start_input_device.
   ASSERT(state_w->m_flags.is_r_open());
   // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
   // Did you use boost::intrusive_ptr at all? The recommended way to create a new device is
@@ -87,35 +91,27 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   if (EventLoopThread::instance().start(state_w, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until the destruction of the RefCountReleaser returned
-    // by InputDevice::stop_input_device() after that called `need_allow_deletion = this`.
+    // Object is kept alive until a call to allow_deletion(), which will be caused automatically
+    // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
+    // which also called InputDevice::remove_input_device()). See NAD.h.
     CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
 
-RefCountReleaser InputDevice::remove_input_device(state_t::wat const& state_w)
+NAD_DECL(InputDevice::remove_input_device, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::remove_input_device() [" << this << ']');
-  RefCountReleaser needs_allow_deletion;
+  DoutEntering(dc::evio, "InputDevice::remove_input_device(" NAD_DoutEntering_ARG0 "{" << *state_w << "}) [" << this << ']');
   if (EventLoopThread::instance().remove(state_w, this))
-  {
-    Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
-    needs_allow_deletion = this;
-  }
-  return needs_allow_deletion;
+    ++need_allow_deletion;
 }
 
 void InputDevice::stop_input_device(state_t::wat const& state_w)
 {
-  // We assume that stop_input_device can be called from another thread (than start_output_device)
-  // by a callback (of libev), but only after we returned from EventLoopThread::start (or rather,
-  // the destruction of the lock object in that function) at which point is_active() will return
-  // true.
-  // It is normal to call stop_output_device() when we are already stopped (ie, from close()),
+  // It is normal to call stop_input_device() when we are already stopped (ie, from close()),
   // therefore only print that we enter this function when we're actually still active.
   bool currently_active = state_w->m_flags.is_active_input_device();
-  DoutEntering(dc::evio(currently_active), "InputDevice::stop_input_device() [" << this << ']');
+  DoutEntering(dc::evio(currently_active), "InputDevice::stop_input_device({" << *state_w << "}) [" << this << ']');
   if (currently_active)
     EventLoopThread::instance().stop(state_w, this);
   // The filedescriptor, when open, is still considered to be open.
@@ -146,14 +142,17 @@ void InputDevice::enable_input_device()
       start_input_device(state_w);
     // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
     disable_release_t::wat disable_release_w(m_disable_release);
-    disable_release_w->execute();
+    while (*disable_release_w > 0)
+    {
+      --*disable_release_w;
+      allow_deletion();
+    }
   }
 }
 
-RefCountReleaser InputDevice::close_input_device()
+NAD_DECL(InputDevice::close_input_device)
 {
-  DoutEntering(dc::evio, "InputDevice::close_input_device() [" << this << ']');
-  RefCountReleaser need_allow_deletion;
+  DoutEntering(dc::evio, "InputDevice::close_input_device(" NAD_DoutEntering_ARG ") [" << this << ']');
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
@@ -164,7 +163,7 @@ RefCountReleaser InputDevice::close_input_device()
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << m_fd << ".");
 #endif
-      need_allow_deletion = remove_input_device(state_w);
+      NAD_CALL(remove_input_device, state_w);
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //
@@ -180,7 +179,9 @@ RefCountReleaser InputDevice::close_input_device()
       if (state_w->m_flags.is_r_disabled())
       {
         state_w->m_flags.unset_r_disabled();
-        disable_release_t::wat(m_disable_release)->execute();
+        disable_release_t::wat disable_release_w(m_disable_release);
+        need_allow_deletion += *disable_release_w;
+        *disable_release_w = 0;
       }
       // Mark the device as dead when it has no longer an open file descriptor.
       if (!state_w->m_flags.is_open())
@@ -191,15 +192,13 @@ RefCountReleaser InputDevice::close_input_device()
     }
   }
   if (need_call_to_closed)
-    need_allow_deletion += closed();
-  return need_allow_deletion;
+    NAD_CALL(closed);
 }
 
 // BWT.
-void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
+NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 {
-  DoutEntering(dc::evio, "InputDevice::read_from_fd(" << fd << ") [" << self << ']');
-  RefCountReleaser need_allow_deletion;
+  DoutEntering(dc::evio, "InputDevice::read_from_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
   ssize_t space = self->m_ibuffer->dev2buf_contiguous();
   for (;;)
   {
@@ -220,8 +219,8 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
     if (rlen == 0)                      // EOF reached ?
     {
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
-      self->read_returned_zero();
-      break;                            // Next time better.
+      NAD_CALL(self->read_returned_zero);
+      break;    // Next time better.
     }
 
     if (rlen == -1)                     // A read error occured ?
@@ -232,7 +231,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
       //if (err == EINTR && !SignalServer::caught(SIGPIPE))
       //  goto try_again_read1;
       if (err != EAGAIN && err != EWOULDBLOCK)
-        self->read_error(err);
+        NAD_CALL(self->read_error, err);
       break;                            // Next time better.
     }
 
@@ -242,7 +241,7 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
 
     // The data is now in the buffer. This is where we becomes the reading thread.
     // BRWT.
-    need_allow_deletion += self->data_received(new_data, rlen);
+    NAD_CALL(self->data_received, new_data, rlen);
 
     // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
     // read so far). Perhaps we should just try to continue to read until EAGAIN.
@@ -253,21 +252,20 @@ void InputDevice::VT_impl::read_from_fd(InputDevice* self, int fd)
   }
 }
 
-void InputDevice::VT_impl::hup(InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::hup, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::hup(" << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::hup(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
 }
 
-void InputDevice::VT_impl::exceptional(InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::exceptional, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::exceptional(" << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::exceptional(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
 }
 
 // BRWT.
-RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char const* new_data, size_t rlen)
+NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "InputDevice::data_received(\"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
-  RefCountReleaser need_allow_deletion;
+  DoutEntering(dc::io, "InputDevice::data_received(" NAD_DoutEntering_ARG0 "self, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
 
   // This function is both the Get Thread and the Put Thread; meaning that no other
   // thread should be accessing this buffer by either reading from it or writing to
@@ -288,7 +286,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
 
       if (self->m_ibuffer->is_contiguous(msg_len))
       {
-        need_allow_deletion += input_decoder->decode(MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
+        NAD_CALL(input_decoder->decode, MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -299,7 +297,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
         MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        need_allow_deletion += input_decoder->decode(MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        NAD_CALL(input_decoder->decode, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
@@ -307,7 +305,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (FileDescriptor::state_t::wat(self->m_state)->m_flags.is_r_disabled())
-        return need_allow_deletion;
+        return;
       rlen -= len;
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
@@ -322,14 +320,14 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      need_allow_deletion += input_decoder->decode(MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
+      NAD_CALL(input_decoder->decode, MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
       self->m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
       if (FileDescriptor::state_t::wat(self->m_state)->m_flags.is_r_disabled())
-        return need_allow_deletion;
+        return;
       rlen -= len;
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
@@ -337,7 +335,7 @@ RefCountReleaser InputDevice::VT_impl::data_received(InputDevice* self, char con
     } while ((len = input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
     break;
   }
-  return need_allow_deletion;
+  return;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))

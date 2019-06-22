@@ -166,6 +166,9 @@ class MemoryBlock
 // m_block_size should be the last member in the object, so that
 static_assert(alignof(MemoryBlock) == alignof(size_t) && sizeof(MemoryBlock) % sizeof(size_t) == 0, "Unexpected alignment of the data block part.");
 
+// Subtract this from a power of two when passing a minimum block size to StreamBuf.
+static constexpr size_t block_overhead_c = sizeof(MemoryBlock) + malloc_overhead_c;
+
 //=============================================================================
 //
 // class MsgBlock

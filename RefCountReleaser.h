@@ -93,10 +93,24 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     }
     return *this;
   }
+  void add(AIRefCount* ptr)
+  {
+    if (!m_ptr)
+      m_ptr = ptr;
+    else
+    {
+      ASSERT(m_ptr == ptr);
+      ASSERT(m_ptr->unique().is_momentary_false());
+      // Cancel a call to inhibit_deletion().
+      CWDEBUG_ONLY(int count =) m_ptr->allow_deletion();
+      Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
+    }
+  }
   void operator=(AIRefCount* ptr)
   {
     DoutEntering(dc::notice, "RefCountReleaser::operator=(" << m_ptr << ")");
-    ASSERT(!m_ptr); m_ptr = ptr;
+    ASSERT(!m_ptr);
+    m_ptr = ptr;
   }
   void reset()
   {

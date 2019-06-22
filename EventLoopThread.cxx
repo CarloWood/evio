@@ -133,6 +133,7 @@ void EventLoopThread::main()
         break;
       }
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
+      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_flags()); });
       ready = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
       Dout(dc::finish|cond_error_cf(ready == -1), ready);
     }
@@ -145,7 +146,7 @@ void EventLoopThread::main()
     {
       epoll_event& event(s_events[--ready]);
       FileDescriptor* device = static_cast<FileDescriptor*>(event.data.ptr);
-      int need_allow_deletion;
+      int need_allow_deletion = 0;
       if ((event.events & EPOLLIN))
         device->read_event(need_allow_deletion);
       if ((event.events & EPOLLOUT))
@@ -159,11 +160,8 @@ void EventLoopThread::main()
         else
           DoutFatal(dc::core, "event.events = " << std::hex << event.events);
       }
-      if (AI_UNLIKELY(need_allow_deletion != 0))
-      {
-        for (int i = 0; i < need_allow_deletion; ++i)
-          device->allow_deletion();
-      }
+      while (need_allow_deletion--)
+        device->allow_deletion();
     }
   }
 
@@ -352,7 +350,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
   // This should never happen. First of all, for speed up reasons you should only call
   // this function when condition.is_momentary_true(), secondly if the condition would
   // be transitory_false it is nonsense to check the condition again here (we really
-  // only want to call ev_io_start when the condition is true while m_loop_mutex is
+  // only want to call start_watching when the condition is true while m_loop_mutex is
   // locked) because if the condition changed from false to true due to another thread
   // then another thread either called this function or wrote to an empty buffer, both
   // of the cases means that it is a put thread; that should never happen since WE are

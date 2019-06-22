@@ -104,7 +104,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   start_input_device(state_w);
 }
 
-void ListenSocketDevice::VT_impl::read_from_fd(InputDevice* _self, int fd)
+NAD_DECL_UNUSED_ARG(ListenSocketDevice::VT_impl::read_from_fd, InputDevice* _self, int fd)
 {
   ListenSocketDevice* self = static_cast<ListenSocketDevice*>(_self);
 

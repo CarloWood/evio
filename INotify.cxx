@@ -48,7 +48,7 @@ class INotifyDecoder : public InputDecoder
 
  protected:
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
-  RefCountReleaser decode(MsgBlock&& msg) override;
+  NAD_DECL(decode, MsgBlock&& msg) override;
 };
 
 //=============================================================================
@@ -206,7 +206,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-RefCountReleaser INotifyDecoder::decode(MsgBlock&& msg)
+NAD_DECL_UNUSED_ARG(INotifyDecoder::decode, MsgBlock&& msg)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
@@ -219,7 +219,6 @@ RefCountReleaser INotifyDecoder::decode(MsgBlock&& msg)
     INotify* obj = device->get_inotify_obj(INotifyDevice::wd_to_inotify_map_ts::rat(device->m_wd_to_inotify_map), event->wd)->second;
     obj->event_occurred(event);
   }
-  return RefCountReleaser();
 }
 
 namespace {

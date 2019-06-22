@@ -53,7 +53,11 @@ OutputDevice::~OutputDevice()
     is_w_open = state_r->m_flags.is_w_open();
   }
   if (is_w_open)
-    close_output_device();    // This will not delete the object (again) because it isn't added.
+  {
+    int need_allow_deletion = 0;
+    close_output_device(need_allow_deletion);    // This will not delete the object (again) because it isn't added.
+    ASSERT(need_allow_deletion == 0);
+  }
   if (m_obuffer)
   {
     // Delete the output buffer if it is no longer needed.
@@ -66,8 +70,6 @@ void OutputDevice::init_output_device(state_t::wat const& state_w)
   DoutEntering(dc::io, "OutputDevice::init_output_device() [" << this << ']');
   // Don't call init() while the OutputDevice is already active.
   ASSERT(!state_w->m_flags.is_active_output_device());
-//  ev_io_init(&m_output_watcher, OutputDevice::write_to_fd, m_fd, EV_WRITE);
-//  m_output_watcher.data2 = this;
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   state_w->m_flags.set_w_open();
 }
@@ -82,8 +84,7 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   if (EventLoopThread::instance().start(state_w, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until the destruction of the RefCountReleaser returned
-    // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
+    // Object is kept alive until a call to allow_deletion().
     CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
@@ -97,27 +98,24 @@ void OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
   if (EventLoopThread::instance().start_if(state_w, condition, this))
   {
     // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until the destruction of the RefCountReleaser returned
-    // by either OutputDevice::stop_input_device after that called `need_allow_deletion = this`.
+    // Object is kept alive until a call to allow_deletion().
     CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
 }
 
-RefCountReleaser OutputDevice::remove_output_device(state_t::wat const& state_w)
+NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::remove_output_device() [" << this << ']');
-  RefCountReleaser needs_allow_deletion;
+  DoutEntering(dc::evio, "OutputDevice::remove_output_device(" NAD_DoutEntering_ARG ") [" << this << ']');
   if (EventLoopThread::instance().remove(state_w, this))
-    needs_allow_deletion = this;
+    ++need_allow_deletion;
   state_w->m_flags.unset_w_flushing();
-  return needs_allow_deletion;
 }
 
-RefCountReleaser OutputDevice::flush_output_device()
+NAD_DECL_PUBLIC(OutputDevice::flush_output_device)
 {
   DoutEntering(dc::evio, "OutputDevice::flush_output_device() [" << this << ']');
-  RefCountReleaser needs_allow_deletion;
+  NAD_PUBLIC_BEGIN;
   bool need_close;
   {
     state_t::wat state_w(m_state);
@@ -126,12 +124,12 @@ RefCountReleaser OutputDevice::flush_output_device()
       state_w->m_flags.set_w_flushing();
   }
   if (need_close)
-    needs_allow_deletion = close_output_device();
-  return needs_allow_deletion;
+    NAD_CALL_FROM_PUBLIC(close_output_device);
+  NAD_PUBLIC_END;
 }
 
 //inline
-void OutputDevice::stop_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
   // Don't call this function when the device is 'flushing', instead call close_output_device(condition).
   ASSERT(!state_w->m_flags.is_w_flushing());
@@ -139,7 +137,7 @@ void OutputDevice::stop_output_device(state_t::wat const& state_w, utils::FuzzyC
 }
 
 //inline
-void OutputDevice::stop_output_device(state_t::wat const& state_w)
+void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 {
   // Don't call this function when the device is 'flushing', instead call close_output_device().
   ASSERT(!state_w->m_flags.is_w_flushing());
@@ -148,31 +146,28 @@ void OutputDevice::stop_output_device(state_t::wat const& state_w)
 
 // Read and write threads; possibly other threads.
 // This function is thread-safe.
-RefCountReleaser OutputDevice::stop_output_device()
+NAD_DECL(OutputDevice::stop_output_device)
 {
-  RefCountReleaser need_allow_deletion;
   bool need_close = false;
   {
     state_t::wat state_w(m_state);
     need_close = state_w->m_flags.is_w_flushing();
     if (!need_close)
-      stop_output_device(state_w);
+      stop_not_flushing_output_device(state_w);
   }
   if (need_close)
-    need_allow_deletion = close_output_device();
-  return need_allow_deletion;
+    NAD_CALL(close_output_device);
 }
 
 // GetThread only.
-RefCountReleaser OutputDevice::stop_output_device(utils::FuzzyCondition const& condition)
+NAD_DECL(OutputDevice::stop_output_device, utils::FuzzyCondition const& condition)
 {
-  RefCountReleaser need_allow_deletion;
   bool need_close = false;
   {
     state_t::wat state_w(m_state);
     need_close = state_w->m_flags.is_w_flushing();
     if (!need_close)
-      stop_output_device(state_w, condition);
+      stop_not_flushing_output_device(state_w, condition);
     else
     {
       EventLoopThread::instance().stop_if(state_w, condition, this);
@@ -180,8 +175,7 @@ RefCountReleaser OutputDevice::stop_output_device(utils::FuzzyCondition const& c
     }
   }
   if (need_close)
-    need_allow_deletion = close_output_device();
-  return need_allow_deletion;
+    NAD_CALL(close_output_device);
 }
 
 void OutputDevice::disable_output_device()
@@ -194,13 +188,13 @@ void OutputDevice::disable_output_device()
       state_w->m_flags.set_w_disabled();
       need_close = state_w->m_flags.is_w_flushing();
       if (!need_close)
-        stop_output_device(state_w);
+        stop_not_flushing_output_device(state_w);
     }
   }
   if (need_close)
   {
     disable_release_t::wat disable_release_w(m_disable_release);
-    *disable_release_w = close_output_device();
+    close_output_device(*disable_release_w);
   }
 }
 
@@ -217,26 +211,28 @@ void OutputDevice::enable_output_device()
   {
     restart_if_non_active();
     disable_release_t::wat disable_release_w(m_disable_release);
-    disable_release_w->execute();
+    while (*disable_release_w > 0)
+    {
+      --*disable_release_w;
+      allow_deletion();
+    }
   }
 }
 
-RefCountReleaser OutputDevice::close_output_device()
+NAD_DECL(OutputDevice::close_output_device)
 {
-  DoutEntering(dc::io, "OutputDevice::close_output_device() [" << this << ']');
-  RefCountReleaser need_allow_deletion;
+  DoutEntering(dc::io, "OutputDevice::close_output_device(" NAD_DoutEntering_ARG ") [" << this << ']');
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
     if (AI_LIKELY(state_w->m_flags.is_w_open()))
     {
       state_w->m_flags.unset_w_open();
-      Dout(dc::io, "Passing device " << this << " to RefCountReleaser.");
 #ifdef CWDEBUG
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
 #endif
-      need_allow_deletion = remove_output_device(state_w);
+      NAD_CALL(remove_output_device, state_w);
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //
@@ -252,7 +248,9 @@ RefCountReleaser OutputDevice::close_output_device()
       if (state_w->m_flags.is_w_disabled())
       {
         state_w->m_flags.unset_w_disabled();
-        disable_release_t::wat(m_disable_release)->execute();
+        disable_release_t::wat disable_release_w(m_disable_release);
+        need_allow_deletion += *disable_release_w;
+        *disable_release_w = 0;
       }
       // Mark the device as dead when it has no longer an open file descriptor.
       if (!state_w->m_flags.is_open())
@@ -263,15 +261,14 @@ RefCountReleaser OutputDevice::close_output_device()
     }
   }
   if (need_call_to_closed)
-    need_allow_deletion += closed();
-  return need_allow_deletion;
+    NAD_CALL(closed);
 }
 
 // Write `m_obuffer' to fd.
 // BRT
-void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
+NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
 {
-  DoutEntering(dc::io, "OutputDevice::write_to_fd(" << fd << ") [" << self << ']');
+  DoutEntering(dc::io, "OutputDevice::write_to_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
   OutputBuffer* const obuffer = self->m_obuffer;
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {
@@ -284,7 +281,7 @@ void OutputDevice::VT_impl::write_to_fd(OutputDevice* self, int fd)
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
       // which only returns 0 when `underflow_a' returned EOF in which case that already
       // reduced the buffer if necessary.
-      self->stop_output_device();	// Buffer is empty; stop watching the fd.
+      NAD_CALL(self->stop_output_device);	// Buffer is empty; stop watching the fd.
       return;
     }
 #if EWOULDBLOCK != EAGAIN
@@ -317,7 +314,7 @@ try_again_write1:
         return;
       }
 #endif
-      self->write_error(err);
+      NAD_CALL(self->write_error, err);
       return;
     }
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);

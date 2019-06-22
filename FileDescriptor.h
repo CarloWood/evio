@@ -23,10 +23,10 @@
 
 #pragma once
 
+#include "NAD.h"
 #include "utils/AIRefCount.h"
 #include "utils/log2.h"
-#include "threadsafe/aithreadsafe.h"
-#include "RefCountReleaser.h"
+#include "utils/InstanceTracker.h"
 #include <cstdint>
 #include <atomic>
 #include <sys/epoll.h>
@@ -104,6 +104,7 @@ class FileDescriptorFlags
   static int constexpr active_to_inferior_shft = active_to_type_shft - inferior_shft;
 
   static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;
+  static mask_t constexpr FDS_REGULAR_FILE        = 0x1000000000000000UL;
   static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;
   static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;
   static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;
@@ -119,6 +120,9 @@ class FileDescriptorFlags
 
   // Return true if this object is a base class of InputDevice.
   bool is_input_device() const { return m_mask & FDS_R; }
+
+  // Return true if this object is a evio::File.
+  bool is_regular_file() const { return m_mask & FDS_REGULAR_FILE; }
 
   // Returns true if this object is a writable device.
   bool is_writable() const { return (m_mask & (FDS_W|FDS_W_DISABLED|FDS_W_OPEN|FDS_DEAD)) == (FDS_W|FDS_W_OPEN); }
@@ -137,6 +141,9 @@ class FileDescriptorFlags
 
   // Return true if this object is marked as having an open fd for reading.
   bool is_r_open() const { return m_mask & FDS_R_OPEN; }
+
+  // Return true if the main event loop must return even when this input device is still active.
+  bool is_w_inferior() const { return m_mask & FDS_W_INFERIOR; }
 
   // Return true if the main event loop must return even when this input device is still active.
   bool is_r_inferior() const { return m_mask & FDS_R_INFERIOR; }
@@ -186,14 +193,17 @@ class FileDescriptorFlags
   bool is_debug_channel() const { return m_mask & FDS_DEBUG; }
 #endif
 
-  // Reset all flags except FDS_RW.
-  void reset() { m_mask &= FDS_RW; }
+  // Reset all flags except FDS_RW and FDS_REGULAR_FILE.
+  void reset() { m_mask &= FDS_RW | FDS_REGULAR_FILE; }
 
   // Mark this object as being derived from OutputDevice.
   void set_output_device() { m_mask |= FDS_W; }
 
   // Mark this object as being derived from InputDevice.
   void set_input_device() { m_mask |= FDS_R; }
+
+  // Mark this object as being derived from File.
+  void set_regular_file() { m_mask |= FDS_REGULAR_FILE; }
 
   // Set the FDS_W_DISABLED flag.
   void set_w_disabled() { m_mask |= FDS_W_DISABLED; }
@@ -297,9 +307,11 @@ class FileDescriptorFlags
   }
 
   FileDescriptorFlags() : m_mask(0) { }
+
+  friend std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags);
 };
 
-class FileDescriptor : public AIRefCount
+class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDescriptor>
 {
  public:
   struct State
@@ -321,7 +333,7 @@ class FileDescriptor : public AIRefCount
 #ifdef CWDEBUG
   // For inspection only.
   int get_fd() const { return m_fd; }
-  FileDescriptorFlags const get_flags() { return state_t::wat(m_state)->m_flags; }
+  FileDescriptorFlags const get_flags() const { return state_t::crat(m_state)->m_flags; }
 #endif
 
  public:
@@ -343,10 +355,13 @@ class FileDescriptor : public AIRefCount
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
   }
 
-  virtual void read_event() { DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object that isn't an InputDevice."); }
-  virtual void write_event() { DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object that isn't an OutputDevice."); }
-  virtual void hup_event() { DoutFatal(dc::core, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
-  virtual void exceptional_event() { DoutFatal(dc::core, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
+ private:
+  // These are called from EventLoopThread::main().
+  friend class EventLoopThread;
+  virtual NAD_DECL_UNUSED_ARG(read_event) { DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object that isn't an InputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(write_event) { DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object that isn't an OutputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(hup_event) { DoutFatal(dc::core, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(exceptional_event) { DoutFatal(dc::core, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
 
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
@@ -359,22 +374,45 @@ class FileDescriptor : public AIRefCount
   ~FileDescriptor() noexcept { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
-  virtual RefCountReleaser close_input_device() { return {}; }
-  virtual RefCountReleaser close_output_device() { return {}; }
+  virtual NAD_DECL_UNUSED_ARG(close_input_device) { }
+  virtual NAD_DECL_UNUSED_ARG(close_output_device) { }
 
-  RefCountReleaser close()
+ public:
+  NAD_DECL_PUBLIC(close_input_device)
   {
-    RefCountReleaser need_allow_deletion;
-    need_allow_deletion = close_input_device();
-    need_allow_deletion += close_output_device();
-    return need_allow_deletion;
+    NAD_PUBLIC_BEGIN;
+    NAD_CALL_FROM_PUBLIC(close_input_device);
+    NAD_PUBLIC_END;
   }
 
+  NAD_DECL_PUBLIC(close_output_device)
+  {
+    NAD_PUBLIC_BEGIN;
+    NAD_CALL_FROM_PUBLIC(close_output_device);
+    NAD_PUBLIC_END;
+  }
+
+  NAD_DECL_PUBLIC(close)
+  {
+    NAD_PUBLIC_BEGIN;
+    NAD_CALL_PUBLIC(close_input_device);
+    NAD_CALL_PUBLIC(close_output_device);
+    NAD_PUBLIC_END;
+  }
+
+  // Overload for internal (non-public) call.
+  NAD_DECL(close)
+  {
+    NAD_CALL(close_input_device);
+    NAD_CALL(close_output_device);
+  }
+
+ protected:
   // Events.
   // The filedescriptor of this device was just closed.
   // If INTERNAL_FDS_DONT_CLOSE is set then the fd wasn't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
-  virtual RefCountReleaser closed() { return RefCountReleaser(); }
+  virtual NAD_DECL_UNUSED_ARG(closed) { }
 
 #ifdef CWDEBUG
   friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
@@ -384,19 +422,22 @@ class FileDescriptor : public AIRefCount
 #endif
 };
 
+std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state);
+
 // Convenience function to create devices.
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
 boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
 #ifdef CWDEBUG
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
-  LibcwDoutStream << "evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
+  LibcwDoutStream << "Entering evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
   (LibcwDoutStream << ... << (", " + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
   LibcwDoutScopeEnd;
+  ::NAMESPACE_DEBUG::Indent indentation(2);
 #endif
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
   AllocTag2(device, "Created with evio::create");
-  Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << device << "].");
+  Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << static_cast<FileDescriptor*>(device) << "].");
   return device;
 }
 

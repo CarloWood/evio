@@ -35,6 +35,7 @@ namespace evio {
 void File::init(int fd, std::string const& filename)
 {
   m_filename = filename;
+  state_t::wat(m_state)->m_flags.set_regular_file();
   FileDescriptor::init(fd);
 }
 
@@ -89,7 +90,7 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   if (!(mode & ios_base::in))
     posix_mode |= O_CREAT;
 
-  Dout(dc::system|continued_cf, "open(\"" << filename << "\", " << NAMESPACE_DEBUG::PosixMode(posix_mode) << ", " << std::oct << prot << ") = ");
+  Dout(dc::system|continued_cf, "open(\"" << filename << "\", " << NAMESPACE_DEBUG::PosixMode(posix_mode) << ", " << std::oct << prot << std::dec << ") = ");
   int fd = ::open(filename.c_str(), posix_mode, prot);
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
 

@@ -49,24 +49,24 @@ class Socket : public InputDevice, public OutputDevice
  public:
   struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
   {
-    void (*_connected)(Socket*, bool);
-    void (*_disconnected)(Socket*, bool success);
+    NAD_DECL((*_connected), Socket*, bool);
+    NAD_DECL((*_disconnected), Socket*, bool success);
   };
 
   struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
   {
     // Overridden to detect successful connections.
-    static void read_from_fd(InputDevice* _self, int fd);
+    static NAD_DECL(read_from_fd, InputDevice* _self, int fd);
     // Overridden to detect connection termination.
-    static RefCountReleaser read_returned_zero(InputDevice* _self);
+    static NAD_DECL(read_returned_zero, InputDevice* _self);
     // Overridden to detect connect failures and connection abortions.
-    static RefCountReleaser read_error(InputDevice* _self, int err);
+    static NAD_DECL(read_error, InputDevice* _self, int err);
     // Overridden to detect connects.
-    static void write_to_fd(OutputDevice* _self, int fd);
+    static NAD_DECL(write_to_fd, OutputDevice* _self, int fd);
     // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
-    static void connected(Socket* self, bool success);
+    static NAD_DECL(connected, Socket* self, bool success);
     // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
-    static void disconnected(Socket* self, bool success);
+    static NAD_DECL(disconnected, Socket* self, bool success);
 
     static constexpr VT_type VT{
       /*Socket*/
@@ -140,9 +140,11 @@ class Socket : public InputDevice, public OutputDevice
     return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_remote_address))->sun_path;
   }
 
- protected:
-  void connected(bool success) { VT_ptr->_connected(this, success); }
-  void disconnected(bool success) { VT_ptr->_disconnected(this, success); }
+ private:
+  // Event, called from VT_impl::write_to_fd (success) and VT_impl::read_error (failure).
+  NAD_DECL(connected, bool success) { NAD_CALL(VT_ptr->_connected, this, success); }
+  // Event, called from VT_impl::read_returned_zero (success) and VT_impl::read_error (failure).
+  NAD_DECL(disconnected, bool success) { NAD_CALL(VT_ptr->_disconnected, this, success); }
 
  public:
   //---------------------------------------------------------------------------
