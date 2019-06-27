@@ -79,11 +79,11 @@ class INotifyDevice : public InputDevice, public virtual FileDescriptor
   using wd_to_inotify_map_ts = aithreadsafe::Wrapper<wd_to_inotify_map_type, aithreadsafe::policy::ReadWrite<AIReadWriteSpinLock>>;
   wd_to_inotify_map_ts m_wd_to_inotify_map;
 
-  static wd_to_inotify_map_type::const_iterator get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd);
+  static wd_to_inotify_map_type::const_iterator get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd, bool should_exists);
 
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
-  INotifyDevice() { input(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1)); }
+  INotifyDevice() { set_sink(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1 + block_overhead_c) - block_overhead_c); }
 
   int add_watch(char const* pathname, uint32_t mask, INotify* obj);
   void rm_watch(int wd);
@@ -97,12 +97,14 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
     if (AI_UNLIKELY(!state_t::rat(m_state)->m_flags.is_r_open()))
     {
       // Set up the inotify device.
+      Dout(dc::system|continued_cf, "inotify_init1(IN_NONBLOCK | IN_CLOEXEC) = ");
       int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+      Dout(dc::finish|cond_error_cf(fd == -1), fd);
       if (fd == -1)
         THROW_FALERTE("with pathname = \"[PATHNAME]\"; inotify_init1");
       init(fd);
       state_t::wat state_w(m_state);
-      // Call input() before calling add_watch(). The library should have done this!
+      // Call set_sink() before calling add_watch(). The library should have done this!
       ASSERT(m_input_device_events_handler && m_ibuffer);
       // Exit ev_run even when this device is still running.
       state_w->m_flags.set_r_inferior();
@@ -116,7 +118,7 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
           AIArgs("[FD]", m_fd)("[PATHNAME]", pathname)("[MASK]", mask));
   }
   wd_to_inotify_map_ts::wat wd_to_inotify_map_w(m_wd_to_inotify_map);
-  auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
+  auto iter = get_inotify_obj(wd_to_inotify_map_w, wd, false);
   if (iter != wd_to_inotify_map_w->end())
     THROW_FALERT("Attempt to add a watch for \"[PATHNAME]\" which already is being watched.", AIArgs("[PATHNAME]", pathname));
   wd_to_inotify_map_w->push_back(std::make_pair(wd, obj));
@@ -124,7 +126,7 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
 }
 
 //static
-INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd)
+INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd, bool should_exist)
 {
   // This kinda sucks - we have to search the vector.
   // However, the vector is very likely to be very small;
@@ -141,7 +143,7 @@ INotifyDevice::wd_to_inotify_map_type::const_iterator INotifyDevice::get_inotify
   FindWatchDescriptor find_watch_descriptor(wd);
   auto result = std::find_if(wd_to_inotify_map_r->begin(), wd_to_inotify_map_r->end(), find_watch_descriptor);
 
-  if (AI_UNLIKELY(result == wd_to_inotify_map_r->end()))
+  if (should_exist && AI_UNLIKELY(result == wd_to_inotify_map_r->end()))
     THROW_FALERT("Could not find watch descriptor [WD] in m_wd_to_inotify_map!", AIArgs("[WD]", wd));
 
   return result;
@@ -163,7 +165,7 @@ void INotifyDevice::rm_watch(int wd)
     // Although a write lock is only necessary for the erase; the AIReadWriteSpinLock that
     // wd_to_inotify_map_ts does not support converting a read lock into a write lock.
     wd_to_inotify_map_ts::wat wd_to_inotify_map_w(m_wd_to_inotify_map);
-    auto iter = get_inotify_obj(wd_to_inotify_map_w, wd);
+    auto iter = get_inotify_obj(wd_to_inotify_map_w, wd, true);
     wd_to_inotify_map_w->erase(iter);
   }
 }
@@ -216,7 +218,7 @@ NAD_DECL_UNUSED_ARG(INotifyDecoder::decode, MsgBlock&& msg)
   if ((event->mask != IN_IGNORED))      // In the case of IN_IGNORED the wd was already removed from m_wd_to_inotify_map (and the INotify object destroyed).
   {
     INotifyDevice* device = static_cast<INotifyDevice*>(m_input_device);
-    INotify* obj = device->get_inotify_obj(INotifyDevice::wd_to_inotify_map_ts::rat(device->m_wd_to_inotify_map), event->wd)->second;
+    INotify* obj = device->get_inotify_obj(INotifyDevice::wd_to_inotify_map_ts::rat(device->m_wd_to_inotify_map), event->wd, true)->second;
     obj->event_occurred(event);
   }
 }

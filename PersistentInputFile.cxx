@@ -41,7 +41,17 @@ NAD_DECL_CWDEBUG_ONLY(PersistentInputFile::VT_impl::read_returned_zero, InputDev
 {
   PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
   DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero(" NAD_DoutEntering_ARG ") [" << self << ']');
-  self->stop_input_device();
+  {
+    // Lock m_state and then make sure that no new data was appended to the file in the mean time.
+    state_t::wat state_w(self->m_state);
+    char buf[1];
+    int rlen;
+    while ((rlen = ::read(self->m_fd, buf, 1)) == -1 && errno == EAGAIN)
+      ;
+    if (AI_UNLIKELY(rlen == 1))
+      throw OneMoreByte{buf[0]};
+    self->stop_input_device(state_w);
+  }
   // Add an inotify watch for modification of the corresponding path (if not already watched).
   if (!self->is_watched() && !self->open_filename().empty())
   {

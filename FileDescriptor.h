@@ -344,6 +344,8 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.
+    ASSERT(ret != -1);
   }
 
   void stop_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_removal)
@@ -353,6 +355,8 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    // Library bug: how to recover from this?
+    ASSERT(ret != -1);
   }
 
  private:

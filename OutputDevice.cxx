@@ -90,18 +90,24 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   }
 }
 
-void OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(state_w->m_flags.is_w_open());
-  if (EventLoopThread::instance().start_if(state_w, condition, this))
+  // Don't call start_output_device with a condition that wasn't transitory_true in the first place.
+  // That is, if is false - don't call this (it will fail anyway) and if it is true then there is
+  // no need for the condition (just call start_output_device without condition).
+  ASSERT(condition.is_transitory_true());
+  auto res = EventLoopThread::instance().start_if(state_w, condition, this);
+  if (res == EventLoopThread::success_added)
   {
     // Increment ref count to stop this object from being deleted while being active.
     // Object is kept alive until a call to allow_deletion().
     CWDEBUG_ONLY(int count =) inhibit_deletion();
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
   }
+  return res != EventLoopThread::condition_failed;
 }
 
 NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
@@ -129,11 +135,11 @@ NAD_DECL_PUBLIC(OutputDevice::flush_output_device)
 }
 
 //inline
-void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
   // Don't call this function when the device is 'flushing', instead call close_output_device(condition).
   ASSERT(!state_w->m_flags.is_w_flushing());
-  EventLoopThread::instance().stop_if(state_w, condition, this);
+  return EventLoopThread::instance().stop_if(state_w, condition, this) != EventLoopThread::condition_failed;
 }
 
 //inline
@@ -160,22 +166,24 @@ NAD_DECL(OutputDevice::stop_output_device)
 }
 
 // GetThread only.
-NAD_DECL(OutputDevice::stop_output_device, utils::FuzzyCondition const& condition)
+NAD_DECL_BOOL(OutputDevice::stop_output_device, utils::FuzzyCondition const& condition)
 {
+  bool success;
   bool need_close = false;
   {
     state_t::wat state_w(m_state);
     need_close = state_w->m_flags.is_w_flushing();
     if (!need_close)
-      stop_not_flushing_output_device(state_w, condition);
+      success = stop_not_flushing_output_device(state_w, condition);
     else
     {
-      EventLoopThread::instance().stop_if(state_w, condition, this);
+      success = EventLoopThread::instance().stop_if(state_w, condition, this);
       need_close = !state_w->m_flags.is_active_output_device();
     }
   }
   if (need_close)
     NAD_CALL(close_output_device);
+  return success;
 }
 
 void OutputDevice::disable_output_device()
@@ -268,7 +276,7 @@ NAD_DECL(OutputDevice::close_output_device)
 // BRT
 NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
 {
-  DoutEntering(dc::io, "OutputDevice::write_to_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
+  DoutEntering(dc::io, "OutputDevice::VT_impl::write_to_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
   OutputBuffer* const obuffer = self->m_obuffer;
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {
@@ -281,7 +289,27 @@ NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
       // `buf2dev_contiguous_forced' calls `force_next_contiguous_number_of_bytes'
       // which only returns 0 when `underflow_a' returned EOF in which case that already
       // reduced the buffer if necessary.
-      NAD_CALL(self->stop_output_device);	// Buffer is empty; stop watching the fd.
+      //
+      // However, even though the buffer was JUST empty - it is possible that right
+      // here another thread that wrote new data to the buffer calls sync(), which
+      // would be ignored because we didn't reset the ACTIVE bit yet. Although unlikely
+      // it could cause a call to sync() to be lost. And if no new data is written,
+      // then this data would never be flushed out.
+      //
+      // Therefore, call stop_output_device with a condition that re-checks if the
+      // buffer is really empty inside the critical area of m_state.
+      utils::FuzzyCondition condition_empty_buffer([obuffer]{
+          return obuffer->StreamBufConsumer::buffer_empty();
+      });
+      // When buf2dev_contiguous_forced() returned zero then the buffer is empty.
+      // So, it is unlikely that a microsecond later it isn't anymore but we're
+      // not allowed to call stop_output_device with a false condition (simply
+      // because it makes no sense).
+      if (AI_UNLIKELY(condition_empty_buffer.is_momentary_false()))
+        continue;
+      // If during the cannonical test the buffer isn't empty anymore, continue reading.
+      if (AI_UNLIKELY(!NAD_CALL(self->stop_output_device, condition_empty_buffer)))
+        continue;
       return;
     }
 #if EWOULDBLOCK != EAGAIN
@@ -305,12 +333,23 @@ try_again_write1:
       //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
       //  continue;
       if (err == EWOULDBLOCK)
+      {
+        // We can't just leave this function in this case because regular files aren't
+        // event driven. Right now I'm assuming that this will never happen because
+        // the whole reason that regular files are not event driven by epoll (aka, do
+        // not support epoll) is supposedly because they CAN'T block(?). If this DOES
+        // happen then I can't think of another solution then to immediately call write(2)
+        // again though.
+        ASSERT(!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_regular_file());
         return;
+      }
 #if EWOULDBLOCK != EAGAIN
       if (err == EAGAIN)
       {
         if (nr_eagain_errors--)
           goto try_again_write1;
+        // See above.
+        ASSERT(!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_regular_file());
         return;
       }
 #endif

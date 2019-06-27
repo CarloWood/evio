@@ -104,11 +104,11 @@ class OutputDevice : public virtual FileDescriptor
   // stopped and producer thread is running -- aka nobody is writing to the device
   // when this function is being called.
   friend class OutputDevicePtr;
-  void start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  bool start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void start_output_device(state_t::wat const& state_w);
-  NAD_DECL(stop_output_device, utils::FuzzyCondition const& condition);
+  NAD_DECL_BOOL(stop_output_device, utils::FuzzyCondition const& condition);
   NAD_DECL(stop_output_device);
-  [[gnu::always_inline]] inline void stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  [[gnu::always_inline]] inline bool stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   [[gnu::always_inline]] inline void stop_not_flushing_output_device(state_t::wat const& state_w);
 
   NAD_DECL(remove_output_device, state_t::wat const& state_w);
@@ -169,10 +169,10 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void output(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments);
+  void set_source(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments);
 
   template<typename DEVICE, typename... Args>
-  void output(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
+  void set_source(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
 
   NAD_DECL_PUBLIC(flush_output_device);
   NAD_DECL_PUBLIC(close_output_device)
@@ -184,7 +184,7 @@ class OutputDevice : public virtual FileDescriptor
 
  private:
   // Called by the second output above.
-  void set_link_output(LinkBuffer* link_buffer)
+  void set_source(LinkBuffer* link_buffer)
   {
     m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
   }
@@ -210,17 +210,17 @@ class OutputDevice : public virtual FileDescriptor
 namespace evio {
 
 template<typename... Args>
-void OutputDevice::output(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments)
+void OutputDevice::set_source(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments)
 {
-  Dout(dc::evio, "OutputDevice::output(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
+  Dout(dc::evio, "OutputDevice::set_source(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
   m_output_device_ptr = &output_device_ptr;
   m_obuffer = m_output_device_ptr->create_buffer(this, output_buffer_arguments...);
 }
 
 template<typename INPUT_DEVICE, typename... Args>
-void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments)
+void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments)
 {
-  Dout(dc::evio, "OutputDevice::output([" << &*ptr << "]) [" << this << ']');
+  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "]) [" << this << ']');
 
   // We need to create a link buffer and use it to link the following two devices.
   InputDevice* input_device = ptr.get();
@@ -230,10 +230,10 @@ void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args...
   LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, buffer_arguments...);
 
   // Initialize the output device to read from the link buffer.
-  output_device->set_link_output(link_buffer);
+  output_device->set_source(link_buffer);
 
   // Initialize the input device to write to the link buffer.
-  input_device->set_link_input(link_buffer);
+  input_device->set_sink(link_buffer);
 }
 
 } // namespace evio

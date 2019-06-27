@@ -66,6 +66,7 @@
 // (Private/)Protected interface
 
 #define NAD_DECL(funcname, ...) void funcname(int& need_allow_deletion, ## __VA_ARGS__)
+#define NAD_DECL_BOOL(funcname, ...) bool funcname(int& need_allow_deletion, ## __VA_ARGS__)
 #define NAD_DECL_UNUSED_ARG(funcname, ...) void funcname(int& UNUSED_ARG(need_allow_deletion), ## __VA_ARGS__)
 #define NAD_DECL_CWDEBUG_ONLY(funcname, ...) void funcname(int& CWDEBUG_ONLY(need_allow_deletion), ## __VA_ARGS__)
 

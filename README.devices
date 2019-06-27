@@ -1,3 +1,6 @@
+Class hierarchy
+---------------
+
 Devices are either derived from InputDevice, OutputDevice or both.
 Both InputDevice and OutputDevice are derived from FileDescriptor,
 but FileDescriptor is a virtual base class, so input/output devices
@@ -9,44 +12,47 @@ will have the typical diamond shape inheritance structure:
                  \            /
                   SomeIODevice
 
-For an InputDevice, FileDescriptorFlags::is_input_device() always
-returns true. For an OutputDevice FileDescriptorFlags::is_output_device()
-returns true.
+For an InputDevice, FileDescriptorFlags::is_input_device() returns true.
+For an OutputDevice FileDescriptorFlags::is_output_device() returns true.
 
-InputDevice reads from the file descriptor, while OutputDevice
-writes to the file descriptor.
+InputDevice reads from the file descriptor, while OutputDevice writes
+to the file descriptor.
+
+Device states (FileDescriptorFlags)
+-----------------------------------
 
 After initialization the file descriptor is 'open', so that respectively
 FileDescriptorFlags::is_w_open() and FileDescriptorFlags::is_r_open()
 return true. FileDescriptorFlags::is_open() returns true when either is
 still true.
 
-A file descriptor is closed when is_open() doesn't return true anymore.
-That is, when both InputDevice::close_input_device() and
+If is_open() returns false then the underlaying fd was closed. That is,
+when both InputDevice::close_input_device() and
 OutputDevice::close_output_device() have been called (in the case of a
-I/O device that is derived from both).
+I/O device that is derived from both). FileDescriptor::close calls both
+and therefore guarantees to close the fd.
 
 Initialization also starts a device: if there is something in the output
 buffer then start_output_device() is called; start_input_device() is
-always called.
+always called (for an InputDevice).
 
-When just looking at the InputDevice or OutputDevice, there are
-four common states:
+When just looking at the InputDevice or OutputDevice, there are four
+common states:
 
     1. Active
     2. Added
     3. Removed
     4. Closed
 
-An output device also has a fifth state:
+An output device has a fifth state:
 
     5. Flushing
 
-The meaning of these states is as follows.
+The meaning of these states is as follows (for devices that support epoll):
 
 1. Active
 
-In this state the fd is added to the epoll interest list and its
+In this state the fd is added to the epoll interest list and it
 is being watched for its event (EPOLLIN for InputDevice and EPOLLOUT
 for OutputDevice). This is the typical state that an input device
 would be in directly after initialization (and an output device
@@ -55,13 +61,19 @@ when there is already data in its output buffer).
 2. Added
 
 In this state the fd is also added to the epoll interest list, but
-it is not being watched for its event.
+it is not being watched for its event. Whenever a device is added
+to the epoll interest list, that has a void* pointing to the
+FileDescriptor base class (void* epoll_event::data::ptr).
+Therefore whenever a device is being added, inhibit_deletion() is
+called to avoid deleting the object until it is removed again.
 
 3. Removed
 
 In this state the fd is not (anymore) in the epoll interest list.
-Most notably this means there isn't a void* userdata that contains
-a pointer to the device object, so it is safe to delete it.
+Most notably this means there isn't a `void*` user-data that points
+to the device object anymore and allow_deletion() was called to
+cancel the inhibit_deletion() that was called when the device was
+added.
 
 4. Closed
 
@@ -70,24 +82,36 @@ fd is closed: if this is a device that is inherited from just
 InputDevice or just OutputDevice then the fd will be closed.
 Otherwise, when it is derived from both InputDevice and OutputDevice,
 then the fd is only closed when its counter part is also in the
-Closed state. If that is the case, then the state of the Device
-becomes 'Dead'.
+Closed state. If that is the case (the underlaying fd is actually
+closed), then the state of the Device becomes 'Dead'
+(FileDescriptorFlags::is_dead() returns true).
 
-As long as a device is not Dead, Closed is the almost the same
-as Removed and it may in principle returned to the Active state;
+As long as a device is not Dead, Closed is almost the same as
+Removed and it may in principle returned to the Active state;
 however - that is not what should happen. The Closed state should
 more or less be final and just waiting for the counter part to
-be closed as well - if it exists and wasn't closed yet.
+be closed as well-- if it exists and wasn't closed yet.
 
 5. Flushing
 
 In this state the OutputDevice is basically Active, but a transition
 from Active to Added is no longer possible. Instead it can only
-go from Active to Closed.
+go from Active to Closed. In other words, when stop_output_device()
+is called on a flushing OutputDevice then that has the effect of
+calling close_output_device().
 
 
-Transitions are made by calls to the member functions start(),
-stop(), remove(), close() and flush().
+Transitions are made by calls to the member functions
+start_input_device/start_output_device, stop_input_device/stop_output_device,
+remove_input_device/remove_output_device, close_input_device/close_output_device
+and flush_output_device. These member functions test and update the
+FileDescriptorFlags of the underlaying FileDescriptor base class (shared
+with its counter part if any), take care of closing the fd, and control the
+epoll administration through methods of the EventLoopThread singleton (namely,
+start(), stop() and remove()).
+
+
+State transititions of an InputDevice:
 
                  init_input_device()
                           |
@@ -104,6 +128,8 @@ stop(), remove(), close() and flush().
                           `------------------------>Closed<--------------------------'
 
 
+State transititions of an OutputDevice:
+
                  init_output_device()
                           |
 .-----------------------. |                                        
@@ -118,3 +144,85 @@ stop(), remove(), close() and flush().
                           |                           v                              |                                 |
                           `------------------------>Closed<--------------------------'<--------------------------------'
 
+
+Thread safety
+-------------
+
+When writing to a device the following functions are called:
+
+                                                          with active_flag == FDS_W_ACTIVE
+                     OutputDevice::                       EventLoopThread::                 FileDescriptor::
+    Producer thread: sync() --> start_output_device() --> start_if(condition_not_empty) --> start_watching() --> add fd to epoll interest list
+                                                            ==> set FDS_W_ACTIVE flag         or
+                                                            ==> set FDS_W_ADDED flag        EventLoopThread::
+                                                                                            handle_regular_file() --> queue FileDescriptor::write_event() for thread pool.
+In the case of a device that supports epoll:
+
+    Event-loop thread: queue FileDescriptor::write_event() for thread pool.
+
+
+Hence, in both cases write_event() is called by a thread from the thread pool.
+Obviously we don't want a reordering to take place of (or even concurrent) calls
+to write_to_fd().
+
+The user is responsible for making sure that there is only a single Producer thread
+at a time that writes to the associated output buffer (followed by a call to sync()),
+so we know that the FDS_W_ACTIVE is set when new data was added.
+
+Subsequent calls to start_if (with active_flag == FDS_W_ACTIVE) are ignored,
+that is: new data was apparently appended to the output buffer, but it doesn't
+matter that that is "new" data: *all* data in the buffer will be handled when
+write_to_fd() is called.
+
+In fact, write_to_fd() keeps writing to the fd until the buffer is empty (or a
+write error occurs, if even just EAGAIN, which I am currently assuming cannot
+happen for regular files).
+
+But we need to make sure that only one thread at a time calls write_to_fd(), which
+means that no new call to write_event() may be *queued* until the buffer has been
+completely emptied (or a write error occurred), making reordering impossbible.
+
+This is achieved because write_to_fd(), after preliminairy testing that the buffer
+is empty (or at least, was just empty), calls stop_output_device with the condition
+that the buffer must be empty, too. Hence, only stops writing (resetting the
+FDS_W_ACTIVE bit) when the buffer is empty in the same critical area of m_state.
+
+So, with m_state locked, the producer thread checks if the buffer is not empty
+and if so sets FDS_W_ACTIVE and queues a call to write_event when the device
+wasn't active before. This guarantees that write_to_fd will write some data
+and again with m_state locked, resets FDS_W_ACTIVE iff the buffer is empty.
+
+
+When reading from a device the following functions are called:
+
+                                                     with active_flag == FDS_R_ACTIVE
+                     InputDevice::                   EventLoopThread::                 FileDescriptor::
+    Consumer thread: start_input_device(state_w) --> start()                       --> start_watching() --> add fd to epoll interest list
+                                                       ==> set FDS_R_ACTIVE flag         or
+                                                       ==> set FDS_R_ADDED flag        EventLoopThread::
+                                                                                       handle_regular_file() --> queue FileDescriptor::read_event() for thread pool.
+In the case of a device that supports epoll:
+
+    Event-loop thread: queue FileDescriptor::read_event() for thread pool.
+
+Hence, in both cases read_event() is called by a thread from the thread pool.
+Obviously we don't want a reordering to take place of (or even concurrent) calls
+of read_from_fd(). Therefore additional calls to start() are ignored because
+FDS_R_ACTIVE is set, which then only may be reset by the thread calling read_event()
+after which is must keep the lock on m_state until it is safe that another thread
+starts reading the fd into the input buffer. The FDS_R_ACTIVE bit is reset by a
+call to FileDescriptorFlags::test_and_clear_active (and FileDescriptorFlags::clear_active,
+but is only called from EventLoopThread::start_if when the condition to start
+failed, clearing after first having set it - all while m_state is locked; so that
+doesn't really count). test_and_clear_active is called from EventLoopThread::remove,
+EventLoopThread::stop and EventLoopThread::stop_if. Here remove() is only called
+from InputDevice::remove_input_device which in turn is only called from
+InputDevice::close_input_device after clearing the FDS_R_OPEN bit, effectively
+disabling any call to start_input_device (which will assert if it is inadvertently
+called anyway). Of the other two functions, stop and stop_if, only stop is called
+from InputDevice::stop_input_device (for an InputDevice).
+
+The requirement is therefore that stop_input_device() may only be called by
+the thread that calls read_event() (aka, the thread pool thread) and when it
+does, it has to assume that immediately upon returning from stop_input_device()
+some other thread will call read_from_fd().

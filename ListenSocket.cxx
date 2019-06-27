@@ -99,7 +99,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
   init(fd);
   Dout(dc::notice, "Added listen socket " << fd << " at " << m_bind_addr);
 
-  // input() does not need to be called here, because we override read_from_fd.
+  // set_sink() does not need to be called here, because we override read_from_fd.
   state_t::wat state_w(m_state);
   start_input_device(state_w);
 }
@@ -117,12 +117,12 @@ NAD_DECL_UNUSED_ARG(ListenSocketDevice::VT_impl::read_from_fd, InputDevice* _sel
   {
     int err = errno;
     Dout(dc::finish|error_cf, (void*)&addrlen << ") = " << sock_fd);
-    if (err != EWOULDBLOCK && self->maybe_out_of_fds())
+    if (err != EWOULDBLOCK && err != EAGAIN && self->maybe_out_of_fds())
       err = EMFILE;
 #ifdef CWDEBUG
     errno = err;
     Dout(dc::warning|error_cf, "ListenSocketDevice::VT_impl::read_from_fd: accept");
-    if (err != EWOULDBLOCK)
+    if (err != EWOULDBLOCK && err != EAGAIN)
       Dout(dc::warning, "ListenSocketDevice::VT_impl::read_from_fd: Need to throw exception: accept failed");
 #endif
     return;

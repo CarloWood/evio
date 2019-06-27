@@ -67,8 +67,6 @@ void InputDevice::init_input_device(state_t::wat const& state_w)
   DoutEntering(dc::evio, "InputDevice::init_input_device() [" << this << ']');
   // Don't call init() while the InputDevice is already active.
   ASSERT(!state_w->m_flags.is_active_input_device());
-//  ev_io_init(&m_input_watcher, InputDevice::read_from_fd, m_fd, EV_READ);
-//  m_input_watcher.data2 = this;
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
@@ -195,11 +193,11 @@ NAD_DECL(InputDevice::close_input_device)
     NAD_CALL(closed);
 }
 
-// BWT.
 NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 {
   DoutEntering(dc::evio, "InputDevice::read_from_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
   ssize_t space = self->m_ibuffer->dev2buf_contiguous();
+
   for (;;)
   {
     // Allocate more space in the buffer if needed.
@@ -208,7 +206,11 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
     {
       // The buffer is full!
       self->stop_input_device();        // Stop reading the filedescriptor.
-      break;                            // Next time better.
+      // After a call to stop_input_device() it is possible that another thread
+      // starts it again and enters read_from_fd from the top. We are therefore
+      // no longer allowed to do anything. We also don't need to do anything
+      // anymore, but just saying. See README.devices for more info.
+      return;
     }
 
     ssize_t rlen;
@@ -219,8 +221,19 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
     if (rlen == 0)                      // EOF reached ?
     {
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
-      NAD_CALL(self->read_returned_zero);
-      break;    // Next time better.
+      try
+      {
+        NAD_CALL(self->read_returned_zero);
+        // In the case of a PersistentInputFile, read_returned_zero calls stop_input_device() and returns.
+        // Therefore we must also return immediately from read_returned_zero, see above.
+        return;
+      }
+      catch (OneMoreByte const& persistent_input_file_exception)      // This can only happen for a PersistentInputFile.
+      {
+        Dout(dc::evio, "Stopping device failed: there was still more to read!");
+        *new_data = persistent_input_file_exception.byte;
+        rlen = 1;
+      }
     }
 
     if (rlen == -1)                     // A read error occured ?
@@ -239,16 +252,16 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
 
-    // The data is now in the buffer. This is where we becomes the reading thread.
-    // BRWT.
+    // The data is now in the buffer. This is where we become the consumer thread.
     NAD_CALL(self->data_received, new_data, rlen);
 
-    // FIXME: this might happen when the read() was interrupted (POSIX allows to just return the number of bytes
-    // read so far). Perhaps we should just try to continue to read until EAGAIN.
-    if (rlen < space)   // Did we read everything, or process at least
-      break;            //  one message ?
-
-    space = 0;
+    // It might happen that more data is available, even rlen < space (for example when the read() was
+    // interrupted (POSIX allows to just return the number of bytes read so far)).
+    // If this is a File (including PersistenInputFile) then we really should not take any risk and
+    // continue to read till the EOF, and end this function with a call to stop_input_device().
+    // If this is a socket then it still won't hurt to continue to read till -say- read returns EAGAIN
+    // (which is even required when you use epoll with edge triggering). So lets just do that.
+    space -= rlen;
   }
 }
 

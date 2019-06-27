@@ -168,7 +168,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void input(InputDecoder& input_decoder, Args... input_buffer_arguments);
+  void set_sink(InputDecoder& input_decoder, Args... input_buffer_arguments);
 
   NAD_DECL(close_input_device) override final;
 
@@ -180,11 +180,11 @@ class InputDevice : public virtual FileDescriptor
   }
 
  private:
-  // This function is called by OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
-  inline void set_link_input(LinkBufferPlus* link_buffer);
+  // This function is called by OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
+  inline void set_sink(LinkBufferPlus* link_buffer);
   // Give access to the above function.
   template<typename INPUT_DEVICE, typename... Args>
-  friend void OutputDevice::output(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
+  friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
 
   // Override base class virtual functions.
   void init_input_device(state_t::wat const& state_w) override;
@@ -205,9 +205,9 @@ class InputDevice : public virtual FileDescriptor
 namespace evio {
 
 template<typename... Args>
-void InputDevice::input(InputDecoder& input_decoder, Args... input_buffer_arguments)
+void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_buffer_arguments)
 {
-  Dout(dc::evio, "InputDevice::input(" << (void*)&input_decoder << ", ...) [" << this << ']');
+  Dout(dc::evio, "InputDevice::set_sink(" << (void*)&input_decoder << ", ...) [" << this << ']');
   m_ibuffer = static_cast<InputDeviceEventsHandler&>(input_decoder).create_buffer(this, input_buffer_arguments...);
   m_input_device_events_handler = &input_decoder;
 }
@@ -225,22 +225,30 @@ class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, publi
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
 };
 
-void InputDevice::set_link_input(LinkBufferPlus* link_buffer)
+void InputDevice::set_sink(LinkBufferPlus* link_buffer)
 {
-  // You can't pass an InputDevice to a OutputDevice::output() when the InputDevice
-  // already has a buffer (ie, you called already InputDevice::input()).
+  // You can't pass an InputDevice to a OutputDevice::set_source() when the InputDevice
+  // already has a buffer (ie, you called already InputDevice::set_sink(InputDecoder&, ...)).
   //
   // If you *really* need to do this then it is possible to replace the buffer by
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and
   // then calling from the derived intput device:
   //     if (m_ibuffer->release(CWDEBUG_ONLY(this)))
   //       m_ibuffer = nullptr;
-  // before passing it to OutputDevice::output().
+  // before passing it to OutputDevice::set_source().
   //
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
   m_input_device_events_handler = link_buffer;
 }
+
+// This can be thrown from read_returned_zero when you want read_from_fd to continue reading anyway.
+// Currently only used by PersistentInputFile (all other devices actually reached the permanent end,
+// so probably none of them will ever use this).
+struct OneMoreByte
+{
+  char byte;
+};
 
 } // namespace evio
 

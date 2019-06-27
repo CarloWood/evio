@@ -70,7 +70,11 @@ class PersistentInputFile : public File, private INotify
   void event_occurred(inotify_event const* event) override
   {
     if ((event->mask & IN_MODIFY))
-      start_input_device(state_t::wat(m_state));
+    {
+      state_t::wat state_w(m_state);
+      if (state_w->m_flags.is_readable())       // Do not (re)start the input device when it was closed in the mean time.
+        start_input_device(state_w);
+    }
   }
 
  public:

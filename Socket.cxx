@@ -158,11 +158,9 @@ NAD_DECL(Socket::VT_impl::write_to_fd, OutputDevice* _self, int fd)
         utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer]{
             return m_obuffer->StreamBufConsumer::buffer_empty();
         });
-        if (condition_empty_buffer.is_momentary_true())
-        {
-          NAD_CALL(self->stop_output_device, condition_empty_buffer);
+        if (condition_empty_buffer.is_momentary_true() &&
+            NAD_CALL(self->stop_output_device, condition_empty_buffer))
           return;
-        }
       }
       else
       {

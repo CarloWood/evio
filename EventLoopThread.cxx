@@ -90,8 +90,11 @@ struct epoll_event EventLoopThread::s_events[maxevents];
 void EventLoopThread::s_wakeup_handler(int)
 {
   EventLoopThread& self(instance());
-  if (self.m_active == 0)
+  if (self.m_terminate == forced || (self.m_terminate == cleanly && self.m_active == 0))
+  {
+    Dout(dc::evio, "EventLoopThread::s_wakeup_handler: Stopping event loop thread because m_active == 0.");
     self.m_stop_running.store(true, std::memory_order_relaxed);
+  }
 }
 
 // EventLoopThread main function.
@@ -170,7 +173,9 @@ void EventLoopThread::main()
   // Deinit.
   ASSERT(m_active == 0);
   utils::Signals::block_and_unregister(m_epoll_signum);
-  ::close(m_epoll_fd);
+  Dout(dc::system|continued_cf, "close(" << m_epoll_fd << ") = ");
+  CWDEBUG_ONLY(int res =) ::close(m_epoll_fd);
+  Dout(dc::finish|cond_error_cf(res == -1), res);
   m_epoll_fd = -1;
   m_terminate = not_yet;
   // Keep the value of m_epoll_signum!
@@ -307,6 +312,52 @@ void EventLoopThread::bump_terminate()
     wake_up();
 }
 
+void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+{
+  DoutEntering(dc::evio, "EventLoopThread::handle_regular_file(" << active_flag << ", " << device << ")");
+  AIThreadPool& thread_pool(AIThreadPool::instance());
+  auto queues_access = thread_pool.queues_read_access();
+  auto& queue = thread_pool.get_queue(queues_access, m_handler);
+  CWDEBUG_ONLY(bool queue_was_full = false;)
+  {
+    bool queue_full;
+    auto queue_access = queue.producer_access();
+    do
+    {
+      if ((queue_full = queue_access.length() == queue.capacity()))
+      {
+        // Queue is full! Wait for a broadcast.
+        Dout(dc::warning(!queue_was_full), "Thread pool queue " << m_handler << " is full! Now no longer handling any filedescriptor I/O until this is resolved.");
+        Debug(queue_was_full = true);
+        queue_access.wait();        // Wait until queue_access.notify_one() is called.
+      }
+      else
+      {
+        Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
+        Dout(dc::evio, "Queuing call to " << ((active_flag == EPOLLIN) ? "read_event" : "write_event") << "() in thread pool queue " << m_handler);
+        if (active_flag == EPOLLIN)
+          queue_access.move_in([device](){
+              int need_allow_deletion = 0;
+              NAD_CALL(device->read_event);
+              while (need_allow_deletion--)
+                device->allow_deletion();
+              return false;
+          });
+        else
+          queue_access.move_in([device](){
+              int need_allow_deletion = 0;
+              NAD_CALL(device->write_event);
+              while (need_allow_deletion--)
+                device->allow_deletion();
+              return false;
+          });
+      }
+    }
+    while (queue_full);
+  }
+  queue.notify_one();
+}
+
 bool EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Don't start a device that is disabled.
@@ -316,36 +367,49 @@ bool EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
     return false;
   }
 
+  DoutEntering(dc::evio, "EventLoopThread::start(" << active_flag << ", " << device << ")");
+
   // Don't start a device that is already active.
   if (!state_w->m_flags.test_and_set_active(active_flag))
     return false;
 
   bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
-  device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
 
   if (!state_w->m_flags.test_inferior(active_flag))
-    ++m_active;
+  {
+    CWDEBUG_ONLY(int active =) ++m_active;
+    Dout(dc::evio, "Incremented m_active to " << active);
+  }
+  else
+    Dout(dc::evio, "Not incrementing m_active because inferior device!");
+
+  if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+    device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+  else
+    handle_regular_file(active_flag, device);
 
   // Return true iff device was added as userdata to the epoll interest list (using EPOLL_CTL_ADD),
   // in turn that will cause a call to inhibit_deletion.
   return needs_adding;
 }
 
-bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+EventLoopThread::result_t EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
-    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ")");
-    return false;
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ") -- don't call start_if when it is sure that it will fail?!");
+    return condition_failed;
   }
 
   // Don't start a device that is disabled.
   if (AI_UNLIKELY(state_w->m_flags.test_disabled(active_flag)))
   {
     Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ") for a device that is disabled.");
-    return false;
+    return success;
   }
+
+  DoutEntering(dc::evio, "EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ")");
 
   // This should never happen. First of all, for speed up reasons you should only call
   // this function when condition.is_momentary_true(), secondly if the condition would
@@ -364,41 +428,63 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
 
   // Don't start a device that is already active.
   if (!state_w->m_flags.test_and_set_active(active_flag))
-    return false;
+    return success;
 
   // This is likely because otherwise we shouldn't be using a construction with
   // FuzzyBool / FuzzyCondition in the first place.
   if (AI_LIKELY(condition.is_transitory_true()))
   {
-    // Re-test condition in critical area.
+    // Re-test condition in critical area. Note that the critical area is actually the area where m_state is locked
+    // which started much sooner. Nevertheless, it is only really required to be locked for testing the condition
+    // (again) here. The reason the mutex isn't constantly released before this point is because the code between
+    // where it is locked and this point is pretty minimal (just some non-atomic bit fiddling). See README.devices
+    // for more information.
     if (condition().is_momentary_false())
     {
       state_w->m_flags.clear_active(active_flag);
-      return false;
+      return condition_failed;
     }
   }
 #ifdef CWDEBUG
-  else
-    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag <<", " << device << ")");
+  else // is_true()
+    Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag <<", " << device << ") -- just call start() without condition?!");
 #endif
 
   bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
-  device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
 
   if (!state_w->m_flags.test_inferior(active_flag))
-    ++m_active;
+  {
+    CWDEBUG_ONLY(int active =) ++m_active;
+    Dout(dc::evio, "Incremented m_active to " << active);
+  }
+  else
+    Dout(dc::evio, "Not incrementing m_active because inferior device!");
 
-  return needs_adding;
+  if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+    device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+  else
+    handle_regular_file(active_flag, device);
+
+  return needs_adding ? success_added : success;
 }
 
 bool EventLoopThread::remove(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
+  DoutEntering(dc::evio, "EventLoopThread::remove({" << *state_w << "}, " << active_flag << ", " << device << ")");
   bool needs_removal = state_w->m_flags.test_and_clear_added(active_flag) && !state_w->m_flags.is_added();
   bool cleared_active = state_w->m_flags.test_and_clear_active(active_flag);
   if (cleared_active || needs_removal)
-    device->stop_watching(state_w, m_epoll_fd, active_flag, needs_removal);
-  if (cleared_active && !state_w->m_flags.test_inferior(active_flag) && --m_active == 0)
-    wake_up();
+  {
+    if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+      device->stop_watching(state_w, m_epoll_fd, active_flag, needs_removal);
+  }
+  if (cleared_active && !state_w->m_flags.test_inferior(active_flag))
+  {
+    int active = --m_active;
+    Dout(dc::evio, "Decremented m_active to " << active);
+    if (active == 0)
+      bump_terminate();
+  }
   // Return true iff device was removed from the epoll interest list (using EPOLL_CTL_DEL).
   return needs_removal;
 }
@@ -409,19 +495,25 @@ void EventLoopThread::stop(FileDescriptor::state_t::wat const& state_w, FileDesc
   if (!state_w->m_flags.test_and_clear_active(active_flag))
     return;
 
-  device->stop_watching(state_w, m_epoll_fd, active_flag, false);
+  if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+    device->stop_watching(state_w, m_epoll_fd, active_flag, false);
 
-  if (!state_w->m_flags.test_inferior(active_flag) && --m_active == 0)
-    wake_up();
+  if (!state_w->m_flags.test_inferior(active_flag))
+  {
+    int active = --m_active;
+    Dout(dc::evio, "Decremented m_active to " << active);
+    if (active == 0)
+      bump_terminate();
+  }
 }
 
-void EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+EventLoopThread::result_t EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
-    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ")");
-    return;
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ") -- don't call stop_if when it is sure that it will fail?!");
+    return condition_failed;
   }
 
   // See start_if.
@@ -429,29 +521,39 @@ void EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils
 
   // Don't stop a device that is already non-active.
   if (!state_w->m_flags.test_and_clear_active(active_flag))
-    return;
+    return success;
 
   // This is likely because otherwise we shouldn't be using a construction with
   // FuzzyBool / FuzzyCondition in the first place.
   if (AI_LIKELY(condition.is_transitory_true()))
   {
-    // Re-test condition in critical area.
+    // Re-test condition in critical area. Note that the critical area is actually where m_state is locked (so that began way sooner).
+    // In reality, it is only really needed to have that locked right here, before testing the condition again. We're not releasing
+    // that lock constantly however, because the code from where it was locked till here is very minimal (just some non-atomic bit fiddling).
     if (condition().is_momentary_false())
     {
       // Revert the clear of the active flag.
       state_w->m_flags.set_active(active_flag);
-      return;
+      return condition_failed;
     }
   }
 #ifdef CWDEBUG
-  else
-    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ")");
+  else // is_true()
+    Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ") -- just call stop() without condition?!");
 #endif
 
-  device->stop_watching(state_w, m_epoll_fd, active_flag, false);
+  if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+    device->stop_watching(state_w, m_epoll_fd, active_flag, false);
 
-  if (!state_w->m_flags.test_inferior(active_flag) && --m_active == 0)
-    wake_up();
+  if (!state_w->m_flags.test_inferior(active_flag))
+  {
+    int active = --m_active;
+    Dout(dc::evio, "Decremented m_active to " << active);
+    if (active == 0)
+      bump_terminate();
+  }
+
+  return success;
 }
 
 namespace {
@@ -460,6 +562,7 @@ SingletonInstance<EventLoopThread> dummy __attribute__ ((__unused__));
 
 void EventLoopThread::stop_running()
 {
+  DoutEntering(dc::evio, "EventLoopThread::stop_running()");
   m_stop_running = true;
 }
 

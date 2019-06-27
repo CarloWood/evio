@@ -48,7 +48,7 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   if ((mode & ios_base::app))
     mode |= ios_base::out;
 
-  // Call input() and/or output() before calling open().
+  // Call set_sink() and/or set_source() before calling open().
   ASSERT(m_ibuffer || m_obuffer);
 
   if ((mode & (ios_base::in|ios_base::out)) == 0)
@@ -63,8 +63,8 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   {
     // If at least one of ios_base::in or ios_base::out is specified, it
     // must match the buffers that we have.
-    ASSERT((m_ibuffer == nullptr) == !(mode & ios_base::in));   // Call input() before calling open().
-    ASSERT((m_obuffer == nullptr) == !(mode & ios_base::out));  // Call output() before calling open().
+    ASSERT((m_ibuffer == nullptr) == !(mode & ios_base::in));   // Call set_sink() before calling open().
+    ASSERT((m_obuffer == nullptr) == !(mode & ios_base::out));  // Call set_source() before calling open().
   }
 #endif
 
