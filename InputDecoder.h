@@ -45,7 +45,7 @@ class InputDeviceEventsHandler
 
   void start_input_device() { m_input_device->start_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
   void stop_input_device() { m_input_device->stop_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
-  NAD_DECL(close_input_device) { m_input_device->close_input_device(need_allow_deletion); }
+  NAD_DECL(close_input_device) { NAD_CALL(m_input_device->close_input_device); }
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)

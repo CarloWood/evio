@@ -74,7 +74,6 @@ class OutputDevice : public virtual FileDescriptor
 
   // Make a deep copy of VT_ptr.
   virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
-
   utils::VTPtr<OutputDevice> VT_ptr;
 
  private:
@@ -182,16 +181,17 @@ class OutputDevice : public virtual FileDescriptor
     NAD_PUBLIC_END;
   }
 
+ protected:
+  // Called from the streambuf associated with this device when pubsync() is called on it.
+  friend class StreamBufProducer;
+  virtual int sync();
+
  private:
-  // Called by the second output above.
+  // Called by the second set_source above.
   void set_source(LinkBuffer* link_buffer)
   {
     m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
   }
-
-  // Called from the streambuf associated with this device when pubsync() is called on it.
-  friend class StreamBufProducer;
-  virtual int sync();
 
   // Override base class virtual functions.
   void init_output_device(state_t::wat const& state_w) override;

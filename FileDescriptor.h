@@ -27,6 +27,7 @@
 #include "utils/AIRefCount.h"
 #include "utils/log2.h"
 #include "utils/InstanceTracker.h"
+#include "utils/AIAlert.h"
 #include <cstdint>
 #include <atomic>
 #include <sys/epoll.h>
@@ -344,6 +345,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    // If epoll_fd == -1 and errno EBADF: did you create an EventLoop object at the start of main?
     // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.
     ASSERT(ret != -1);
   }
@@ -355,8 +357,12 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     CWDEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
-    // Library bug: how to recover from this?
-    ASSERT(ret != -1);
+    if (AI_UNLIKELY(ret == -1))
+    {
+      // This is an unrecoverable error... Application should print this information and terminate.
+      THROW_FALERTE("epoll_ctl([EPOLL_FD], [EPOLL_OP_STR], [FD], [EPOLL_EVENT]) = -1",
+          AIArgs("[EPOLL_FD]", epoll_fd)("[EPOLL_OP_STR]", epoll_op_str(op))("[FD]", m_fd)("[EPOLL_EVENT]", state_w->m_epoll_event));
+    }
   }
 
  private:
@@ -364,8 +370,8 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   friend class EventLoopThread;
   virtual NAD_DECL_UNUSED_ARG(read_event) { DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object that isn't an InputDevice."); }
   virtual NAD_DECL_UNUSED_ARG(write_event) { DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object that isn't an OutputDevice."); }
-  virtual NAD_DECL_UNUSED_ARG(hup_event) { DoutFatal(dc::core, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
-  virtual NAD_DECL_UNUSED_ARG(exceptional_event) { DoutFatal(dc::core, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(hup_event) { Dout(dc::warning, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(exceptional_event) { Dout(dc::warning, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
 
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).

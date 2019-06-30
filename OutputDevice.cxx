@@ -77,8 +77,11 @@ void OutputDevice::init_output_device(state_t::wat const& state_w)
 void OutputDevice::start_output_device(state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device() [" << this << ']');
-  // Call OutputDevice::init before calling OutputDevice::start_output_device.
+  // Call OutputDevice::init before calling OutputDevice::start_output_device and
+  // don't call start_output_device when the device was closed.
   ASSERT(state_w->m_flags.is_w_open());
+  // Call set_source() on an OutputDevice before starting it.
+  ASSERT(m_obuffer);
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
   if (EventLoopThread::instance().start(state_w, this))
@@ -314,8 +317,8 @@ NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
     }
 #if EWOULDBLOCK != EAGAIN
     int nr_eagain_errors = 1;
-try_again_write1:
 #endif
+try_again_write1:
     size_t wlen = ::write(fd, obuffer->buf2dev_ptr(), len);
     if (wlen == (size_t)-1)
     {
@@ -329,9 +332,8 @@ try_again_write1:
       else
         std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(err) << std::endl;
 #endif
-      ASSERT(err != EINTR); // FIXME, check for SIGPIPE
-      //if (errno == EINTR && !SignalServer::caught(SIGPIPE))
-      //  continue;
+      if (err == EINTR)
+        goto try_again_write1;
       if (err == EWOULDBLOCK)
       {
         // We can't just leave this function in this case because regular files aren't

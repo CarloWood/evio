@@ -193,7 +193,7 @@ NAD_DECL(Socket::VT_impl::read_error, InputDevice* _self, int CWDEBUG_ONLY(err))
 {
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_error(" NAD_DoutEntering_ARG0 << err << ") [" << self << "]");
-  self->close(need_allow_deletion);
+  NAD_CALL(self->close);
   if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
     NAD_CALL(self->connected, false);     // Signal connect failure.
   if ((self->m_connected_flags & is_connected))

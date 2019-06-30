@@ -43,7 +43,7 @@ class PersistentInputFile : public File, private INotify
     static NAD_DECL(read_returned_zero, InputDevice* self);
 
     // Virtual table of PersistentInputFile.
-    static constexpr File::VT_type VT{
+    static constexpr VT_type VT{
       /*File*/
         /*InputDevice*/
       { nullptr,

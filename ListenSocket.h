@@ -123,7 +123,6 @@ class ListenSocketDevice : public InputDevice
 
   // Make a deep copy of VT_ptr.
   VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
   utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
 
 protected:

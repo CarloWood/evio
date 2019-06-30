@@ -60,7 +60,7 @@ void EventLoopThread::init(AIQueueHandle handler)
   DoutEntering(dc::evio, "EventLoopThread::init(" << handler << ')');
   m_handler = handler;
 
-  // Create the thread running ev_run.
+  // Create the thread running the loop around epoll_pwait.
   m_event_thread = std::thread(&EventLoopThread::main, &EventLoopThread::instance());
 
   // Wait till we're actually running.
@@ -157,7 +157,10 @@ void EventLoopThread::main()
       if (AI_UNLIKELY(event.events & ~(EPOLLIN|EPOLLOUT)))
       {
         if ((event.events & EPOLLHUP))
+        {
           device->hup_event(need_allow_deletion);
+          device->close();      // Leaving this alive would cause a flood of events.
+        }
         else if ((event.events & EPOLLERR))
           device->exceptional_event(need_allow_deletion);
         else
@@ -171,7 +174,7 @@ void EventLoopThread::main()
   m_running = false;
 
   // Deinit.
-  ASSERT(m_active == 0);
+  ASSERT(m_terminate == forced || m_active == 0);
   utils::Signals::block_and_unregister(m_epoll_signum);
   Dout(dc::system|continued_cf, "close(" << m_epoll_fd << ") = ");
   CWDEBUG_ONLY(int res =) ::close(m_epoll_fd);

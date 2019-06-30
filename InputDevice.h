@@ -76,7 +76,7 @@ class InputDevice : public virtual FileDescriptor
     static NAD_DECL(read_returned_zero, InputDevice* self) { NAD_CALL(self->close_input_device); }        // Read thread.
 
     // The default behaviour is to close() the filedescriptor.
-    static NAD_DECL(read_error, InputDevice* self, int UNUSED_ARG(err)) { return self->close(need_allow_deletion); } // Read thread.
+    static NAD_DECL(read_error, InputDevice* self, int UNUSED_ARG(err)) { return NAD_CALL(self->close); } // Read thread.
 
     // The default behavior is to do nothing.
     static NAD_DECL(data_received, InputDevice* self, char const* new_data, size_t rlen);

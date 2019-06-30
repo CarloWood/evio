@@ -84,6 +84,8 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!is_destructed());
+  // Call set_sink() on an InputDevice before starting it.
+  ASSERT(m_ibuffer);
   // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
   // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
   if (EventLoopThread::instance().start(state_w, this))
@@ -215,8 +217,23 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 
     ssize_t rlen;
     char* new_data = self->m_ibuffer->dev2buf_ptr();
-//try_again_read1:
-    rlen = ::read(fd, new_data, space);
+
+    for (;;)                                            // Loop for EINTR.
+    {
+      rlen = ::read(fd, new_data, space);
+      if (AI_UNLIKELY(rlen == -1))                      // A read error occured ?
+      {
+        int err = errno;
+        Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
+        if (err != EINTR)
+        {
+          if (err != EAGAIN && err != EWOULDBLOCK)
+            NAD_CALL(self->read_error, err);
+          return;
+        }
+      }
+      break;
+    }
 
     if (rlen == 0)                      // EOF reached ?
     {
@@ -236,24 +253,15 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
       }
     }
 
-    if (rlen == -1)                     // A read error occured ?
-    {
-      int err = errno;
-      Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
-      ASSERT(err != EINTR); // FIXME, check for SIGPIPE
-      //if (err == EINTR && !SignalServer::caught(SIGPIPE))
-      //  goto try_again_read1;
-      if (err != EAGAIN && err != EWOULDBLOCK)
-        NAD_CALL(self->read_error, err);
-      break;                            // Next time better.
-    }
-
     self->m_ibuffer->dev2buf_bump(rlen);
 
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
 
     // The data is now in the buffer. This is where we become the consumer thread.
     NAD_CALL(self->data_received, new_data, rlen);
+
+    if (AI_UNLIKELY(need_allow_deletion))
+      break;    // We were closed.
 
     // It might happen that more data is available, even rlen < space (for example when the read() was
     // interrupted (POSIX allows to just return the number of bytes read so far)).
