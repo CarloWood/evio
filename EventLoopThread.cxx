@@ -136,7 +136,9 @@ void EventLoopThread::main()
         break;
       }
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
+#ifdef CWDEBUG
       utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_flags()); });
+#endif
       ready = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
       Dout(dc::finish|cond_error_cf(ready == -1), ready);
     }
