@@ -365,7 +365,12 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
   if (AI_UNLIKELY(sa_family == AF_UNIX || first == '/'))
   {
     // Don't pass a port or a family other than AF_UNIX with a unix socket.
-    ASSERT((sa_family == AF_UNIX || sa_family == AF_UNSPEC) && port_h == -1);
+    if ((sa_family != AF_UNIX && sa_family != AF_UNSPEC) || port_h != -1)
+    {
+      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+          "\"[SOCKADDR_TEXT]\": is a UNIX socket, but IP address expected because sa_family = [FAMILY] and port_h = [PORT]",
+          AIArgs("[SOCKADDR_TEXT]", sockaddr_text)("FAMILY]", sa_family)("[PORT]", port_h));
+    }
     make_sockaddr_un(sockaddr_text);
     return;
   }
