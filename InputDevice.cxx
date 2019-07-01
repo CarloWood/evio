@@ -84,8 +84,8 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!is_destructed());
-  // Call set_sink() on an InputDevice before starting it.
-  ASSERT(m_ibuffer);
+  // Call set_sink() on an InputDevice before starting it (except when the InputDevice overrides read_from_fd).
+  ASSERT(m_ibuffer || VT_ptr->_read_from_fd != VT_impl::VT._read_from_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
   // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
   if (EventLoopThread::instance().start(state_w, this))
@@ -325,7 +325,7 @@ NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (FileDescriptor::state_t::wat(self->m_state)->m_flags.is_r_disabled())
+      if (!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_readable())
         return;
       rlen -= len;
       if (rlen == 0)
@@ -347,7 +347,7 @@ NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
 
       self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (FileDescriptor::state_t::wat(self->m_state)->m_flags.is_r_disabled())
+      if (!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_readable())
         return;
       rlen -= len;
       if (rlen == 0)

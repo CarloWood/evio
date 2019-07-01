@@ -80,8 +80,8 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   // Call OutputDevice::init before calling OutputDevice::start_output_device and
   // don't call start_output_device when the device was closed.
   ASSERT(state_w->m_flags.is_w_open());
-  // Call set_source() on an OutputDevice before starting it.
-  ASSERT(m_obuffer);
+  // Call set_source() on an OutputDevice before starting it (except when the OutputDevice overrides write_to_fd).
+  ASSERT(m_obuffer || VT_ptr->_write_to_fd != VT_impl::VT._write_to_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
   if (EventLoopThread::instance().start(state_w, this))
@@ -320,15 +320,25 @@ NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
 #endif
 try_again_write1:
     size_t wlen = ::write(fd, obuffer->buf2dev_ptr(), len);
-    if (wlen == (size_t)-1)
+    if (AI_UNLIKELY(wlen == (size_t)-1))
     {
       int err = errno;
+      int const is_debug_channel =
 #ifdef CWDEBUG
-      if (!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_debug_channel())
+        FileDescriptor::state_t::wat(self->m_state)->m_flags.is_debug_channel();
+#else
+        false;
+#endif
+      // It can happen that the fd is already closed by another thread, as a result of a read event on this fd.
+      if (err == EBADF && FileDescriptor::state_t::wat(self->m_state)->m_flags.is_dead())
       {
-        Dout(dc::warning|error_cf,
-            "write(" << fd << ", " << buf2str(obuffer->buf2dev_ptr(), obuffer->buf2dev_contiguous()) << ", " << len << ')');
+        if (!is_debug_channel)
+          Dout(dc::evio, "Leaving OutputDevice::write_to_fd() because fd was already closed.");
+        return;
       }
+#ifdef CWDEBUG
+      if (!is_debug_channel)
+        Dout(dc::system|error_cf, "write(" << fd << ", " << buf2str(obuffer->buf2dev_ptr(), obuffer->buf2dev_contiguous()) << ", " << len << ") = -1");
       else
         std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(err) << std::endl;
 #endif

@@ -884,7 +884,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   void printOn(std::ostream& o) const;
 #endif
 
-#if defined(CWDEBUG) || defined(DEBUG)
+#if defined(CWDEBUG) || defined(DEBUG) || defined(DEBUG_GTEST_TESTSUITE)
  public:
   bool debug_update_get_area(MemoryBlock*& get_area_block_node, char*& cur_gptr, std::streamsize& available)
   {

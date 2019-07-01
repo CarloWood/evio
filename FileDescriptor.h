@@ -380,7 +380,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptor() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, this}; }
+  FileDescriptor() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
   ~FileDescriptor() noexcept { }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
