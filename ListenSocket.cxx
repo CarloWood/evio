@@ -29,6 +29,8 @@ namespace evio {
 
 void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
 {
+  DoutEntering(dc::evio, "ListenSocketDevice::listen(" << bind_addr << ", " << backlog << ")");
+
   // Don't call listen() twice on a row. First close() the listen socket again.
   ASSERT(!state_t::rat(m_state)->m_flags.is_r_open());
 
@@ -52,7 +54,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog)
     int opt = 1;
     // Some OS need (optval_t)&opt, glibc doesn't (libc-5 does).
     CWDEBUG_ONLY(int res =) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    Dout(dc::warning(res < 0)|error_cf, "ListenSocketDevice::listen: setsockopt(SO_REUSEADDR)");
+    Dout(dc::system|cond_error_cf(res == -1), "setsockopt(" << fd << ", SOL_SOCKET, SO_REUSEADDR, {1}, " << sizeof(opt) << ")");
   }
 #endif // SO_REUSEADDR
 

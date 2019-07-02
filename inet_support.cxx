@@ -86,8 +86,13 @@ void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size)
   opt >>= 1;
   Dout(dc::warning(!utils::is_power_of_two(opt)), "set_rcvsockbuf: socket receive buffer is not a power of two!");
   Dout(dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes.");
-#if 0
-  if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (optval_t)&opt, sizeof(opt)) < 0)
+#if 1
+#ifdef CWDEBUG
+  int optin = opt;
+#endif
+  int ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (optval_t)&opt, sizeof(opt));
+  Dout(dc::system|cond_error_cf(ret == -1), "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_RCVBUF, {" << optin << "}, " << sizeof(opt) << ") = " << ret);
+  if (ret == -1)
   {
     THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_RCVBUF, [[OPT]], [SIZE]) = -1",
         AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
@@ -108,8 +113,13 @@ void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size)
   opt >>= 1;
   Dout(dc::warning(!utils::is_power_of_two(opt)), "set_sndsockbuf: socket send buffer is not a power of two!");
   Dout(dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes.");
-#if 0
-  if (setsockopt(sock_fd, SOL_SOCKET, SO_SNDBUF, (optval_t)&opt, sizeof(opt)) < 0)
+#if 1
+#ifdef CWDEBUG
+  int optin = opt;
+#endif
+  int ret = setsockopt(sock_fd, SOL_SOCKET, SO_SNDBUF, (optval_t)&opt, sizeof(opt));
+  Dout(dc::system|cond_error_cf(ret == -1), "setsockopt(" << sock_fd << ", SOL_SOCKET, SO_SNDBUF, {" << optin << "}, " << sizeof(opt) << ") = " << ret);
+  if (ret == -1)
   {
     THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_SNDBUF, [[OPT]], [SIZE]) = -1",
         AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
