@@ -109,8 +109,8 @@ NAD_DECL_UNUSED_ARG(ListenSocketDevice::VT_impl::read_from_fd, InputDevice* _sel
   ListenSocketDevice* self = static_cast<ListenSocketDevice*>(_self);
 
   int sock_fd;
-  socklen_t addrlen = sizeof(struct sockaddr);
   SocketAddress accept_addr;
+  socklen_t addrlen = sizeof(SocketAddress);
 
   Dout(dc::system|continued_cf, "accept4(" << fd << ", ");
   if ((sock_fd = accept4(fd, accept_addr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
