@@ -202,6 +202,7 @@ void ListenSocket<ACCEPTED_SOCKET>::VT_impl::spawn_accepted(ListenSocketDevice* 
 {
   ListenSocket<ACCEPTED_SOCKET>* self = static_cast<ListenSocket<ACCEPTED_SOCKET>*>(_self);
   auto sock = create<ACCEPTED_SOCKET>();
+  sock->set_sock_buffers(fd);
   sock->init(fd, remote_address);
   self->new_connection(*sock);
 }

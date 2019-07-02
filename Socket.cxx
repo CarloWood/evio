@@ -34,6 +34,28 @@
 
 namespace evio {
 
+void Socket::set_sock_buffers(int fd, size_t rcvbuf_size, size_t sndbuf_size)
+{
+  try
+  {
+    if (m_ibuffer)
+      set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->m_minimum_block_size);
+    if (m_obuffer)
+      set_sndsockbuf(fd, sndbuf_size, m_obuffer->m_minimum_block_size);
+  }
+  catch (AIAlert::Error const& error)
+  {
+    Dout(dc::system|continued_cf, "close(" << fd << ") = ");
+    CWDEBUG_ONLY(int ret =) ::close(fd);
+    Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    THROW_ALERT("Socket::set_sock_buffers([FD], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
+        AIArgs("[FD]", fd)("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
+        error);
+  }
+  m_rcvbuf_size = rcvbuf_size;
+  m_sndbuf_size = sndbuf_size;
+}
+
 bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
 {
   if (state_t::rat(m_state)->m_flags.is_open())
@@ -47,6 +69,10 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   Dout(dc::finish|cond_error_cf(fd < 0), fd);
   if (fd < 0)
     return false;
+
+  // Send and receive buffer sizes must be set immediately after creating a socket!
+  if (remote_address.is_ip())
+    set_sock_buffers(fd, rcvbuf_size, sndbuf_size);
 
   if (!if_addr.is_unspecified())
   {
@@ -69,12 +95,12 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   }
   Dout(dc::finish|cond_error_cf(ret < 0), ret);
 
-  init(fd, remote_address, rcvbuf_size, sndbuf_size, true);
+  init(fd, remote_address, true);
 
   return true;
 }
 
-void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, bool signal_connected)
+void Socket::init(int fd, SocketAddress const& remote_address, bool signal_connected)
 {
 #ifdef CWDEBUG
   if (get_flags().is_open())
@@ -89,30 +115,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, size_t rcvbuf_siz
   ASSERT(m_ibuffer || m_obuffer);
 
   m_remote_address = remote_address;
-
-  m_rcvbuf_size = rcvbuf_size;
-  m_sndbuf_size = sndbuf_size;
   m_connected_flags = signal_connected;
-
-  if (remote_address.is_ip())
-  {
-    try
-    {
-      if (m_ibuffer)
-        set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->m_minimum_block_size);
-      if (m_obuffer)
-        set_sndsockbuf(fd, sndbuf_size, m_obuffer->m_minimum_block_size);
-    }
-    catch (AIAlert::Error const& error)
-    {
-      Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-      CWDEBUG_ONLY(int ret =) ::close(fd);
-      Dout(dc::finish|cond_error_cf(ret == -1), ret);
-      THROW_ALERT("Socket::init([FD], [SOCKET_ADDRESS], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
-          AIArgs("[FD]", fd)("[SOCKET_ADDRESS]", remote_address)("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
-          error);
-    }
-  }
 
   FileDescriptor::init(fd);     // link in
   state_t::wat state_w(m_state);

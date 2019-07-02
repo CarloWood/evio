@@ -154,8 +154,11 @@ class Socket : public InputDevice, public OutputDevice
   Socket() : VT_ptr(this), m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
   ~Socket() noexcept;
 
+  // Set the socket buffer sizes.
+  void set_sock_buffers(int fd, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
+
   // Associate this object with an existing and open socket `fd'.
-  void init(int fd, SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, bool signal_connected = false);
+  void init(int fd, SocketAddress const& socket_address, bool signal_connected = false);
 
   // Create a socket(2), bind it to if_addr, and call init().
   bool connect(SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
