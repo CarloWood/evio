@@ -28,14 +28,13 @@
 #define EVIO_OUTPUT_STREAM_H
 
 #include "StreamBuf.h"
+#include "Protocol.h"
 #include <iostream>
 #include <limits>
 
 namespace evio {
 
-static constexpr size_t default_output_blocksize_c = 2048 - sizeof(MemoryBlock) - CW_MALLOC_OVERHEAD;
-
-class OutputDevicePtr
+class OutputDevicePtr : public Protocol
 {
  protected:
   OutputDevice* m_output_device;
@@ -50,22 +49,21 @@ class OutputDevicePtr
 
   friend class OutputDevice;
   OutputBuffer* create_buffer(OutputDevice* output_device)
-      { return create_buffer(output_device, default_output_blocksize_c, 8 * default_output_blocksize_c, std::numeric_limits<size_t>::max()); }
-  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize)
-      { return create_buffer(output_device, minimum_blocksize, 8 * minimum_blocksize, std::numeric_limits<size_t>::max()); }
-  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark)
-      { return create_buffer(output_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
-  virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t, size_t)
+      { return create_buffer(output_device, 8 * minimum_block_size(), std::numeric_limits<size_t>::max()); }
+  OutputBuffer* create_buffer(OutputDevice* output_device, size_t buffer_full_watermark)
+      { return create_buffer(output_device, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
+  virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t)
       { /* Should never be used. */ return nullptr; }
 };
 
 class OutputStream : public std::ostream, public OutputDevicePtr
 {
  protected:
-  OutputBuffer* create_buffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) override
+  OutputBuffer* create_buffer(OutputDevice* output_device, size_t buffer_full_watermark, size_t max_alloc) override
   {
+    DoutEntering(dc::evio, "OutputStream::create_buffer(" << output_device << ", " << buffer_full_watermark << ", " << max_alloc << ")");
     m_output_device = output_device;
-    OutputBuffer* output_buffer = new OutputBuffer(output_device, minimum_blocksize, buffer_full_watermark, max_alloc);
+    OutputBuffer* output_buffer = new OutputBuffer(output_device, minimum_block_size(), buffer_full_watermark, max_alloc);
     [[maybe_unused]] std::streambuf* old_streambuf = rdbuf(output_buffer);
     return output_buffer;
   }

@@ -44,6 +44,10 @@ class ListenSocketDevice : public InputDevice
  private:
   SocketAddress m_bind_addr;            // The address we bind to.
 
+ private:
+  virtual size_t input_minimum_block_size() const = 0;
+  virtual size_t output_minimum_block_size() const = 0;
+
  public:
   //---------------------------------------------------------------------------
   // Public methods:
@@ -56,10 +60,16 @@ class ListenSocketDevice : public InputDevice
   // `backlog' is the size of the client queue waiting for accept().
   //
   // When a new connection is accepted the virtual function spawn_accepted will be called.
-  void listen(SocketAddress&& sockaddr, int backlog = 4);
+  //
+  // Passing a value of zero to rcvbuf_size / sndbuf_size will cause the virtual function
+  // input_minimum_block_size() / output_minimum_block_size() to be used respectively.
+  void listen(SocketAddress&& sockaddr, int backlog = 4, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
 
   // Convenience function in case you want to pass an lvalue.
-  void listen(SocketAddress const& sockaddr, int backlog = 4) { listen(SocketAddress(sockaddr), backlog); }
+  void listen(SocketAddress const& sockaddr, int backlog = 4, size_t rcvbuf_size = 0, size_t sndbuf_size = 0)
+  {
+    listen(SocketAddress(sockaddr), backlog, rcvbuf_size, sndbuf_size);
+  }
 
   // Start listening on an existing listen socket with filedescriptor fd.
   // bind_addr must be the address this listen socket is bound to.
@@ -195,6 +205,10 @@ class ListenSocket : public ListenSocketDevice
 
  public:
   ListenSocket() : VT_ptr(this) { }
+
+ private:
+  size_t input_minimum_block_size() const override;
+  size_t output_minimum_block_size() const override;
 };
 
 template<typename ACCEPTED_SOCKET>
@@ -202,9 +216,24 @@ void ListenSocket<ACCEPTED_SOCKET>::VT_impl::spawn_accepted(ListenSocketDevice* 
 {
   ListenSocket<ACCEPTED_SOCKET>* self = static_cast<ListenSocket<ACCEPTED_SOCKET>*>(_self);
   auto sock = create<ACCEPTED_SOCKET>();
-  sock->set_sock_buffers(fd);
   sock->init(fd, remote_address);
   self->new_connection(*sock);
+}
+
+template<typename ACCEPTED_SOCKET>
+size_t ListenSocket<ACCEPTED_SOCKET>::input_minimum_block_size() const
+{
+  // Sorry, but for this ACCEPTED_SOCKET::input_protocol_type needs to have a default constructor.
+  typename ACCEPTED_SOCKET::input_protocol_type input;
+  return input.minimum_block_size();
+}
+
+template<typename ACCEPTED_SOCKET>
+size_t ListenSocket<ACCEPTED_SOCKET>::output_minimum_block_size() const
+{
+  // Sorry, but for this ACCEPTED_SOCKET::output_protocol_type needs to have a default constructor.
+  typename ACCEPTED_SOCKET::output_protocol_type output;
+  return output.minimum_block_size();
 }
 
 } // namespace evio

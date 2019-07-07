@@ -28,17 +28,16 @@
 #define EVIO_INPUT_DECODER_H
 
 #include "StreamBuf.h"  // MsgBlock.
+#include "Protocol.h"
 #include <limits>
 #include <cstring>
 
 namespace evio {
 
-static constexpr size_t default_input_blocksize_c = 512 - sizeof(MemoryBlock) - CW_MALLOC_OVERHEAD;
-
 // This class is used as the base class of InputDecoder or LinkBufferPlus.
 // Any class that is not (an) InputDecoder that derives from this class
 // must define a end_of_msg_finder that returns 0.
-class InputDeviceEventsHandler
+class InputDeviceEventsHandler : public Protocol
 {
  protected:
   InputDevice* m_input_device;
@@ -49,13 +48,10 @@ class InputDeviceEventsHandler
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)
-      { return create_buffer(input_device, default_input_blocksize_c, 8 * default_input_blocksize_c, std::numeric_limits<size_t>::max()); }
-  InputBuffer* create_buffer(InputDevice* input_device, size_t minimum_blocksize)
-      { return create_buffer(input_device, minimum_blocksize, 8 * minimum_blocksize, std::numeric_limits<size_t>::max()); }
-  InputBuffer* create_buffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark)
-      { return create_buffer(input_device, minimum_blocksize, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
-  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t, size_t)
-      { /* Should never be used */ return nullptr; }
+      { return create_buffer(input_device, 8 * minimum_block_size(), std::numeric_limits<size_t>::max()); }
+  InputBuffer* create_buffer(InputDevice* input_device, size_t buffer_full_watermark)
+      { return create_buffer(input_device, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
+  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t) { /*This should never be used*/ ASSERT(false); return nullptr; }
 
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // BRT.
@@ -65,16 +61,11 @@ class InputDeviceEventsHandler
 class InputDecoder : public InputDeviceEventsHandler
 {
  private:
-  InputBuffer* create_buffer(
-      InputDevice* input_device,
-      size_t minimum_blocksize,
-      size_t buffer_full_watermark,
-      size_t max_alloc
-      ) override
+  InputBuffer* create_buffer(InputDevice* input_device, size_t buffer_full_watermark, size_t max_alloc) override
   {
-    DoutEntering(dc::evio, "InputDecoder::create_buffer(" << input_device << ", " << minimum_blocksize << ", " << buffer_full_watermark << ", " << max_alloc << ")");
+    DoutEntering(dc::evio, "InputDecoder::create_buffer(" << input_device << ", " << buffer_full_watermark << ", " << max_alloc << ")");
     m_input_device = input_device;
-    InputBuffer* input_buffer = new InputBuffer(input_device, minimum_blocksize, buffer_full_watermark, max_alloc);
+    InputBuffer* input_buffer = new InputBuffer(input_device, minimum_block_size(), buffer_full_watermark, max_alloc);
     return input_buffer;
   }
 

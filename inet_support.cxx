@@ -71,22 +71,61 @@ int print_hostent_on(struct hostent const* h, ostream& o)
   return 0;
 }
 
+// Without setting a socket buffer size, the buffers are HUGE (by default).
+// This is bad because
+// 1) we already do the buffering and we're doing it better.
+// 2) huge buffers just cause latency; they kill the flow control that this library tries to achieve.
+//
+// For best flow control, the send and receive buffers should roughly equal to the minimum block size:
+// Under normal circumstances the buffer really shouldn't grow larger than one block (the minimum
+// block size) and even when it does, then the second block has the same size. Hence, the largest
+// amount that we try to write to a socket is usually the minimum block size (nl. until the buffer runs
+// really full-- but then things are wrong already anyway; a low watermark should help to control
+// that size). If the socket send buffer is empty then it is not needed to be larger than this
+// size; however, data is sent to the peer in MTU sized packets, existing of Maximum Segment Size (MSS)
+// sized data segments (extracted from the socket send buffer) plus a 40 byte header
+// (e.g. see https://searchnetworking.techtarget.com/definition/maximum-segment-size).
+// For example, with an MTU of 1500 bytes, MMS will be 1500 - 40 = 1460 bytes. Those segments are
+// kept in the socket sndbuf until the peer has acknowledged them. So, until that happens there is
+// less room in the socket buffer and we might not be able to write all of the minimum block size
+// to the socket send buffer. This is not a problem, as long as there are enough segments available
+// in the socket send buffer to be sent without getting a stall on to-be-acknowledged packets.
+//
+// In other words, the socket send buffer is a trade off between latency and data transfer speed,
+// both of which can be measured; the only real way to determine the best SO_SNDBUF size.
+//
+// The SO_RCVBUF size allows for flow control of received data. If our application can not process
+// incoming data fast enough data will pile up in our input buffer, causing latency on top of the
+// (maximum (slow?) speed). Picking a smallish input buffer, the input buffer will run full causing
+// the library to stop reading the socket, in turn causing the socket receive buffer to run full
+// which, using TCP window adjustment mechanism, will tell the sender to slow down.  Also the sender
+// shouldn't use a large (socket send) buffer of course, or there will still be latency.
+//
+// If the socket receive buffer is ridiculously large (as is the default) then that will just fill
+// up and we can read at our leasure. This is not bad when we don't care about latency; for example
+// when we just want to download data one-way; but when latency matters then the socket receive buffer
+// should be as small as possible without causing dramatic transfer speed reduction for the case
+// where our application CAN easily keep up with processing the incoming data.
+//
+// See http://www.masterraghu.com/subjects/np/introduction/unix_network_programming_v1.3/ch02lev1sec11.html
+// and "SO_RCVBUF and SO_SNDBUF Socket Options" on
+// http://www.masterraghu.com/subjects/np/introduction/unix_network_programming_v1.3/ch07lev1sec5.html#ch07lev1sec5
+// for detailed information about the subject of socket buffers.
+
 void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size)
 {
+  // The smaller the slower - smaller than this seems just ridiculous (the default is like 512 kB).
+  constexpr int rcvbuf_limit = 4096;        // Sanity.
   int opt = rcvbuf_size;
   if (opt == 0)
   {
-    // FIXME: this heuristic makes little sense.
-    // See http://www.masterraghu.com/subjects/np/introduction/unix_network_programming_v1.3/ch02lev1sec11.html for information about this subject.
-    opt = utils::nearest_power_of_two(2 * minimum_block_size + 256);
-    if (opt < 8192)
-      opt = 8192;
+    // Either pass rcvbuf_size or minimum_block_size (or both in which case rcvbuf_size will be used).
+    ASSERT(minimum_block_size != 0);
+    opt = minimum_block_size;
+    if (opt < rcvbuf_limit)
+      opt = rcvbuf_limit;
   }
-  // Because the kernel allocates double the requested value, ask for half the value...
-  opt >>= 1;
-  Dout(dc::warning(!utils::is_power_of_two(opt)), "set_rcvsockbuf: socket receive buffer is not a power of two!");
   Dout(dc::notice, "Setting receive buffer size for socket " << sock_fd << " to " << opt << " bytes.");
-#if 1
 #ifdef CWDEBUG
   int optin = opt;
 #endif
@@ -97,23 +136,25 @@ void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size)
     THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_RCVBUF, [[OPT]], [SIZE]) = -1",
         AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
   }
-#endif
+  Dout(dc::warning(optin < std::max(rcvbuf_limit, (int)minimum_block_size)),
+      "Requested SO_SNDBUF is less than " << ((optin < rcvbuf_limit) ? std::to_string(rcvbuf_limit).c_str() : "the minimum block size") << "; you better know what you are doing.");
 }
 
 void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size)
 {
+  // Emperically determined to be the minimum sndbuf of a socket that can communicate with a socket (over localhost) with default socket buffer sizes.
+  // A smaller value leads to strange stalls in epoll_pwait() of ~43 ms per call. Also see src/epoll_bug.c in ai-evio-testsuite.
+  constexpr int sndbuf_limit = 33182;
   int opt = sndbuf_size;
   if (opt == 0)
   {
-    opt = utils::nearest_power_of_two(minimum_block_size);
-    if (opt < 8192)
-      opt = 8192;
+    // Either pass sndbuf_size or minimum_block_size (or both in which case sndbuf_size will be used).
+    ASSERT(minimum_block_size != 0);
+    opt = minimum_block_size;
+    if (opt < sndbuf_limit)
+      opt = sndbuf_limit;
   }
-  // Because the kernel allocates double the requested value, ask for half the value...
-  opt >>= 1;
-  Dout(dc::warning(!utils::is_power_of_two(opt)), "set_sndsockbuf: socket send buffer is not a power of two!");
   Dout(dc::notice, "Setting send buffer size for socket " << sock_fd << " to " << opt << " bytes.");
-#if 1
 #ifdef CWDEBUG
   int optin = opt;
 #endif
@@ -124,7 +165,8 @@ void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size)
     THROW_ALERTE("setsockopt([FD], SOL_SOCKET, SO_SNDBUF, [[OPT]], [SIZE]) = -1",
         AIArgs("[FD]", sock_fd)("[OPT]", opt)("[SIZE]", sizeof(opt)));
   }
-#endif
+  Dout(dc::warning(optin < std::max(sndbuf_limit, (int)minimum_block_size)),
+      "Requested SO_SNDBUF is less than " << ((optin < sndbuf_limit) ? std::to_string(sndbuf_limit).c_str() : "the minimum block size") << "; you better know what you are doing.");
 }
 
 size_t size_of_addr(struct sockaddr const* addr)

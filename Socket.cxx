@@ -34,26 +34,24 @@
 
 namespace evio {
 
-void Socket::set_sock_buffers(int fd, size_t rcvbuf_size, size_t sndbuf_size)
+//static
+void Socket::set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size, size_t sndbuf_size)
 {
   try
   {
-    if (m_ibuffer)
-      set_rcvsockbuf(fd, rcvbuf_size, m_ibuffer->m_minimum_block_size);
-    if (m_obuffer)
-      set_sndsockbuf(fd, sndbuf_size, m_obuffer->m_minimum_block_size);
+    set_rcvsockbuf(fd, rcvbuf_size, input_minimum_block_size);
+    set_sndsockbuf(fd, sndbuf_size, output_minimum_block_size);
   }
   catch (AIAlert::Error const& error)
   {
     Dout(dc::system|continued_cf, "close(" << fd << ") = ");
     CWDEBUG_ONLY(int ret =) ::close(fd);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
-    THROW_ALERT("Socket::set_sock_buffers([FD], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
-        AIArgs("[FD]", fd)("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
+    THROW_ALERT("Socket::set_sock_buffers([FD], [INMINBLOCKSZ], [OUTMINBLOCKSZ], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
+        AIArgs("[FD]", fd)("INMINBLOCKSZ", input_minimum_block_size)("OUTMINBLOCKSZ", output_minimum_block_size)
+              ("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
         error);
   }
-  m_rcvbuf_size = rcvbuf_size;
-  m_sndbuf_size = sndbuf_size;
 }
 
 bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
@@ -70,9 +68,13 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   if (fd < 0)
     return false;
 
-  // Send and receive buffer sizes must be set immediately after creating a socket!
+  // Send and receive buffer sizes must be set before calling connect().
   if (remote_address.is_ip())
-    set_sock_buffers(fd, rcvbuf_size, sndbuf_size);
+  {
+    // If m_ibuffer/m_obuffer is nullptr then the socket isn't going to be used in that direction,
+    // so set a "random" value, but non-zero because that causes an assert.
+    set_sock_buffers(fd, m_ibuffer ? m_ibuffer->m_minimum_block_size : 1, m_obuffer ? m_obuffer->m_minimum_block_size : 1, rcvbuf_size, sndbuf_size);
+  }
 
   if (!if_addr.is_unspecified())
   {

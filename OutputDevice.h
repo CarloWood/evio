@@ -25,6 +25,7 @@
 
 #include "FileDescriptor.h"
 #include "StreamBuf.h"
+#include "Protocol.h"
 #include "utils/VTPtr.h"
 
 namespace utils {
@@ -77,13 +78,11 @@ class OutputDevice : public virtual FileDescriptor
   utils::VTPtr<OutputDevice> VT_ptr;
 
  private:
-  //---------------------------------------------------------------------------
-  // Inferface with libev.
-  //
-
-  //ev_io m_output_watcher;               // The watcher.
   using disable_release_t = aithreadsafe::Wrapper<int, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
+#ifdef DEBUGDEVICESTATS
+  size_t m_sent_bytes;
+#endif
 
  protected:
   //---------------------------------------------------------------------------
@@ -134,6 +133,10 @@ class OutputDevice : public virtual FileDescriptor
   Buf2Dev* rddbbuf() const { return m_obuffer; }
 #endif
 
+#ifdef DEBUGDEVICESTATS
+  size_t sent_bytes() const { return m_sent_bytes; }
+#endif
+
   // Returns true if the output device is registered with epoll.
   template<typename ThreadType>
   utils::FuzzyBool is_active(ThreadType) const
@@ -168,10 +171,18 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_source(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments);
+  void set_source(OutputDevicePtr& output_device_ptr, Args... output_create_buffer_arguments);
 
-  template<typename DEVICE, typename... Args>
-  void set_source(boost::intrusive_ptr<DEVICE> const& ptr, Args... buffer_arguments);
+  template<typename INPUT_DEVICE>
+  void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr,
+      size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc = std::numeric_limits<size_t>::max());
+
+  template<typename INPUT_DEVICE>
+  void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr,
+      size_t minimum_block_size)
+  {
+    set_source(ptr, minimum_block_size, 8 * minimum_block_size);
+  }
 
   NAD_DECL_PUBLIC(flush_output_device);
   NAD_DECL_PUBLIC(close_output_device)
@@ -210,24 +221,24 @@ class OutputDevice : public virtual FileDescriptor
 namespace evio {
 
 template<typename... Args>
-void OutputDevice::set_source(OutputDevicePtr& output_device_ptr, Args... output_buffer_arguments)
+void OutputDevice::set_source(OutputDevicePtr& output_device_ptr, Args... output_create_buffer_arguments)
 {
   Dout(dc::evio, "OutputDevice::set_source(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
   m_output_device_ptr = &output_device_ptr;
-  m_obuffer = m_output_device_ptr->create_buffer(this, output_buffer_arguments...);
+  m_obuffer = m_output_device_ptr->create_buffer(this, output_create_buffer_arguments...);
 }
 
-template<typename INPUT_DEVICE, typename... Args>
-void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments)
+template<typename INPUT_DEVICE>
+void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc)
 {
-  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "]) [" << this << ']');
+  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "], " << minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
 
   // We need to create a link buffer and use it to link the following two devices.
   InputDevice* input_device = ptr.get();
   OutputDevice* output_device = this;
 
   // Create the link buffer.
-  LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, buffer_arguments...);
+  LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, minimum_block_size, buffer_full_watermark, max_alloc);
 
   // Initialize the output device to read from the link buffer.
   output_device->set_source(link_buffer);

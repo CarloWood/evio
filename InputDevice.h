@@ -102,6 +102,9 @@ class InputDevice : public virtual FileDescriptor
  private:
   using disable_release_t = aithreadsafe::Wrapper<int, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_release_t m_disable_release;
+#ifdef DEBUGDEVICESTATS
+  size_t m_received_bytes;
+#endif
 
  protected:
   //---------------------------------------------------------------------------
@@ -143,6 +146,10 @@ class InputDevice : public virtual FileDescriptor
   Dev2Buf* rddbbuf() const { return m_ibuffer; }
 #endif
 
+#ifdef DEBUGDEVICESTATS
+  size_t received_bytes() const { return m_received_bytes; }
+#endif
+
   // Returns true if the input device is registered with epoll.
   template<typename ThreadType>
   utils::FuzzyBool is_active(ThreadType) const
@@ -168,7 +175,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_sink(InputDecoder& input_decoder, Args... input_buffer_arguments);
+  void set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments);
 
   NAD_DECL(close_input_device) override final;
 
@@ -183,8 +190,8 @@ class InputDevice : public virtual FileDescriptor
   // This function is called by OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
   inline void set_sink(LinkBufferPlus* link_buffer);
   // Give access to the above function.
-  template<typename INPUT_DEVICE, typename... Args>
-  friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Args... buffer_arguments);
+  template<typename INPUT_DEVICE>
+  friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
 
   // Override base class virtual functions.
   void init_input_device(state_t::wat const& state_w) override;
@@ -205,10 +212,10 @@ class InputDevice : public virtual FileDescriptor
 namespace evio {
 
 template<typename... Args>
-void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_buffer_arguments)
+void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments)
 {
   Dout(dc::evio, "InputDevice::set_sink(" << (void*)&input_decoder << ", ...) [" << this << ']');
-  m_ibuffer = static_cast<InputDeviceEventsHandler&>(input_decoder).create_buffer(this, input_buffer_arguments...);
+  m_ibuffer = static_cast<InputDeviceEventsHandler&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
   m_input_device_events_handler = &input_decoder;
 }
 

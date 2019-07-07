@@ -1,0 +1,70 @@
+Right now the Protocol only specifies the average message length
+for contiguous decoding. From that a minimum block size is derived.
+
+In order to create a new StreamBuf (derived) class, we need to
+know the minimum block size, the buffer full watermark and the
+maximum (allocated) size of the buffer, usually called
+
+  * minimum_block_size
+  * buffer_full_watermark
+  * max_alloc
+
+In order to set Socket buffers, we need to know the minimum
+block size. Because these buffer sizes have different demands,
+there is a different minimum block size for sending and receiving.
+
+Knowing the Protocol, the minimum block size for sending (and
+therefore the socket sndbuf size) can be obtained from
+
+  Protocol::minimum_block_size_snd()
+
+and the minimum block size for receiving (and therefore the
+socket rcvbuf size) can be obtained from
+
+  Protocol::minimum_block_size_rcv()
+
+The max_alloc and buffer_full_watermark are not part of the
+protocol and must be specified together with set_source()
+and set_sink() (although they have defaults; the default
+values are: buffer_full_watermark is eight times the minimum
+block size and max_alloc is infinite.
+See InputDeviceEventsHandler::create_buffer).
+
+The minimum block size can only be specified through the Protocol.
+
+
+API's that require the StreamBuf arguments
+------------------------------------------
+
+  * StreamBuf::StreamBuf
+  * Dev2Buf::Dev2Buf                 Derived from StreamBuf.
+  * Buf2Dev::Buf2Dev                 Derived from StreamBuf.
+  * InputBuffer::InputBuffer         Derived from Dev2Buf.
+  * OutputBuffer::OutputBuffer       Derived from Buf2Dev.
+  * LinkBuffer::LinkBuffer           Obviously here the input and output part have the same minimum block size, since it is just a single buffer that is being used for both.
+                                     Derived from Dev2Buf and pseudo-derived from Buf2Dev.
+  * LinkBufferPlus::LinkBufferPlus   Derived from LinkBuffer.
+
+InputBuffer and OutputBuffer are derived from by the user.
+A LinkBuffer is only used as base class to LinkBufferPlus,
+which in turn is only created by
+
+  template<typename INPUT_DEVICE>
+  void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, Protocol const& protocol, size_t buffer_full_watermark, size_t max_alloc);
+
+when linking an output device to an input device.
+
+A class derived from InputDecoder can be passed to set_sink, and since
+an InputDecoder is a Protocol, the only other (optional) parameters are
+buffer_full_watermark and max_alloc.
+
+A class derived from OutputDevicePtr (ie OutputStream) can be passed to
+set_source, and since an OutputDevicePtr is a Protocol, the only other
+(optional) parameters are buffer_full_watermark and max_alloc.
+
+It is also possible to pass a boost::intrusive_ptr<INPUT_DEVICE> to
+set_source (as shown above), where INPUT_DEVICE must be derived from
+InputDevice. In that case the Protocol is unknown and must be specified
+as well.
+
+

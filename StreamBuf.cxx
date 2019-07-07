@@ -73,28 +73,29 @@ void StreamBuf::dump()
 
   // Constructor.
 StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
-    StreamBufProducer(minimum_block_size, buffer_full_watermark, max_allocated_block_size),
+    StreamBufProducer(utils::malloc_size(minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock), buffer_full_watermark, max_allocated_block_size),
     m_device_counter(0)
 {
   DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
-  size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
 #ifdef CWDEBUG
-  if (block_size != m_minimum_block_size)
+  // m_minimum_block_size was set to the actual (larger) minimum block size that is going to be used,
+  // while minimum_block_size is the value that is being requested.
+  if (minimum_block_size != m_minimum_block_size)
   {
-    Dout(dc::warning, "Using a minimum block size of " << block_size << " bytes instead of requested " << m_minimum_block_size << ". "
+    Dout(dc::warning, "Using a minimum block size of " << m_minimum_block_size << " bytes instead of requested " << minimum_block_size << ". "
          "To suppress this warning use a power of two minus evio::block_overhead_c (" << block_overhead_c <<
          " bytes) for the minimum block size.");
   }
   // I just think this is a bit on the small side.
-  if (block_size < 64)
-    Dout(dc::warning, "StreamBuf with a block_size of " << block_size << " which is smaller than 64 !");
+  if (m_minimum_block_size < 64)
+    Dout(dc::warning, "StreamBuf with a block_size of " << m_minimum_block_size << " which is smaller than 64 !");
 #endif
   //===========================================================
   // Create first MemoryBlock.
   m_total_allocated = 0;
-  m_get_area_block_node = m_put_area_block_node = create_memory_block(block_size);
+  m_get_area_block_node = m_put_area_block_node = create_memory_block(m_minimum_block_size);
   char* const start = m_get_area_block_node->block_start();
-  setp(start, start + block_size);
+  setp(start, start + m_minimum_block_size);
   m_total_reset = 0;
   m_total_freed.store(0, std::memory_order_relaxed);
   m_total_read.store(0, std::memory_order_relaxed);

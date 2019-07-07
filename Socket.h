@@ -100,15 +100,6 @@ class Socket : public InputDevice, public OutputDevice
   // The address of the remote socket; either what we connected to or the peer address of an accepted connection.
   SocketAddress m_remote_address;
 
-  // The receive socket buffer that we want to be set.
-  // The actual size can be set to a larger value, see net/inet_support.cc
-  // A value of 0 here means: use a size that depends on the minimum block
-  // size of our input buffer.
-  size_t m_rcvbuf_size;
-
-  // Idem for the send socket buffer (except, output buffer).
-  size_t m_sndbuf_size;
-
   int m_connected_flags;
   static constexpr int signal_connected = 1;    // When set, call connected() as soon as fd is writable.
   static constexpr int is_connected = 2;
@@ -126,12 +117,6 @@ class Socket : public InputDevice, public OutputDevice
   // Returns the local IP number and port of this socket (the bind address).
   // Only valid when `is_open' returns true.
   SocketAddress local_address() const;
-
-  // Accessor for m_rcvbuf_size.
-  size_t get_rcvbuf_size() const { return m_rcvbuf_size; }
-
-  // Accessor for m_sndbuf_size.
-  size_t get_sndbuf_size() const { return m_sndbuf_size; }
 
   char const* get_path() const
   {
@@ -151,11 +136,11 @@ class Socket : public InputDevice, public OutputDevice
   // Constructor
   //
 
-  Socket() : VT_ptr(this), m_rcvbuf_size(0), m_sndbuf_size(0) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
+  Socket() : VT_ptr(this) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
   ~Socket() noexcept;
 
   // Set the socket buffer sizes.
-  void set_sock_buffers(int fd, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
+  static void set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
 
   // Associate this object with an existing and open socket `fd'.
   void init(int fd, SocketAddress const& socket_address, bool signal_connected = false);

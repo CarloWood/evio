@@ -72,6 +72,9 @@ void OutputDevice::init_output_device(state_t::wat const& state_w)
   ASSERT(!state_w->m_flags.is_active_output_device());
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   state_w->m_flags.set_w_open();
+#ifdef DEBUGDEVICESTATS
+  m_sent_bytes = 0;
+#endif
 }
 
 void OutputDevice::start_output_device(state_t::wat const& state_w)
@@ -232,7 +235,12 @@ void OutputDevice::enable_output_device()
 
 NAD_DECL(OutputDevice::close_output_device)
 {
-  DoutEntering(dc::io, "OutputDevice::close_output_device(" NAD_DoutEntering_ARG ") [" << this << ']');
+  DoutEntering(dc::io, "OutputDevice::close_output_device(" NAD_DoutEntering_ARG ")"
+#ifdef DEBUGDEVICESTATS
+      " [sent_bytes = " << m_sent_bytes << "]"
+#endif
+      "[" << this << ']');
+
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
@@ -370,12 +378,20 @@ try_again_write1:
     }
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
     obuffer->buf2dev_bump(wlen);
-    Dout(dc::evio, "Wrote " << wlen << " bytes to fd " << fd << '.' );
+#ifdef DEBUGDEVICESTATS
+    self->m_sent_bytes += wlen;
+#endif
+    Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd <<
+#ifdef DEBUGDEVICESTATS
+      " [total sent now " << self->m_sent_bytes << " bytes]"
+#endif
+      );
     if (wlen < len)
     {
-      Dout(dc::evio, "(Tried to write " << len << " bytes).");
+      Dout(dc::finish, " (Tried to write " << len << " bytes) [" << self << ']');
       return;			// We wrote as much as currently possible.
     }
+    Dout(dc::finish, " [" << self << ']');
   }
 }
 

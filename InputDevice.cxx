@@ -71,6 +71,9 @@ void InputDevice::init_input_device(state_t::wat const& state_w)
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
   state_w->m_flags.set_r_open();
+#ifdef DEBUGDEVICESTATS
+  m_received_bytes = 0;
+#endif
 }
 
 void InputDevice::start_input_device(state_t::wat const& state_w)
@@ -152,7 +155,11 @@ void InputDevice::enable_input_device()
 
 NAD_DECL(InputDevice::close_input_device)
 {
-  DoutEntering(dc::evio, "InputDevice::close_input_device(" NAD_DoutEntering_ARG ") [" << this << ']');
+  DoutEntering(dc::evio, "InputDevice::close_input_device(" NAD_DoutEntering_ARG ")"
+#ifdef DEBUGDEVICESTATS
+      " [received_bytes = " << m_received_bytes << "]"
+#endif
+      " [" << this << ']');
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
@@ -254,8 +261,15 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
     }
 
     self->m_ibuffer->dev2buf_bump(rlen);
-
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
+#ifdef DEBUGDEVICESTATS
+    self->m_received_bytes += rlen;
+#endif
+    Dout(dc::evio, "Read " << rlen << " bytes from fd " << fd <<
+#ifdef DEBUGDEVICESTATS
+    " [total received now: " << self->m_received_bytes << " bytes]"
+#endif
+      " [" << self << ']');
 
     // The data is now in the buffer. This is where we become the consumer thread.
     NAD_CALL(self->data_received, new_data, rlen);
