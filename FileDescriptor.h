@@ -439,11 +439,15 @@ template<typename DeviceType, typename... ARGS, typename = typename std::enable_
 boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
 #ifdef CWDEBUG
+#if CWDEBUG_LOCATION
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
   LibcwDoutStream << "Entering evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
   (LibcwDoutStream << ... << (", " + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
   LibcwDoutScopeEnd;
   ::NAMESPACE_DEBUG::Indent indentation(2);
+#else
+  DoutEntering(dc::evio, "evio::create<>(" << join(", ", args...) << ')')
+#endif
 #endif
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
   AllocTag2(device, "Created with evio::create");

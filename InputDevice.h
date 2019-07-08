@@ -191,7 +191,7 @@ class InputDevice : public virtual FileDescriptor
   inline void set_sink(LinkBufferPlus* link_buffer);
   // Give access to the above function.
   template<typename INPUT_DEVICE>
-  friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
+  friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
 
   // Override base class virtual functions.
   void init_input_device(state_t::wat const& state_w) override;
@@ -225,8 +225,8 @@ void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buf
 class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, public OutputDevicePtr
 {
  public:
-  LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
-    LinkBuffer(input_device, output_device, minimum_blocksize, buffer_full_watermark, max_alloc) { m_input_device = input_device; m_output_device = output_device; }
+  LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc) :
+    LinkBuffer(input_device, output_device, minimum_block_size, buffer_full_watermark, max_alloc) { m_input_device = input_device; m_output_device = output_device; }
 
  protected:
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;

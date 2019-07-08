@@ -160,7 +160,7 @@ public:
 
   // Added for convience:
 
-  stdio_dtct(int fd_lp) : dbbuf_fd_dtct<IO>(NEW( typename IO::buffer_ct(IO::default_blocksize_c, UINT_MAX, UINT_MAX) ))
+  stdio_dtct(int fd_lp) : dbbuf_fd_dtct<IO>(NEW( typename IO::buffer_ct(IO::default_block_size_c, UINT_MAX, UINT_MAX) ))
       {
         __LibcwDout( dc::io, "this = " << (void*)this << "; stdio_dtct(" << fd_lp << ")" );
         init(fd_lp);

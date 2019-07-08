@@ -72,23 +72,27 @@ void StreamBuf::dump()
 #endif // DEBUGKEEPMEMORYBLOCKS
 
   // Constructor.
-StreamBuf::StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
-    StreamBufProducer(utils::malloc_size(minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock), buffer_full_watermark, max_allocated_block_size),
+StreamBuf::StreamBuf(size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) :
+    StreamBufProducer(round_up_minimum_block_size(requested_minimum_block_size), buffer_full_watermark, max_allocated_block_size),
     m_device_counter(0)
 {
-  DoutEntering(dc::io, "StreamBuf(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
+  DoutEntering(dc::io, "StreamBuf(" << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << ']');
 #ifdef CWDEBUG
-  // m_minimum_block_size was set to the actual (larger) minimum block size that is going to be used,
-  // while minimum_block_size is the value that is being requested.
-  if (minimum_block_size != m_minimum_block_size)
+  // m_minimum_block_size was set to the actual (possibly larger) minimum block size that is going to be used,
+  // while requested_minimum_block_size is the value that is being requested.
+  if (requested_minimum_block_size != m_minimum_block_size)
   {
-    Dout(dc::warning, "Using a minimum block size of " << m_minimum_block_size << " bytes instead of requested " << minimum_block_size << ". "
+    Dout(dc::warning, "Using a minimum block size of " << m_minimum_block_size << " bytes instead of requested " << requested_minimum_block_size << ". "
          "To suppress this warning use a power of two minus evio::block_overhead_c (" << block_overhead_c <<
          " bytes) for the minimum block size.");
   }
   // I just think this is a bit on the small side.
   if (m_minimum_block_size < 64)
+  {
     Dout(dc::warning, "StreamBuf with a block_size of " << m_minimum_block_size << " which is smaller than 64 !");
+    // Is your Protocol derived class returning a minimum_block_size() of zero? It is strongly suggested to use at LEAST 64.
+    ASSERT(m_minimum_block_size > 0);
+  }
 #endif
   //===========================================================
   // Create first MemoryBlock.

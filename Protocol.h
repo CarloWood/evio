@@ -36,6 +36,8 @@ namespace evio {
 class Protocol
 {
  public:
+  virtual ~Protocol() noexcept { }
+
   // This really should be defined in the derived Protocol class; however, a size of 512 isn't so large that it would be a disadvantage
   // and in most cases is will be actually larger than the real average message length, so using this as default should be possible
   // in many cases.
@@ -46,9 +48,13 @@ class Protocol
   virtual size_t average_message_length() const { return 512; }
 
   virtual size_t minimum_block_size_estimate() const { return 16 * average_message_length(); }
-  virtual size_t minimum_block_size() const { return utils::nearest_power_of_two(minimum_block_size_estimate()) - evio::block_overhead_c; }
-//  virtual size_t rcvbuf_size() const { return minimum_block_size(); }
-//  virtual size_t sndbuf_size() const { return std::max(65536UL, rcvbuf_size()); }
+  // This should be treated as a requested_minimum_block_size because the user can override it.
+  virtual size_t minimum_block_size() const
+  {
+    // This rounds off minimum_block_size_estimate() to a power of two minus evio::block_overhead_c.
+    // The power of two picked is such that the returned value is at least 0.8 * minimum_block_size_estimate().
+    return (1 << (3 + utils::log2((minimum_block_size_estimate() + 5 * evio::block_overhead_c / 4 - 1) / 5))) - evio::block_overhead_c;
+  }
 
   friend std::ostream& operator<<(std::ostream& os, Protocol const& protocol);
 };

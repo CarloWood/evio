@@ -49,7 +49,7 @@ class OutputDevicePtr : public Protocol
 
   friend class OutputDevice;
   OutputBuffer* create_buffer(OutputDevice* output_device)
-      { return create_buffer(output_device, 8 * minimum_block_size(), std::numeric_limits<size_t>::max()); }
+      { return create_buffer(output_device, 8 * StreamBuf::round_up_minimum_block_size(minimum_block_size()), std::numeric_limits<size_t>::max()); }
   OutputBuffer* create_buffer(OutputDevice* output_device, size_t buffer_full_watermark)
       { return create_buffer(output_device, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
   virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t)

@@ -225,7 +225,7 @@ size_t ListenSocket<ACCEPTED_SOCKET>::input_minimum_block_size() const
 {
   // Sorry, but for this ACCEPTED_SOCKET::input_protocol_type needs to have a default constructor.
   typename ACCEPTED_SOCKET::input_protocol_type input;
-  return input.minimum_block_size();
+  return StreamBuf::round_up_minimum_block_size(input.minimum_block_size());
 }
 
 template<typename ACCEPTED_SOCKET>
@@ -233,7 +233,7 @@ size_t ListenSocket<ACCEPTED_SOCKET>::output_minimum_block_size() const
 {
   // Sorry, but for this ACCEPTED_SOCKET::output_protocol_type needs to have a default constructor.
   typename ACCEPTED_SOCKET::output_protocol_type output;
-  return output.minimum_block_size();
+  return StreamBuf::round_up_minimum_block_size(output.minimum_block_size());
 }
 
 } // namespace evio

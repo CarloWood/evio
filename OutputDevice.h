@@ -175,13 +175,13 @@ class OutputDevice : public virtual FileDescriptor
 
   template<typename INPUT_DEVICE>
   void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr,
-      size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc = std::numeric_limits<size_t>::max());
+      size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc = std::numeric_limits<size_t>::max());
 
   template<typename INPUT_DEVICE>
   void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr,
-      size_t minimum_block_size)
+      size_t requested_minimum_block_size)
   {
-    set_source(ptr, minimum_block_size, 8 * minimum_block_size);
+    set_source(ptr, requested_minimum_block_size, 8 * StreamBuf::round_up_minimum_block_size(requested_minimum_block_size));
   }
 
   NAD_DECL_PUBLIC(flush_output_device);
@@ -229,16 +229,16 @@ void OutputDevice::set_source(OutputDevicePtr& output_device_ptr, Args... output
 }
 
 template<typename INPUT_DEVICE>
-void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc)
+void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc)
 {
-  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "], " << minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
+  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "], " << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
 
   // We need to create a link buffer and use it to link the following two devices.
   InputDevice* input_device = ptr.get();
   OutputDevice* output_device = this;
 
   // Create the link buffer.
-  LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, minimum_block_size, buffer_full_watermark, max_alloc);
+  LinkBufferPlus* link_buffer = new LinkBufferPlus(input_device, output_device, StreamBuf::round_up_minimum_block_size(requested_minimum_block_size), buffer_full_watermark, max_alloc);
 
   // Initialize the output device to read from the link buffer.
   output_device->set_source(link_buffer);

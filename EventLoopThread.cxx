@@ -146,6 +146,12 @@ void EventLoopThread::main()
     // Unblock the signal(s) that can change our wake-up flags again by restoring the old set.
     sigprocmask(SIG_SETMASK, &pwait_sigmask, NULL);
 
+#if 0
+    // Use for test_Socket.h testsuite; to make sure epoll_pwait isn't hanging. Use 1000 as timeout in that case, instead of -1.
+    if (ready == 0)
+      std::cerr << "epoll_pwait() is hanging!" << std::endl;
+#endif
+
     // Handle the returned events.
     while (ready > 0)
     {

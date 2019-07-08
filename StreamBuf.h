@@ -788,7 +788,13 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // After using this constructor, the input buffer is the same as the
   // output buffer. Use set_input_buffer() from the same thread that is
   // used for construction to change this.
-  StreamBuf(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
+  StreamBuf(size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
+
+  // Turn a human provided minimum_block_size into the real one (more malloc friendly).
+  static size_t round_up_minimum_block_size(size_t requested_minimum_block_size)
+  {
+    return utils::malloc_size(requested_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+  }
 
   // Which InputDevice is pointing to me, if any?
   void set_input_device(InputDevice* device);
@@ -1049,8 +1055,8 @@ class LinkBuffer : public Dev2Buf
 {
  public:
   LinkBuffer(InputDevice* input_device, OutputDevice* output_device,
-      size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
-    Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc)
+      size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc) :
+    Dev2Buf(minimum_block_size, buffer_full_watermark, max_alloc)
   {
     set_input_device(input_device);
     as_Buf2Dev()->set_output_device(output_device);
@@ -1087,8 +1093,8 @@ inline void StreamBuf::reduce_buffer_if_empty()
 class InputBuffer : public Dev2Buf
 {
  public:
-  InputBuffer(InputDevice* input_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
-    Dev2Buf(minimum_blocksize, buffer_full_watermark, max_alloc) { set_input_device(input_device); }
+  InputBuffer(InputDevice* input_device, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc) :
+    Dev2Buf(requested_minimum_block_size, buffer_full_watermark, max_alloc) { set_input_device(input_device); }
 
   // Stuff below reads from the input buffer and therefore may only be accessed by the consumer thread.
 
@@ -1106,8 +1112,8 @@ class InputBuffer : public Dev2Buf
 class OutputBuffer : public Buf2Dev
 {
  public:
-  OutputBuffer(OutputDevice* output_device, size_t minimum_blocksize, size_t buffer_full_watermark, size_t max_alloc) :
-    Buf2Dev(minimum_blocksize, buffer_full_watermark, max_alloc) { set_output_device(output_device); }
+  OutputBuffer(OutputDevice* output_device, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc) :
+    Buf2Dev(minimum_block_size, buffer_full_watermark, max_alloc) { set_output_device(output_device); }
 
   // Stuff below writes to the output buffer and therefore should be accessed by the producer thread.
 

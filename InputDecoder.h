@@ -48,13 +48,17 @@ class InputDeviceEventsHandler : public Protocol
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)
-      { return create_buffer(input_device, 8 * minimum_block_size(), std::numeric_limits<size_t>::max()); }
+      { return create_buffer(input_device,
+                             /*buffer_full_watermark*/ 8 * StreamBuf::round_up_minimum_block_size(minimum_block_size()),
+                             /*max_alloc*/ std::numeric_limits<size_t>::max()); }
   InputBuffer* create_buffer(InputDevice* input_device, size_t buffer_full_watermark)
-      { return create_buffer(input_device, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
-  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t) { /*This should never be used*/ ASSERT(false); return nullptr; }
+      { return create_buffer(input_device,
+                             buffer_full_watermark,
+                             /*max_alloc*/ std::numeric_limits<size_t>::max()); }
+  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t)
+      { /*This should never be used*/ ASSERT(false); return nullptr; }
 
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
-  // BRT.
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 
