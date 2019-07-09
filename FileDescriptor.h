@@ -368,10 +368,26 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
  private:
   // These are called from EventLoopThread::main().
   friend class EventLoopThread;
-  virtual NAD_DECL_UNUSED_ARG(read_event) { DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object that isn't an InputDevice."); }
-  virtual NAD_DECL_UNUSED_ARG(write_event) { DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object that isn't an OutputDevice."); }
-  virtual NAD_DECL_UNUSED_ARG(hup_event) { Dout(dc::warning, "Calling FileDescriptor::hup_event() on object that isn't an InputDevice."); }
-  virtual NAD_DECL_UNUSED_ARG(exceptional_event) { Dout(dc::warning, "Calling FileDescriptor::exceptional_event() on object that isn't an InputDevice."); }
+  virtual NAD_DECL_UNUSED_ARG(read_event)
+  {
+    ASSERT(!is_destructed());
+    DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object [" << this << "] that isn't an InputDevice.");
+  }
+  virtual NAD_DECL_UNUSED_ARG(write_event)
+  {
+    ASSERT(!is_destructed());
+    DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object [" << this << "] that isn't an OutputDevice.");
+  }
+  virtual NAD_DECL_UNUSED_ARG(hup_event)
+  {
+    ASSERT(!is_destructed());
+    Dout(dc::warning, "Calling FileDescriptor::hup_event() on object [" << this << "] that isn't an InputDevice.");
+  }
+  virtual NAD_DECL_UNUSED_ARG(exceptional_event)
+  {
+    ASSERT(!is_destructed());
+    Dout(dc::warning, "Calling FileDescriptor::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
+  }
 
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).

@@ -91,15 +91,7 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   ASSERT(m_ibuffer || VT_ptr->_read_from_fd != VT_impl::VT._read_from_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
   // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
-  if (EventLoopThread::instance().start(state_w, this))
-  {
-    // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until a call to allow_deletion(), which will be caused automatically
-    // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
-    // which also called InputDevice::remove_input_device()). See NAD.h.
-    CWDEBUG_ONLY(int count =) inhibit_deletion();
-    Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
-  }
+  EventLoopThread::instance().start(state_w, this);
 }
 
 NAD_DECL(InputDevice::remove_input_device, state_t::wat const& state_w)

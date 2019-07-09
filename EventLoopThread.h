@@ -115,34 +115,25 @@ class EventLoopThread : public Singleton<EventLoopThread>
   static void s_wakeup_handler(int);
   void wake_up();
 
- public:
-  enum result_t
-  {
-    condition_failed,   // The condition was false, nothing was done.
-    success,            // start_if: successfully started (the ACTIVE flag was set (and if the device supports epoll, now watching active_flag).
-                        // stop_if: successfully stopped (the ACTIVE flag was cleared (and if the device supports epoll, no longer watching the active_flag).
-    success_added       // Also means success, but start_if also set the ADDED flag (and added the fd to epoll if it supports epoll).
-  };
-
  private:
   void handle_regular_file(FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
-  bool start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
+  void start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   void stop(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   bool remove(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
-  result_t start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
-  result_t stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
+  bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
+  bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
 
  public:
-  [[gnu::always_inline]] bool start(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { return start(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] bool start(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { return start(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { start(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { start(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
   [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { stop(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
   [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { stop(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
   [[gnu::always_inline]] bool remove(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { return remove(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
   [[gnu::always_inline]] bool remove(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { return remove(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] result_t start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] result_t start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] result_t stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] result_t stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
 
 //  void invoke_pending();
   void stop_running();

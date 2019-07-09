@@ -87,13 +87,7 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   ASSERT(m_obuffer || VT_ptr->_write_to_fd != VT_impl::VT._write_to_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
-  if (EventLoopThread::instance().start(state_w, this))
-  {
-    // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until a call to allow_deletion().
-    CWDEBUG_ONLY(int count =) inhibit_deletion();
-    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
-  }
+  EventLoopThread::instance().start(state_w, this);
 }
 
 bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
@@ -105,15 +99,7 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
   // That is, if is false - don't call this (it will fail anyway) and if it is true then there is
   // no need for the condition (just call start_output_device without condition).
   ASSERT(condition.is_transitory_true());
-  auto res = EventLoopThread::instance().start_if(state_w, condition, this);
-  if (res == EventLoopThread::success_added)
-  {
-    // Increment ref count to stop this object from being deleted while being active.
-    // Object is kept alive until a call to allow_deletion().
-    CWDEBUG_ONLY(int count =) inhibit_deletion();
-    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << this << ']');
-  }
-  return res != EventLoopThread::condition_failed;
+  return EventLoopThread::instance().start_if(state_w, condition, this);
 }
 
 NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
@@ -145,7 +131,7 @@ bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, 
 {
   // Don't call this function when the device is 'flushing', instead call close_output_device(condition).
   ASSERT(!state_w->m_flags.is_w_flushing());
-  return EventLoopThread::instance().stop_if(state_w, condition, this) != EventLoopThread::condition_failed;
+  return EventLoopThread::instance().stop_if(state_w, condition, this);
 }
 
 //inline

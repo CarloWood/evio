@@ -369,20 +369,20 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
   queue.notify_one();
 }
 
-bool EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Don't start a device that is disabled.
   if (AI_UNLIKELY(state_w->m_flags.test_disabled(active_flag)))
   {
     Dout(dc::warning, "Calling EventLoopThread::start(" << active_flag << ", " << device << ") for a device that is disabled [" << this << "]");
-    return false;
+    return;
   }
 
   DoutEntering(dc::evio, "EventLoopThread::start(" << active_flag << ", " << device << ")");
 
   // Don't start a device that is already active.
   if (!state_w->m_flags.test_and_set_active(active_flag))
-    return false;
+    return;
 
   bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
 
@@ -394,30 +394,36 @@ bool EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
   else
     Dout(dc::evio, "Not incrementing m_active because inferior device!");
 
+  if (needs_adding)
+  {
+    // Increment ref count to stop device from being deleted while being active.
+    // Object is kept alive until a call to allow_deletion(), which will be caused automatically
+    // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
+    // which also called InputDevice::remove_input_device()). See NAD.h.
+    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+    Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+  }
+
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
     device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
   else
     handle_regular_file(active_flag, device);
-
-  // Return true iff device was added as userdata to the epoll interest list (using EPOLL_CTL_ADD),
-  // in turn that will cause a call to inhibit_deletion.
-  return needs_adding;
 }
 
-EventLoopThread::result_t EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
     Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ") -- don't call start_if when it is sure that it will fail?!");
-    return condition_failed;
+    return false;
   }
 
   // Don't start a device that is disabled.
   if (AI_UNLIKELY(state_w->m_flags.test_disabled(active_flag)))
   {
     Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ") for a device that is disabled.");
-    return success;
+    return true;
   }
 
   DoutEntering(dc::evio, "EventLoopThread::start_if(" << condition << ", " << active_flag << ", " << device << ")");
@@ -439,7 +445,7 @@ EventLoopThread::result_t EventLoopThread::start_if(FileDescriptor::state_t::wat
 
   // Don't start a device that is already active.
   if (!state_w->m_flags.test_and_set_active(active_flag))
-    return success;
+    return true;
 
   // This is likely because otherwise we shouldn't be using a construction with
   // FuzzyBool / FuzzyCondition in the first place.
@@ -453,7 +459,7 @@ EventLoopThread::result_t EventLoopThread::start_if(FileDescriptor::state_t::wat
     if (condition().is_momentary_false())
     {
       state_w->m_flags.clear_active(active_flag);
-      return condition_failed;
+      return false;
     }
   }
 #ifdef CWDEBUG
@@ -471,12 +477,20 @@ EventLoopThread::result_t EventLoopThread::start_if(FileDescriptor::state_t::wat
   else
     Dout(dc::evio, "Not incrementing m_active because inferior device!");
 
+  if (needs_adding)
+  {
+    // Increment ref count to stop device from being deleted while being active.
+    // It is kept alive until a call to allow_deletion().
+    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+  }
+
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
     device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
   else
     handle_regular_file(active_flag, device);
 
-  return needs_adding ? success_added : success;
+  return true;
 }
 
 bool EventLoopThread::remove(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
@@ -518,13 +532,13 @@ void EventLoopThread::stop(FileDescriptor::state_t::wat const& state_w, FileDesc
   }
 }
 
-EventLoopThread::result_t EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+bool EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   // Unlikely because you shouldn't call this function if this is the case, see below.
   if (AI_UNLIKELY(condition.is_false()))
   {
     Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ") -- don't call stop_if when it is sure that it will fail?!");
-    return condition_failed;
+    return false;
   }
 
   // See start_if.
@@ -532,7 +546,7 @@ EventLoopThread::result_t EventLoopThread::stop_if(FileDescriptor::state_t::wat 
 
   // Don't stop a device that is already non-active.
   if (!state_w->m_flags.test_and_clear_active(active_flag))
-    return success;
+    return true;
 
   // This is likely because otherwise we shouldn't be using a construction with
   // FuzzyBool / FuzzyCondition in the first place.
@@ -545,7 +559,7 @@ EventLoopThread::result_t EventLoopThread::stop_if(FileDescriptor::state_t::wat 
     {
       // Revert the clear of the active flag.
       state_w->m_flags.set_active(active_flag);
-      return condition_failed;
+      return false;
     }
   }
 #ifdef CWDEBUG
@@ -564,7 +578,7 @@ EventLoopThread::result_t EventLoopThread::stop_if(FileDescriptor::state_t::wat 
       bump_terminate();
   }
 
-  return success;
+  return true;
 }
 
 namespace {
