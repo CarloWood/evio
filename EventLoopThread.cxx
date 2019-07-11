@@ -149,7 +149,10 @@ void EventLoopThread::main()
 #if 0
     // Use for test_Socket.h testsuite; to make sure epoll_pwait isn't hanging. Use 1000 as timeout in that case, instead of -1.
     if (ready == 0)
+    {
       std::cerr << "epoll_pwait() is hanging!" << std::endl;
+      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ std::cerr << p << ": " << p->get_fd() << ", " << p->get_flags() << std::endl; });
+    }
 #endif
 
     // Handle the returned events.

@@ -63,10 +63,10 @@ std::ostream& operator<<(std::ostream& os, SocketAddress const& socket_address)
   return os << socket_address.to_string();
 }
 
-std::string SocketAddress::to_string() const
+std::string SocketAddress::to_string(bool no_port) const
 {
   std::string result;
-  bool add_brackets = true;
+  bool add_brackets = !no_port;
   switch (m_sockaddr.sa_family)
   {
     case AF_INET:
@@ -85,8 +85,11 @@ std::string SocketAddress::to_string() const
       result += hostname;
       if (add_brackets)
         result += ']';
-      result += ':';
-      result += service;
+      if (!no_port)
+      {
+        result += ':';
+        result += service;
+      }
       break;
     }
     case AF_UNIX:
@@ -94,6 +97,12 @@ std::string SocketAddress::to_string() const
       break;
     case AF_UNSPEC:
       result = "AF_UNSPEC";
+      break;
+    case AF_PACKET:
+      result = "AF_PACKET";
+      break;
+    default:
+      result = "AF_unknown";
       break;
   }
   return result;
@@ -486,7 +495,9 @@ void SocketAddress::move(SocketAddress&& other)
       std::memcpy(&m_sockaddr, ptr, sizeof(struct sockaddr));
       break;
     default:
-      DoutFatal(dc::core, "SocketAddress::move(SocketAddress&& other): sa_family is not AF_INET, AF_INET6, AF_UNIX or AF_UNSPEC.");
+      Dout(dc::warning, "SocketAddress::move(SocketAddress&& other): sa_family is not AF_INET, AF_INET6, AF_UNIX or AF_UNSPEC.");
+      std::memcpy(&m_sockaddr, ptr, sizeof(struct sockaddr));
+      break;
   }
   other.m_sockaddr.sa_family = AF_UNSPEC;
 }
@@ -514,7 +525,9 @@ void SocketAddress::init(struct sockaddr const* sa_addr)
       std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr));
       break;
     default:
-      DoutFatal(dc::core, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX or AF_UNSPEC.");
+      Dout(dc::warning, "SocketAddress::init(struct sockaddr const*): sa_family is not AF_INET, AF_INET6 or AF_UNIX or AF_UNSPEC.");
+      std::memcpy(&m_sockaddr, sa_addr, sizeof(struct sockaddr));
+      break;
   }
 }
 

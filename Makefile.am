@@ -26,6 +26,9 @@ SOURCES = FileDescriptor.cxx \
 	  SocketAddress.h \
 	  SocketAddressList.cxx \
 	  SocketAddressList.h \
+	  Interface.cxx \
+	  Interface.h \
+	  SocketNetmask.h \
 	  File.cxx \
 	  File.h \
 	  PersistentInputFile.cxx \

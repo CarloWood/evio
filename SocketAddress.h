@@ -85,6 +85,7 @@ class SocketAddress             // TestSuite: test_SocketAddress.h
   bool is_ip() const { return m_sockaddr.sa_family == AF_INET || m_sockaddr.sa_family == AF_INET6; }
   bool is_ip4() const { return m_sockaddr.sa_family == AF_INET; }
   bool is_ip6() const { return m_sockaddr.sa_family == AF_INET6; }
+  bool is_unknown() const { return !is_unspecified() && !is_un() && !is_ip(); }
 
   // Automatic conversion to struct sockaddr*.
   operator struct sockaddr const*() const { return is_un() ? reinterpret_cast<struct sockaddr const*>(m_sockaddr_un_ptr) : &m_sockaddr; }
@@ -94,7 +95,7 @@ class SocketAddress             // TestSuite: test_SocketAddress.h
   sa_family_t family() const { return m_sockaddr.sa_family; }
 
   // Conversion to a human readable string.
-  std::string to_string() const;
+  std::string to_string(bool no_port = false) const;
 
   // Convert to arpa address.
   using arpa_buf_t = std::array<char, 74>;
