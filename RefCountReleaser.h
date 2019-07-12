@@ -21,10 +21,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#pragma once
+#include "FileDescriptor.h"
+
+#ifndef EVIO_REFCOUNT_RELEASER_H
+#define EVIO_REFCOUNT_RELEASER_H
 
 #include "debug.h"
-#include "utils/AIRefCount.h"
 #include "utils/macros.h"
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -38,7 +40,7 @@ namespace evio {
 struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
 {
  private:
-  AIRefCount* m_ptr;
+  FileDescriptorBase* m_ptr;
 
  public:
   void execute()
@@ -93,7 +95,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     }
     return *this;
   }
-  void add(AIRefCount* ptr)
+  void add(FileDescriptorBase* ptr)
   {
     if (!m_ptr)
       m_ptr = ptr;
@@ -106,7 +108,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
       Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
     }
   }
-  void operator=(AIRefCount* ptr)
+  void operator=(FileDescriptorBase* ptr)
   {
     DoutEntering(dc::notice, "RefCountReleaser::operator=(" << m_ptr << ")");
     ASSERT(!m_ptr);
@@ -121,3 +123,5 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
 };
 
 } // namespace evio
+
+#endif // EVIO_REFCOUNT_RELEASER_H

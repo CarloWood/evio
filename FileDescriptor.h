@@ -21,7 +21,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#pragma once
+#ifndef EVIO_FILEDESCRIPTOR_H
+#define EVIO_FILEDESCRIPTOR_H
 
 #include "NAD.h"
 #include "utils/AIRefCount.h"
@@ -312,7 +313,7 @@ class FileDescriptorFlags
   friend std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags);
 };
 
-class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDescriptor>
+class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<FileDescriptorBase>
 {
  public:
   struct State
@@ -338,7 +339,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
 #endif
 
  public:
-  void start_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_adding)
+  void start_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_adding)
   {
     state_w->m_epoll_event.events |= events;
     int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
@@ -350,7 +351,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     ASSERT(ret != -1);
   }
 
-  void stop_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_removal)
+  void stop_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_removal)
   {
     state_w->m_epoll_event.events &= ~events;
     int op = needs_removal ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
@@ -365,28 +366,39 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     }
   }
 
+  int allow_deletion() const
+  {
+    int count = AIRefCount::allow_deletion(true);
+    if (count == 1)
+    {
+      std::cerr << "Should add " << this << " to to-be-deleted list." << std::endl;
+      delete this;
+    }
+    return count;
+  }
+
  private:
   // These are called from EventLoopThread::main().
   friend class EventLoopThread;
   virtual NAD_DECL_UNUSED_ARG(read_event)
   {
     ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object [" << this << "] that isn't an InputDevice.");
+    DoutFatal(dc::core, "Calling FileDescriptorBase::read_event() on object [" << this << "] that isn't an InputDevice.");
   }
   virtual NAD_DECL_UNUSED_ARG(write_event)
   {
     ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object [" << this << "] that isn't an OutputDevice.");
+    DoutFatal(dc::core, "Calling FileDescriptorBase::write_event() on object [" << this << "] that isn't an OutputDevice.");
   }
   virtual NAD_DECL_UNUSED_ARG(hup_event)
   {
     ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::hup_event() on object [" << this << "] that isn't an InputDevice.");
+    Dout(dc::warning, "Calling FileDescriptorBase::hup_event() on object [" << this << "] that isn't an InputDevice.");
   }
   virtual NAD_DECL_UNUSED_ARG(exceptional_event)
   {
     ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
+    Dout(dc::warning, "Calling FileDescriptorBase::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
   }
 
  private:
@@ -396,14 +408,42 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptor() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
-  ~FileDescriptor() noexcept { }
+  FileDescriptorBase() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
+  ~FileDescriptorBase() noexcept { }
 
+ protected:
+#ifdef CWDEBUG
+  friend std::ostream& operator<<(std::ostream& os, FileDescriptorBase const* fdptr)
+  {
+    return os << "FD:" << static_cast<void const*>(fdptr);
+  }
+#endif
+};
+
+std::ostream& operator<<(std::ostream& os, FileDescriptorBase::State const& state);
+
+} // namespace evio
+
+#include "RefCountReleaser.h"
+
+namespace evio {
+
+class FileDescriptor : public FileDescriptorBase
+{
+ protected:
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual NAD_DECL_UNUSED_ARG(close_input_device) { }
   virtual NAD_DECL_UNUSED_ARG(close_output_device) { }
 
+  // Events.
+  // The filedescriptor of this device was just closed.
+  // If INTERNAL_FDS_DONT_CLOSE is set then the fd wasn't really closed, but this method is still called.
+  // When we get here the object is also marked as FDS_DEAD.
+  virtual NAD_DECL_UNUSED_ARG(closed) { }
+
  public:
+  using FileDescriptorBase::FileDescriptorBase;
+
   NAD_DECL_PUBLIC(close_input_device)
   {
     NAD_PUBLIC_BEGIN;
@@ -432,23 +472,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     NAD_CALL(close_input_device);
     NAD_CALL(close_output_device);
   }
-
- protected:
-  // Events.
-  // The filedescriptor of this device was just closed.
-  // If INTERNAL_FDS_DONT_CLOSE is set then the fd wasn't really closed, but this method is still called.
-  // When we get here the object is also marked as FDS_DEAD.
-  virtual NAD_DECL_UNUSED_ARG(closed) { }
-
-#ifdef CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
-  {
-    return os << "FD:" << static_cast<void const*>(fdptr);
-  }
-#endif
 };
-
-std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state);
 
 // Convenience function to create devices.
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>
@@ -472,3 +496,5 @@ boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 }
 
 } // namespace evio
+
+#endif // EVIO_FILEDESCRIPTOR_H

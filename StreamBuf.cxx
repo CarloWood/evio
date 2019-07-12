@@ -183,7 +183,7 @@ char* StreamBufConsumer::release_memory_block(MemoryBlock*& get_area_block_node)
 #endif
   MemoryBlock* prev_get_area_block_node = get_area_block_node;
   get_area_block_node = get_area_block_node->m_next;
-  char* start = get_area_block_node->block_start();
+  char* start = get_area_block_node ? get_area_block_node->block_start() : nullptr;
   // Make sure to update m_last_gptr here, otherwise it is possible that after we free the memory block
   // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
   // pointing to that, now newly allocated, memory!
@@ -716,21 +716,65 @@ bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
     delete this;
     return true;
   }
+  else if (device == m_odevice)
+  {
+    // This can only be the case when this is a bouncer.
+    ASSERT(device == m_idevice);
+
+    // If Device1 and Device2 are the same device (a bouncer) then
+    // the situation is:
+    //
+    //   InputDevice - - -> Streambuf < - - - OutputDevice (inhibit_deletion() was NOT called!)
+    //       |                  |                  |
+    //       |                  v                  |
+    //       |              LinkBuffer             |
+    //        \                                   /
+    //         \                                 /
+    //          `--------->Bounce Device<-------'
+    //
+    // And we need to simply reset the appropriate m_idevice / m_odevice without
+    // calling allow_deletion(). We can't know if this we're being called from
+    // the destructor of InputDevice or OutputDevice but that shouldn't matter.
+    // Both will be called immediately after another. So lets just set both
+    // pointers to nullptr (I don't think they will be used anymore).
+    m_idevice = nullptr;
+    m_odevice = nullptr;
+  }
   else
   {
-    // When m_device_counter becomes 2, the ref count of m_odevice is increased.
-    // It should never be deleted before the input device!
+    // When m_device_counter became 2, the ref count of m_odevice was increased.
+    // Therefore it is impossible that m_odevice would be deleted (calling this
+    // function) before allow_deletion() is called - which also happens by this
+    // function. Hence, this function will always be called first with,
     ASSERT(device == m_idevice);
+    // Therefore we must go from this situation:
+    //
+    //               <----- m_idevice
+    //                      m_odevice ------>
+    //   InputDevice - - -> Streambuf < - - - OutputDevice (inhibit_deletion() was called on this device).
+    //       |                  |                  |
+    //       v                  v                  v
+    //    Device1           LinkBuffer          Device2
+    //
+    // To this situation:
+    //
+    //          nullptr <-- m_idevice
+    //                      m_odevice ------>
+    //                      Streambuf < - - - OutputDevice (allow_deletion() was called).
+    //                          |                  |
+    //                          v                  v
+    //                      LinkBuffer         Device2
+    //
+    // (where the destructor InputDevice (base of Device1) is calling us).
+
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
-
     Dout(dc::io|continued_cf, "this = " << this << "; StreamBuf::release(" << (void*)device << "), " <<
         m_device_counter << " output device left: " << m_odevice << "; decrementing ref count of that device ");
     CWDEBUG_ONLY(int count =) m_odevice->allow_deletion();
     Dout(dc::finish, "(now " << (count - 1) << ").");
-
-    return false;
   }
+  return false;
 }
 
 void StreamBuf::set_input_device(InputDevice* device)
@@ -740,9 +784,13 @@ void StreamBuf::set_input_device(InputDevice* device)
   ASSERT(!m_idevice);
   if (++m_device_counter == 2)
   {
-    CWDEBUG_ONLY(int count =) m_odevice->inhibit_deletion();
-    Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_input_device(" << device <<
-        "); incremented ref count of output device [" << m_odevice << "] (now " << (count + 1) << ").");
+    // Inhibit the deletion of the output device iff the input device and output device aren't the same device (a bouncer).
+    if (static_cast<FileDescriptor*>(device) != static_cast<FileDescriptor*>(m_odevice))
+    {
+      CWDEBUG_ONLY(int count =) m_odevice->inhibit_deletion();
+      Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_input_device(" << device <<
+          "); incremented ref count of output device [" << m_odevice << "] (now " << (count + 1) << ").");
+    }
   }
   m_idevice = device;
 }
@@ -750,13 +798,17 @@ void StreamBuf::set_input_device(InputDevice* device)
 void StreamBuf::set_output_device(OutputDevice* device)
 {
   // Don't pass a StreamBuf to more than one device.
-  // Also note set_output_device should only be called from the constructor of OutputBuffer or LinkBuffer. Don't call it directly.
+  // Also note that set_output_device should only be called from the constructor of OutputBuffer or LinkBuffer. Don't call it directly.
   ASSERT(!m_odevice);
   if (++m_device_counter == 2)
   {
-    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-    Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_output_device(" << device <<
-        "); incremented ref count of output device [" << device << "] (now " << (count + 1) << ").");
+    // Inhibit the deletion of the output device iff the input device and output device aren't the same device (a bouncer).
+    if (static_cast<FileDescriptor*>(device) != static_cast<FileDescriptor*>(m_idevice))
+    {
+      CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+      Dout(dc::io, "this = " << this << "; Calling StreamBuf::set_output_device(" << device <<
+          "); incremented ref count of output device [" << device << "] (now " << (count + 1) << ").");
+    }
   }
   m_odevice = device;
 }

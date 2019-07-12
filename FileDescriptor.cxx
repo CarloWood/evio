@@ -135,9 +135,9 @@ bool is_valid(int fd)
 #endif
 }
 
-void FileDescriptor::init(int fd)
+void FileDescriptorBase::init(int fd)
 {
-  DoutEntering(dc::evio, "FileDescriptor::init(" << fd << ") [" << this << ']');
+  DoutEntering(dc::evio, "FileDescriptorBase::init(" << fd << ") [" << this << ']');
   // Close the device before opening it again.
   ASSERT(!is_valid(m_fd));
   // Only call init() with a valid, open filedescriptor.
@@ -208,7 +208,7 @@ std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state)
+std::ostream& operator<<(std::ostream& os, FileDescriptorBase::State const& state)
 {
   return os << "{m_flags:" << state.m_flags << ", m_epoll_event:" << state.m_epoll_event << "}";
 }

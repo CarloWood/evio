@@ -61,8 +61,6 @@
 
 #pragma once
 
-#include "RefCountReleaser.h"
-
 // (Private/)Protected interface
 
 #define NAD_DECL(funcname, ...) void funcname(int& need_allow_deletion, ## __VA_ARGS__)

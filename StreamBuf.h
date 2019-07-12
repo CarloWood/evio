@@ -376,7 +376,6 @@ class StreamBufCommon : public std::streambuf
   {
   }
 
-
 #ifdef DEBUGSTREAMBUFSTATS
   virtual void print_stats() const = 0;
 #endif
@@ -445,7 +444,11 @@ class StreamBufProducer : public StreamBufCommon
   {
   }
 
-  ~StreamBufProducer() noexcept { }
+  ~StreamBufProducer() noexcept
+  {
+    // ~StreamBufConsumer should have freed all blocks (~StreamBufConsumer should be called before ~StreamBufProducer due to inheritance order).
+    ASSERT(m_total_allocated == m_total_freed);
+  }
 
   // Note that the way m_last_pptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
   [[gnu::always_inline]] void pbump(int n)
@@ -617,6 +620,12 @@ class StreamBufConsumer
 
  protected:
   inline StreamBufConsumer();
+
+  ~StreamBufConsumer() noexcept
+  {
+    while (release_memory_block(m_get_area_block_node))
+      ;
+  }
 
   // Get area / consumer thread / reading.
   [[gnu::always_inline]] inline char* eback() const;
