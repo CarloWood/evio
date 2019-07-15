@@ -323,11 +323,18 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   };
   using state_t = aithreadsafe::Wrapper<State, aithreadsafe::policy::Primitive<std::mutex>>;
 
+  // Overload intrusive_ptr_release for FileDescriptorBase (as opposed to AIRefCount).
+  // This is a bit dangerous: make sure you never cast a FileDescriptorBase to an AIRefCount.
+  friend void intrusive_ptr_release(FileDescriptorBase const* ptr);
+  void allow_deletion() const;
+
  protected:
-  state_t m_state;
-  int m_fd;                           // The file descriptor. In the case of a device that is derived from both,
-                                      // InputDevice and OutputDevice using multiple inheritance -- this fd is
-                                      // used for both input and output.
+  state_t m_state;                          // Mutex protected state of this FileDescriptor.
+  int m_fd;                                 // The file descriptor. In the case of a device that is derived from both,
+                                            // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                            // used for both input and output.
+  mutable FileDescriptorBase const* m_next; // A singly linked list of FileDescriptorBase (derived) objects that need to be deleted by the EventLoopThead.
+                                            // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
 
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
@@ -364,17 +371,6 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
       THROW_FALERTE("epoll_ctl([EPOLL_FD], [EPOLL_OP_STR], [FD], [EPOLL_EVENT]) = -1",
           AIArgs("[EPOLL_FD]", epoll_fd)("[EPOLL_OP_STR]", epoll_op_str(op))("[FD]", m_fd)("[EPOLL_EVENT]", state_w->m_epoll_event));
     }
-  }
-
-  int allow_deletion() const
-  {
-    int count = AIRefCount::allow_deletion(true);
-    if (count == 1)
-    {
-      std::cerr << "Should add " << this << " to to-be-deleted list." << std::endl;
-      delete this;
-    }
-    return count;
   }
 
  private:

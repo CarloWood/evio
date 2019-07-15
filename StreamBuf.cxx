@@ -769,10 +769,9 @@ bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
 
     // Resetting the device pointer is necessary because of `sync' and `flush'.
     m_idevice = nullptr;
-    Dout(dc::io|continued_cf, "this = " << this << "; StreamBuf::release(" << (void*)device << "), " <<
-        m_device_counter << " output device left: " << m_odevice << "; decrementing ref count of that device ");
-    CWDEBUG_ONLY(int count =) m_odevice->allow_deletion();
-    Dout(dc::finish, "(now " << (count - 1) << ").");
+    Dout(dc::io|continued_cf, "this = " << this << "; StreamBuf::release(" << (void*)device << "), ");
+    m_odevice->allow_deletion();
+    Dout(dc::finish, m_device_counter << "output device left: " << m_odevice);
   }
   return false;
 }

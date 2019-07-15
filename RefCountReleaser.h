@@ -49,8 +49,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     if (m_ptr)
     {
       // Cancel the call to inhibit_deletion().
-      CWDEBUG_ONLY(int count =) m_ptr->allow_deletion();
-      Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
+      m_ptr->allow_deletion();
     }
     m_ptr = nullptr;
   }
@@ -104,8 +103,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
       ASSERT(m_ptr == ptr);
       ASSERT(m_ptr->unique().is_momentary_false());
       // Cancel a call to inhibit_deletion().
-      CWDEBUG_ONLY(int count =) m_ptr->allow_deletion();
-      Dout(dc::io, "Decremented ref count of device " << (void*)m_ptr << " to " << (count - 1));
+      m_ptr->allow_deletion();
     }
   }
   void operator=(FileDescriptorBase* ptr)

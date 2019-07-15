@@ -24,6 +24,7 @@
 #include "sys.h"
 #include "debug.h"
 #include "FileDescriptor.h"
+#include "EventLoopThread.h"
 #ifdef CW_CONFIG_NONBLOCK_SYSV
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -211,6 +212,26 @@ std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
 std::ostream& operator<<(std::ostream& os, FileDescriptorBase::State const& state)
 {
   return os << "{m_flags:" << state.m_flags << ", m_epoll_event:" << state.m_epoll_event << "}";
+}
+
+void intrusive_ptr_release(FileDescriptorBase const* ptr)
+{
+  int count = ptr->AIRefCount::allow_deletion(true);
+  if (count == 1)
+  {
+    std::atomic_thread_fence(std::memory_order_acquire);
+    // We must use delayed deletion, because the EventLoopThread might already have gotten a pointer to the object from epoll_pwait().
+    // I addressed the problem here: https://lkml.org/lkml/2019/7/11/747 ; but never got an answer, so resorting to this user-space "solution".
+    EventLoopThread::instance().add_needs_deletion(ptr);
+  }
+}
+
+void FileDescriptorBase::allow_deletion() const
+{
+  int count = AIRefCount::allow_deletion(true);
+  Dout(dc::io, "Decremented ref count of device " << this << " to " << (count - 1));
+  if (count == 1)
+    EventLoopThread::instance().add_needs_deletion(this);
 }
 
 } // namespace evio

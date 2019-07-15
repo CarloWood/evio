@@ -36,6 +36,10 @@ extern channel_ct evio;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
+#ifndef DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS
+#define DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS 0
+#endif
+
 namespace evio {
 
 // EventLoop constructor.
@@ -146,6 +150,10 @@ void EventLoopThread::main()
     // Unblock the signal(s) that can change our wake-up flags again by restoring the old set.
     sigprocmask(SIG_SETMASK, &pwait_sigmask, NULL);
 
+#if DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS
+    std::this_thread::sleep_for(std::chrono::microseconds(DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS));
+#endif
+
 #if 0
     // Use for test_Socket.h testsuite; to make sure epoll_pwait isn't hanging. Use 1000 as timeout in that case, instead of -1.
     if (ready == 0)
@@ -181,6 +189,7 @@ void EventLoopThread::main()
         device->allow_deletion();
     }
   }
+  garbage_collection();
 
   m_running = false;
 
@@ -349,9 +358,10 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
       {
         Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
         Dout(dc::evio, "Queuing call to " << ((active_flag == EPOLLIN) ? "read_event" : "write_event") << "() in thread pool queue " << m_handler);
+        device->inhibit_deletion();
         if (active_flag == EPOLLIN)
           queue_access.move_in([device](){
-              int need_allow_deletion = 0;
+              int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->read_event);
               while (need_allow_deletion--)
                 device->allow_deletion();
@@ -359,7 +369,7 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
           });
         else
           queue_access.move_in([device](){
-              int need_allow_deletion = 0;
+              int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->write_event);
               while (need_allow_deletion--)
                 device->allow_deletion();
@@ -377,11 +387,11 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
   // Don't start a device that is disabled.
   if (AI_UNLIKELY(state_w->m_flags.test_disabled(active_flag)))
   {
-    Dout(dc::warning, "Calling EventLoopThread::start(" << active_flag << ", " << device << ") for a device that is disabled [" << this << "]");
+    Dout(dc::warning, "Calling EventLoopThread::start(" << *state_w << ", " << active_flag << ", " << device << ") for a device that is disabled [" << this << "]");
     return;
   }
 
-  DoutEntering(dc::evio, "EventLoopThread::start(" << active_flag << ", " << device << ")");
+  DoutEntering(dc::evio, "EventLoopThread::start(" << *state_w << ", " << active_flag << ", " << device << ")");
 
   // Don't start a device that is already active.
   if (!state_w->m_flags.test_and_set_active(active_flag))
@@ -592,6 +602,26 @@ void EventLoopThread::stop_running()
 {
   DoutEntering(dc::evio, "EventLoopThread::stop_running()");
   m_stop_running = true;
+}
+
+void EventLoopThread::add_needs_deletion(FileDescriptorBase const* node)
+{
+  // Even though node is const -- this is like an initialization of m_next and therefore we're allowed to change m_next.
+  node->m_next = m_needs_deletion_list.load(std::memory_order_relaxed);
+  while (!m_needs_deletion_list.compare_exchange_weak(node->m_next, node, std::memory_order_release, std::memory_order_relaxed))
+    ;
+}
+
+void EventLoopThread::flush_need_deletion()
+{
+  FileDescriptorBase const* head = m_needs_deletion_list.exchange(nullptr, std::memory_order_acquire);
+  while (head)
+  {
+    FileDescriptorBase const* orphan = head;
+    head = orphan->m_next;
+    orphan->mark_deleted();
+    delete orphan;
+  }
 }
 
 } // namespace evio

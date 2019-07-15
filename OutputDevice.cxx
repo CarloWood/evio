@@ -79,7 +79,7 @@ void OutputDevice::init_output_device(state_t::wat const& state_w)
 
 void OutputDevice::start_output_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::start_output_device() [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device and
   // don't call start_output_device when the device was closed.
   ASSERT(state_w->m_flags.is_w_open());
@@ -92,7 +92,7 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
 
 bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ", " << condition << ") [" << this << ']');
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(state_w->m_flags.is_w_open());
   // Don't call start_output_device with a condition that wasn't transitory_true in the first place.
@@ -104,7 +104,7 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
 
 NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::remove_output_device(" NAD_DoutEntering_ARG ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::remove_output_device(" NAD_DoutEntering_ARG0 << *state_w << ") [" << this << ']');
   if (EventLoopThread::instance().remove(state_w, this))
     ++need_allow_deletion;
   state_w->m_flags.unset_w_flushing();

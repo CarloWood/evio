@@ -76,7 +76,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   // However, you must call EventLoopThread::instance().init(handler) to initialize it before use.
   // See above for the normal usage (aka, don't use EventLoopThread directly).
   friend_Instance;
-  EventLoopThread() : m_epoll_fd(-1), m_epoll_signum(utils::Signals::reserve_and_next_rt_signum()), m_active(0), m_terminate(not_yet), m_running(false) { }
+  EventLoopThread() : m_epoll_fd(-1), m_epoll_signum(utils::Signals::reserve_and_next_rt_signum()), m_active(0), m_terminate(not_yet), m_running(false), m_needs_deletion_list(nullptr) { }
   ~EventLoopThread();
   EventLoopThread(EventLoopThread const&) = delete;
 
@@ -113,6 +113,9 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void terminate(bool normal_exit);     // Called from the destructor of EventLoop; exit as soon as all watchers added by start() have finished.
 
   static void s_wakeup_handler(int);
+#ifdef DEBUG_GTEST_TESTSUITE
+ public:
+#endif
   void wake_up();
 
  private:
@@ -162,6 +165,24 @@ class EventLoopThread : public Singleton<EventLoopThread>
     return TemporaryRelease();
   }
 #endif
+
+  //----------------------------------------------------------------------
+  // Delayed FileDescriptor deletion.
+
+ public:
+  void add_needs_deletion(FileDescriptorBase const* ptr);
+
+ private:
+  std::atomic<FileDescriptorBase const*> m_needs_deletion_list;       // A singly linked list of FileDescriptorBase (derived) objects that need to be deleted.
+
+  void flush_need_deletion();
+
+ public: // Testsuite needs this.
+  [[gnu::always_inline]] void garbage_collection()
+  {
+    if (AI_UNLIKELY(m_needs_deletion_list.load(std::memory_order_relaxed)))
+      flush_need_deletion();
+  }
 };
 
 class EventLoop
