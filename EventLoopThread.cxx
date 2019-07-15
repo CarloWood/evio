@@ -407,18 +407,19 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
   else
     Dout(dc::evio, "Not incrementing m_active because inferior device!");
 
-  if (needs_adding)
-  {
-    // Increment ref count to stop device from being deleted while being active.
-    // Object is kept alive until a call to allow_deletion(), which will be caused automatically
-    // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
-    // which also called InputDevice::remove_input_device()). See NAD.h.
-    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-    Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
-  }
-
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+  {
+    if (needs_adding)
+    {
+      // Increment ref count to stop device from being deleted while being active.
+      // Object is kept alive until a call to allow_deletion(), which will be caused automatically
+      // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
+      // which also called InputDevice::remove_input_device()). See NAD.h.
+      CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+      Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+    }
     device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+  }
   else
     handle_regular_file(active_flag, device);
 }
@@ -490,31 +491,36 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
   else
     Dout(dc::evio, "Not incrementing m_active because inferior device!");
 
-  if (needs_adding)
-  {
-    // Increment ref count to stop device from being deleted while being active.
-    // It is kept alive until a call to allow_deletion().
-    CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
-  }
-
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+  {
+    if (needs_adding)
+    {
+      // Increment ref count to stop device from being deleted while being active.
+      // It is kept alive until a call to allow_deletion().
+      CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+      Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+    }
     device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+  }
   else
     handle_regular_file(active_flag, device);
 
   return true;
 }
 
-bool EventLoopThread::remove(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+NAD_DECL(EventLoopThread::remove, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
-  DoutEntering(dc::evio, "EventLoopThread::remove({" << *state_w << "}, " << active_flag << ", " << device << ")");
+  DoutEntering(dc::evio, "EventLoopThread::remove({" NAD_DoutEntering_ARG0 << *state_w << "}, " << active_flag << ", " << device << ")");
   bool needs_removal = state_w->m_flags.test_and_clear_added(active_flag) && !state_w->m_flags.is_added();
   bool cleared_active = state_w->m_flags.test_and_clear_active(active_flag);
   if (cleared_active || needs_removal)
   {
     if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
+    {
       device->stop_watching(state_w, m_epoll_fd, active_flag, needs_removal);
+      if (needs_removal)
+        ++need_allow_deletion;
+    }
   }
   if (cleared_active && !state_w->m_flags.test_inferior(active_flag))
   {
@@ -523,8 +529,6 @@ bool EventLoopThread::remove(FileDescriptor::state_t::wat const& state_w, FileDe
     if (active == 0)
       bump_terminate();
   }
-  // Return true iff device was removed from the epoll interest list (using EPOLL_CTL_DEL).
-  return needs_removal;
 }
 
 void EventLoopThread::stop(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)

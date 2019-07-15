@@ -97,8 +97,7 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
 NAD_DECL(InputDevice::remove_input_device, state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "InputDevice::remove_input_device(" NAD_DoutEntering_ARG0 "{" << *state_w << "}) [" << this << ']');
-  if (EventLoopThread::instance().remove(state_w, this))
-    ++need_allow_deletion;
+  NAD_CALL(EventLoopThread::instance().remove, state_w, this);
 }
 
 void InputDevice::stop_input_device(state_t::wat const& state_w)

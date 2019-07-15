@@ -105,8 +105,7 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
 NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "OutputDevice::remove_output_device(" NAD_DoutEntering_ARG0 << *state_w << ") [" << this << ']');
-  if (EventLoopThread::instance().remove(state_w, this))
-    ++need_allow_deletion;
+  NAD_CALL(EventLoopThread::instance().remove, state_w, this);
   state_w->m_flags.unset_w_flushing();
 }
 
