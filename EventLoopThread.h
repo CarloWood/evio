@@ -83,8 +83,8 @@ class EventLoopThread : public Singleton<EventLoopThread>
  private:
   std::thread m_event_thread;
   AIQueueHandle m_handler;
-  int m_epoll_fd;
-  static constexpr int maxevents = 32;
+  int32_t m_epoll_fd;
+  static constexpr int maxevents = 8;
   static struct epoll_event s_events[maxevents];
   int const m_epoll_signum;
   std::atomic_int m_active;

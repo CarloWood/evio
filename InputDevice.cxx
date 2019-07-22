@@ -263,18 +263,31 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
       " [" << self << ']');
 
     // The data is now in the buffer. This is where we become the consumer thread.
+    int prev_need_allow_deletion = need_allow_deletion;
     NAD_CALL(self->data_received, new_data, rlen);
 
-    if (AI_UNLIKELY(need_allow_deletion))
+    if (AI_UNLIKELY(need_allow_deletion > prev_need_allow_deletion))
+    {
+      Dout(dc::evio, "Stopping with reading because data_received incremented need_allow_deletion.");
       break;    // We were closed.
+    }
 
     // It might happen that more data is available, even rlen < space (for example when the read() was
     // interrupted (POSIX allows to just return the number of bytes read so far)).
     // If this is a File (including PersistenInputFile) then we really should not take any risk and
     // continue to read till the EOF, and end this function with a call to stop_input_device().
-    // If this is a socket then it still won't hurt to continue to read till -say- read returns EAGAIN
-    // (which is even required when you use epoll with edge triggering). So lets just do that.
+    // If this is a socket then it still won't hurt to continue to read till -say- read returns EAGAIN.
+    // So lets just do that.
     space -= rlen;
+
+    // epoll(7) says: For stream-oriented files (e.g., pipe, FIFO, stream socket), the condition that
+    // the read/write I/O space is exhausted can also be detected by checking the amount of data read
+    // from / written to the target file descriptor. For example, if you call read(2) by asking to read
+    // a certain amount of data and read(2) returns a lower number of bytes, you can be sure of having
+    // exhausted the read I/O space for the file descriptor. The same is true when writing using write(2).
+    //
+    // Therefore for stream-oriented (and only for stream-oriented) devices it would be safe to
+    // break here when space > 0.
   }
 }
 

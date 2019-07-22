@@ -29,8 +29,12 @@
 #include "utils/log2.h"
 #include "utils/InstanceTracker.h"
 #include "utils/AIAlert.h"
+#ifdef CWDEBUG
+#include "utils/is_power_of_two.h"
+#endif
 #include <cstdint>
 #include <atomic>
+#include <new>
 #include <sys/epoll.h>
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -40,6 +44,7 @@ NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
 char const* epoll_op_str(int op);
+std::string epoll_events_str(uint32_t events);
 std::ostream& operator<<(std::ostream& os, epoll_event const& event);
 
 namespace evio {
@@ -55,35 +60,46 @@ class FileDescriptorFlags
   // .-FDS_SAME
   // |    .-FDS_DEAD
   // |    |.-INTERNAL_FDS_DONT_CLOSE
-  // |    ||.-FDS_DEBUG        <-infer->
-  // |    |||                  <--disabled_shft->                       _ epoll_width
-  // |    |||                  <--------open_shft-------->             /
-  // v    vvv                  <-----------------added_shft-------><------->
-  // 10000111 00000000 00000101 00000101 00000101 00000101 00000101 00000101
-  //                        ^ ^      ^ ^      ^ ^      ^ ^      ^ ^      ^ ^
-  //                        | |      | |      | |      | |      | |      |  \_ FDS_R_ACTIVE = EPOLLIN
-  //                        | |      | |      | |      | |      | |       \___ FDS_W_ACTIVE = EPOLLOUT
-  //                        | |      | |      | |      | |      | `-FDS_R_ADDED
-  //                        | |      | |      | |      | |      `-FDS_W_ADDED
-  //                        | |      | |      | |      | `-FDS_R_OPEN
-  //                        | |      | |      | |      `-FDS_W_OPEN
-  //                        | |      | |      | `-FDS_R_DISABLED
-  //                        | |      | |      `-FDS_W_DISABLED
-  //                        | |      | `-FDS_R_INFERIOR
-  //                        | |      `-FDS_W_INFERIOR
-  //                        | `-FDS_R
-  //                        `-FDS_W
+  // |    ||.-FDS_DEBUG                       inferior_shft
+  // |    |||                                /    disabled_shft
+  // |    |||                             <---->   /
+  // |    |||                             <---------->                      _ epoll_width
+  // |    |||                             <----open_shft--->               /
+  // v    vvv                             <------added_shft------>      <---->
+  // 10000111 0000000000000000000000 00101 00101 00101 00101 00101 00101 11101
+  //                                   ^ ^   ^ ^   ^ ^   ^ ^   ^ ^   ^ ^ ^^^ ^
+  //                                   | |   | |   | |   | |   | |   | | |||  \_ FDS_EPOLLIN_BUSY = EPOLLIN
+  //                                   | |   | |   | |   | |   | |   | | || \___ FDS_EPOLLOUT_BUSY = EPOLLOUT
+  //                                   | |   | |   | |   | |   | |   | | |\_____ FDS_EPOLLERR_BUSY = EPOLLERR
+  //                                   | |   | |   | |   | |   | |   | | \______ FDS_EPOLLHUP_BUSY = EPOLLHUP
+  //                                   | |   | |   | |   | |   | |   | `-FDS_R_ACTIVE
+  //                                   | |   | |   | |   | |   | |   `---FDS_W_ACTIVE
+  //                                   | |   | |   | |   | |   | `-FDS_R_ADDED
+  //                                   | |   | |   | |   | |   `-FDS_W_ADDED
+  //                                   | |   | |   | |   | `-FDS_R_OPEN
+  //                                   | |   | |   | |   `-FDS_W_OPEN
+  //                                   | |   | |   | `-FDS_R_DISABLED
+  //                                   | |   | |   `-FDS_W_DISABLED
+  //                                   | |   | `-FDS_R_INFERIOR
+  //                                   | |   `-FDS_W_INFERIOR
+  //                                   | `-FDS_R
+  //                                   `-FDS_W
 
-  static int constexpr epoll_width = utils::log2(EPOLLIN | EPOLLOUT) + 1;
+  static int constexpr epoll_width = utils::log2(EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP) + 1;
   static int constexpr inferior_shft = epoll_width;
   static int constexpr disabled_shft = 2 * epoll_width;
   static int constexpr open_shft = 3 * epoll_width;
   static int constexpr added_shft = 4 * epoll_width;
+  static int constexpr active_to_type_shft = 5 * epoll_width;
 
-  static mask_t constexpr FDS_R_ACTIVE            = EPOLLIN;                    // Set when epoll is using a pointer to this object (is watching this fd for input activity).
-  static mask_t constexpr FDS_W_ACTIVE            = EPOLLOUT;                   // Set when epoll is using a pointer to this object (is watching this fd for output activity).
+  static mask_t constexpr FDS_EPOLLIN_BUSY        = EPOLLIN;
+  static mask_t constexpr FDS_EPOLLOUT_BUSY       = EPOLLOUT;
+  static mask_t constexpr FDS_EPOLLERR_BUSY       = EPOLLERR;
+  static mask_t constexpr FDS_EPOLLHUP_BUSY       = EPOLLHUP;
 
-  static int constexpr active_to_type_shft = added_shft + epoll_width;
+  static mask_t constexpr FDS_R_ACTIVE            = EPOLLIN << epoll_width;     // Set when epoll is using a pointer to this object (is watching this fd for input activity).
+  static mask_t constexpr FDS_W_ACTIVE            = EPOLLOUT << epoll_width;    // Set when epoll is using a pointer to this object (is watching this fd for output activity).
+
   static mask_t constexpr FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;
   static mask_t constexpr FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;
   static mask_t constexpr FDS_RW                  = FDS_R | FDS_W;
@@ -117,6 +133,9 @@ class FileDescriptorFlags
   mask_t m_mask;
 
  public:
+  [[gnu::always_inline]] static uint32_t active_to_events(mask_t active_flag) { return active_flag >> epoll_width; }
+  [[gnu::always_inline]] static mask_t event_to_active(uint32_t event) { return event << epoll_width; }
+
   // Return true if this object is a base class of OutputDevice.
   bool is_output_device() const { return m_mask & FDS_W; }
 
@@ -154,7 +173,11 @@ class FileDescriptorFlags
   bool is_w_flushing() const { return m_mask & FDS_W_FLUSHING; }
 
   // Return true if this object is inferior for the action passed in active_flag.
-  bool test_inferior(mask_t active_flag) const { return m_mask & (active_flag << active_to_inferior_shft); }
+  bool test_inferior(mask_t active_flag) const
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    return m_mask & (active_flag << active_to_inferior_shft);
+  }
 
   // Returns true if this object is not associated with a working fd.
   bool is_dead() const { return m_mask & FDS_DEAD; }
@@ -169,7 +192,11 @@ class FileDescriptorFlags
   bool is_r_disabled() const { return m_mask & FDS_R_DISABLED; }
 
   // Return true if this object is disabled for the action passed in active_flag.
-  bool test_disabled(mask_t active_flag) const { return m_mask & (active_flag << active_to_disabled_shft); }
+  bool test_disabled(mask_t active_flag) const
+  {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    return m_mask & (active_flag << active_to_disabled_shft);
+  }
 
   // Return true if this object is added to the kernel epoll structure because it is an input device.
   bool is_r_added() const { return m_mask & FDS_R_ADDED; }
@@ -185,6 +212,17 @@ class FileDescriptorFlags
 
   // Returns true if this object is being watched for readability.
   bool is_active_input_device() const { return m_mask & FDS_R_ACTIVE; }
+
+  // Returns true if this object has queued or is handling a read_event in the thread pool.
+  bool is_r_busy() const { return m_mask & FDS_EPOLLIN_BUSY; }
+
+  // Returns true if this object has queued or is handling a write_event in the thread pool.
+  bool is_w_busy() const { return m_mask & FDS_EPOLLOUT_BUSY; }
+
+#if 0
+  // Returns true if this object has queued or is handling either a read_event or write_event in the thread pool.
+  bool is_busy() const { return m_mask & (FDS_EPOLLIN_BUSY|FDS_EPOLLOUT_BUSY); }
+#endif
 
   // Return true if this object has or had a fd that is open for both reading and writing.
   bool is_same() const { return m_mask & FDS_SAME; }
@@ -276,8 +314,17 @@ class FileDescriptorFlags
 
   void clear_active(mask_t active_flag)
   {
+    ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
     m_mask &= ~active_flag;
   }
+
+#if 0
+  void clear_busy(mask_t events)
+  {
+    ASSERT((events & ~(EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP)) == 0);
+    m_mask &= ~events;
+  }
+#endif
 
   bool test_and_set_active(mask_t active_flag)
   {
@@ -308,6 +355,16 @@ class FileDescriptorFlags
     return !already_added;
   }
 
+#if 0
+  uint32_t test_and_set_busy(uint32_t events)
+  {
+    mask_t requested_busy_flags = events & (EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP);
+    mask_t already_busy = m_mask & requested_busy_flags;
+    m_mask |= requested_busy_flags;
+    return events ^ already_busy;
+  }
+#endif
+
   FileDescriptorFlags() : m_mask(0) { }
 
   friend std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags);
@@ -329,12 +386,13 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   void allow_deletion() const;
 
  protected:
-  state_t m_state;                          // Mutex protected state of this FileDescriptor.
-  int m_fd;                                 // The file descriptor. In the case of a device that is derived from both,
-                                            // InputDevice and OutputDevice using multiple inheritance -- this fd is
-                                            // used for both input and output.
-  mutable FileDescriptorBase const* m_next; // A singly linked list of FileDescriptorBase (derived) objects that need to be deleted by the EventLoopThead.
-                                            // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
+  alignas(cacheline_size_c) state_t m_state;    // Mutex protected state of this FileDescriptor.
+  int m_fd;                                     // The file descriptor. In the case of a device that is derived from both,
+                                                // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                                // used for both input and output.
+  mutable FileDescriptorBase const* m_next;     // A singly linked list of FileDescriptorBase (derived) objects that need to be deleted by the EventLoopThead.
+                                                // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
+  alignas(cacheline_size_c) std::atomic<uint32_t> m_being_processed_by_thread_pool;     // Mask of events being handled by the thread pool.
 
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
@@ -346,31 +404,92 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
 #endif
 
  public:
-  void start_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_adding)
+  // This is called by the EventLoopThread to see if an event that was just returned
+  // by epoll_pwait() is still in the thread pool queue (or being processed by a thread).
+  // Adds the events to m_being_processed_by_thread_pool.
+  // Returns the events that are already being processed by thread pool.
+  uint32_t test_and_set_being_processed_by_thread_pool(uint32_t events)
   {
-    state_w->m_epoll_event.events |= events;
-    int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+    // events is what is returned by epoll_pwait and should only contain one or more of these four events.
+    ASSERT((events & ~(EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR)) == 0);
+    // This is EventLoopThread, the only thread that sets bits in m_being_processed_by_thread_pool.
+    // Therefore, when m_being_processed_by_thread_pool is zero, it will remain zero and there is no need to use a RMW operation.
+    uint32_t prev_busy = m_being_processed_by_thread_pool.load(std::memory_order_acquire);
+    // Fast track the case where we suppress the same events over and over.
+    if (AI_LIKELY(events == prev_busy))
+    {
+      // All events are to be suppressed.
+      return prev_busy;
+    }
+    else if (prev_busy == 0)
+    {
+      // There are no other threads accessing this variable.
+      m_being_processed_by_thread_pool.store(events, std::memory_order_relaxed);
+      return 0;
+    }
+    // Relaxed because this adds event bits and we're only interested to stop this
+    // thread from calling this function again and then getting back those events.
+    return m_being_processed_by_thread_pool.fetch_or(events, std::memory_order_relaxed);
+  }
+
+  void do_epoll_ctl(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, int op)
+  {
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     DEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
     // If epoll_fd == -1 and errno EBADF: did you create an EventLoop object at the start of main?
     // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.
-    ASSERT(ret != -1);
-  }
-
-  void stop_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t events, bool needs_removal)
-  {
-    state_w->m_epoll_event.events &= ~events;
-    int op = needs_removal ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
-    Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
-    int ret = epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
-    Dout(dc::finish|cond_error_cf(ret == -1), ret);
     if (AI_UNLIKELY(ret == -1))
     {
       // This is an unrecoverable error... Application should print this information and terminate.
       THROW_FALERTE("epoll_ctl([EPOLL_FD], [EPOLL_OP_STR], [FD], [EPOLL_EVENT]) = -1",
           AIArgs("[EPOLL_FD]", epoll_fd)("[EPOLL_OP_STR]", epoll_op_str(op))("[FD]", m_fd)("[EPOLL_EVENT]", state_w->m_epoll_event));
     }
+  }
+
+  // This is called by an AIThreadPool thread after it processed an event.
+  void clear_being_processed_by_thread_pool(int epoll_fd, uint32_t event)
+  {
+    DoutEntering(dc::evio, "FileDescriptorBase::clear_being_processed_by_thread_pool(" << epoll_fd << ", " << epoll_events_str(event) << ") [" << this << "]");
+    FileDescriptorBase::state_t::wat state_w(m_state);
+    // Allow a new event to be added to the thread pool for this fd/event.
+    m_being_processed_by_thread_pool.fetch_and(~event, std::memory_order_release);
+    // Rearm fd/event if the current event is still interesting.
+    if ((state_w->m_epoll_event.events & event))
+    {
+      // Rearm fd.
+      do_epoll_ctl(state_w, epoll_fd, EPOLL_CTL_MOD);
+    }
+  }
+
+  bool is_being_processed_by_thread_pool(uint32_t event)
+  {
+    // This is expected to be a single event (active_flag).
+    ASSERT(utils::is_power_of_two(event));
+    return (m_being_processed_by_thread_pool.load(std::memory_order_relaxed) & event);
+  }
+
+  void start_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_adding)
+  {
+    state_w->m_epoll_event.events |= event | EPOLLET;
+    int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+#if 0
+    if (AI_LIKELY(is_being_processed_by_thread_pool(event)))
+      Dout(dc::notice, "Delaying addition of event " << epoll_events_str(event) << " with epoll_ctl [" << this << "]");
+    else
+#endif
+    do_epoll_ctl(state_w, epoll_fd, op);
+  }
+
+  void stop_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_removal)
+  {
+    state_w->m_epoll_event.events &= ~event;
+    int op = needs_removal ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
+    // It doesn't make sense to rearm a fd when the corresponding event is going to ignored anyway,
+    // but we can remove a fd from the epoll interest list, or stop watching events, immediately
+    // because the delay is really only to make sure we get an event (using the fact that an epoll_ctl
+    // rearms the fd).
+    do_epoll_ctl(state_w, epoll_fd, op);
   }
 
  private:
@@ -396,6 +515,23 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
     ASSERT(!is_destructed());
     Dout(dc::warning, "Calling FileDescriptorBase::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
   }
+#if 0
+  // Returns the events that were not busy before.
+  uint32_t test_and_set_busy(uint32_t events)
+  {
+    return state_t::wat(m_state)->m_flags.test_and_set_busy(events);
+  }
+  void clear_busy(uint32_t event)
+  {
+    state_t::wat(m_state)->m_flags.clear_busy(event);
+  }
+#endif
+ public:
+  bool is_busy() const
+  {
+    Dout(dc::notice, m_being_processed_by_thread_pool);
+    return m_being_processed_by_thread_pool;
+  }
 
  private:
   // At least one of these must be overridden to initialize the appropriate device(s).
@@ -404,7 +540,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptorBase() : m_fd(-1) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
+  FileDescriptorBase() : m_fd(-1), m_being_processed_by_thread_pool(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
   ~FileDescriptorBase() noexcept { }
 
  protected:

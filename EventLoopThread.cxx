@@ -40,6 +40,8 @@ NAMESPACE_DEBUG_CHANNELS_END
 #define DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS 0
 #endif
 
+std::string epoll_events_str(uint32_t events);
+
 namespace evio {
 
 // EventLoop constructor.
@@ -126,27 +128,32 @@ void EventLoopThread::main()
   m_stop_running = false;
   m_running = true;
 
+  AIThreadPool& thread_pool(AIThreadPool::instance());
+  auto queues_access = thread_pool.queues_read_access();
+  auto& queue = thread_pool.get_queue(queues_access, m_handler);
+
   while (!m_stop_running.load(std::memory_order_relaxed))
   {
     // Before entering epoll_pwait, block the signal(s) that can change our wake-up flags.
     sigprocmask(SIG_BLOCK, &epoll_sigmask, &pwait_sigmask);
-    int ready;
+    int nfds;
     do
     {
       // While m_epoll_signum is blocked, deal with a wake-up and see if we must terminate.
       if (AI_UNLIKELY(m_stop_running.load(std::memory_order_relaxed)))
       {
-        ready = -1;
+        nfds = -1;
+        garbage_collection();
         break;
       }
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
 #ifdef CWDEBUG
       utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
 #endif
-      ready = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
-      Dout(dc::finish|cond_error_cf(ready == -1), ready);
+      nfds = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
+      Dout(dc::finish|cond_error_cf(nfds == -1), nfds);
     }
-    while (ready == -1 && errno == EINTR);
+    while (nfds == -1 && errno == EINTR);
     // Unblock the signal(s) that can change our wake-up flags again by restoring the old set.
     sigprocmask(SIG_SETMASK, &pwait_sigmask, NULL);
 
@@ -154,42 +161,81 @@ void EventLoopThread::main()
     std::this_thread::sleep_for(std::chrono::microseconds(DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS));
 #endif
 
-#if 0
-    // Use for test_Socket.h testsuite; to make sure epoll_pwait isn't hanging. Use 1000 as timeout in that case, instead of -1.
-    if (ready == 0)
+    // Handle the returned event(s) for each fd.
+    while (nfds > 0)
     {
-      std::cerr << "epoll_pwait() is hanging!" << std::endl;
-      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ std::cerr << p << ": " << p->get_fd() << ", " << p->get_flags() << std::endl; });
-    }
-#endif
+      epoll_event& event(s_events[--nfds]);
 
-    // Handle the returned events.
-    while (ready > 0)
-    {
-      epoll_event& event(s_events[--ready]);
       FileDescriptor* device = static_cast<FileDescriptor*>(event.data.ptr);
-      int need_allow_deletion = 0;
-      if ((event.events & EPOLLIN))
-        device->read_event(need_allow_deletion);
-      if ((event.events & EPOLLOUT))
-        device->write_event(need_allow_deletion);
-      if (AI_UNLIKELY(event.events & ~(EPOLLIN|EPOLLOUT)))
+      uint32_t already_being_processed_by_thread_pool = device->test_and_set_being_processed_by_thread_pool(event.events);
+      Dout(dc::evio((already_being_processed_by_thread_pool & event.events) != 0),
+          "epoll_pwait event(s) " << epoll_events_str(already_being_processed_by_thread_pool & event.events) << " ignored because the event(s) are being handled by the thread pool.");
+      event.events &= ~already_being_processed_by_thread_pool;
+      if (event.events == 0)
+        continue;       // The FileDescriptor is being_processed_by_thread_pool for all returned events.
+      Dout(dc::evio, "epoll_pwait new event: " << event);
+
+      CWDEBUG_ONLY(bool queue_was_full = false;)
       {
-        if ((event.events & EPOLLHUP))
+        bool queue_full;
+        auto queue_access = queue.producer_access();
+        do
         {
-          device->hup_event(need_allow_deletion);
-          device->close();      // Leaving this alive would cause a flood of events.
+          if ((queue_full = queue_access.length() == queue.capacity()))
+          {
+            // Queue is full! Wait for a broadcast.
+            Dout(dc::warning(!queue_was_full), "Thread pool queue " << m_handler << " is full! Now no longer handling any socket etc. I/O until this is resolved.");
+            Debug(queue_was_full = true);
+            queue_access.wait();                    // Wait until queue_access.notify_one() is called.
+          }
+          else
+          {
+            Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
+            Dout(dc::evio, "Queuing I/O event " << event << " for " << device << " in thread pool queue " << m_handler);
+            device->inhibit_deletion();
+            queue_access.move_in([device, events = event.events, epoll_fd = m_epoll_fd](){
+              int need_allow_deletion = 1;      // Balance with the call to inhibit_deletion() above.
+              if (AI_UNLIKELY(events & ~(EPOLLIN|EPOLLOUT)))
+              {
+                if ((events & EPOLLHUP))
+                {
+                  device->hup_event(need_allow_deletion);
+                  device->close();      // Leaving this alive would cause a flood of events.
+                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLHUP);
+                }
+                else if ((events & EPOLLERR))
+                {
+                  device->exceptional_event(need_allow_deletion);
+                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLERR);
+                }
+                else
+                  DoutFatal(dc::core, "event.events = " << std::hex << events);
+              }
+              else
+              {
+                if ((events & EPOLLIN))
+                {
+                  device->read_event(need_allow_deletion);
+                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLIN);
+                }
+                if ((events & EPOLLOUT))
+                {
+                  device->write_event(need_allow_deletion);
+                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLOUT);
+                }
+              }
+              while (need_allow_deletion--)
+                device->allow_deletion();
+              return false;
+            });
+          }
         }
-        else if ((event.events & EPOLLERR))
-          device->exceptional_event(need_allow_deletion);
-        else
-          DoutFatal(dc::core, "event.events = " << std::hex << event.events);
+        while (queue_full);
       }
-      while (need_allow_deletion--)
-        device->allow_deletion();
+      queue.notify_one();
     }
+    garbage_collection();
   }
-  garbage_collection();
 
   m_running = false;
 
@@ -357,9 +403,9 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
       else
       {
         Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
-        Dout(dc::evio, "Queuing call to " << ((active_flag == EPOLLIN) ? "read_event" : "write_event") << "() in thread pool queue " << m_handler);
+        Dout(dc::evio, "Queuing call to " << ((active_flag == FileDescriptorFlags::FDS_R_ACTIVE) ? "read_event" : "write_event") << "() in thread pool queue " << m_handler);
         device->inhibit_deletion();
-        if (active_flag == EPOLLIN)
+        if (active_flag == FileDescriptorFlags::FDS_R_ACTIVE)
           queue_access.move_in([device](){
               int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->read_event);
@@ -367,7 +413,7 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
                 device->allow_deletion();
               return false;
           });
-        else
+        else // active_flag == FileDescriptorFlags::FDS_W_ACTIVE
           queue_access.move_in([device](){
               int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->write_event);
@@ -418,7 +464,7 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
       Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
     }
-    device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+    device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }
   else
     handle_regular_file(active_flag, device);
@@ -500,7 +546,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
       Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
     }
-    device->start_watching(state_w, m_epoll_fd, active_flag, needs_adding);
+    device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }
   else
     handle_regular_file(active_flag, device);
@@ -517,7 +563,7 @@ NAD_DECL(EventLoopThread::remove, FileDescriptor::state_t::wat const& state_w, F
   {
     if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
     {
-      device->stop_watching(state_w, m_epoll_fd, active_flag, needs_removal);
+      device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_removal);
       if (needs_removal)
         ++need_allow_deletion;
     }
@@ -538,7 +584,7 @@ void EventLoopThread::stop(FileDescriptor::state_t::wat const& state_w, FileDesc
     return;
 
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
-    device->stop_watching(state_w, m_epoll_fd, active_flag, false);
+    device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), false);
 
   if (!state_w->m_flags.test_inferior(active_flag))
   {
@@ -585,7 +631,7 @@ bool EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils
 #endif
 
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
-    device->stop_watching(state_w, m_epoll_fd, active_flag, false);
+    device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), false);
 
   if (!state_w->m_flags.test_inferior(active_flag))
   {
@@ -623,7 +669,7 @@ void EventLoopThread::flush_need_deletion()
   {
     FileDescriptorBase const* orphan = head;
     head = orphan->m_next;
-    orphan->mark_deleted();
+    DEBUG_ONLY(orphan->mark_deleted());
     delete orphan;
   }
 }

@@ -707,7 +707,7 @@ void StreamBufProducer::flush()
   m_odevice->restart_if_non_active();
 }
 
-bool StreamBuf::release(FileDescriptor const* DEBUG_ONLY(device))
+bool StreamBuf::release(FileDescriptor const* device)
 {
   // StreamBuf should always be used as base class of InputBuffer, OutputBuffer or LinkBuffer only.
   ASSERT(m_device_counter > 0);

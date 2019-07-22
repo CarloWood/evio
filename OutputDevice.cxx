@@ -366,13 +366,16 @@ try_again_write1:
 #ifdef DEBUGDEVICESTATS
     self->m_sent_bytes += wlen;
 #endif
-    Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd <<
+    Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd
 #ifdef DEBUGDEVICESTATS
-      " [total sent now " << self->m_sent_bytes << " bytes]"
+      << " [total sent now " << self->m_sent_bytes << " bytes]"
 #endif
       );
     if (wlen < len)
     {
+      // This means we can't write more at the moment. In the case of regular
+      // files that should really be true. For other cases it would be ok when
+      // that is not the case: then we will get a new EPOLLOUT event.
       Dout(dc::finish, " (Tried to write " << len << " bytes) [" << self << ']');
       return;			// We wrote as much as currently possible.
     }

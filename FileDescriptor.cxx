@@ -201,6 +201,11 @@ std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
   if (flags.is_active_output_device())
     os << "|FDS_W_ACTIVE";
 
+  if (flags.is_r_busy())
+    os << "|FDS_R_BUSY";
+  if (flags.is_w_busy())
+    os << "|FDS_W_BUSY";
+
 #ifdef CWDEBUG
   if (flags.is_debug_channel())
     os << "|FDS_DEBUG";
