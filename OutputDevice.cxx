@@ -297,6 +297,7 @@ NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
       utils::FuzzyCondition condition_empty_buffer([obuffer]{
           return obuffer->StreamBufConsumer::buffer_empty();
       });
+      obuffer->restart_input_device_if_needed();
       // When buf2dev_contiguous_forced() returned zero then the buffer is empty.
       // So, it is unlikely that a microsecond later it isn't anymore but we're
       // not allowed to call stop_output_device with a false condition (simply
@@ -371,6 +372,7 @@ try_again_write1:
       << " [total sent now " << self->m_sent_bytes << " bytes]"
 #endif
       );
+    obuffer->restart_input_device_if_needed();
     if (wlen < len)
     {
       // This means we can't write more at the moment. In the case of regular

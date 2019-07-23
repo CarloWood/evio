@@ -79,7 +79,7 @@ std::string epoll_events_str(uint32_t events)
 
 std::ostream& operator<<(std::ostream& os, epoll_event const& event)
 {
-  return os << "{events:" << epoll_events_str(event.events) << ", data:" << event.data.ptr << "}";
+  return os << "{events:" << epoll_events_str(event.events) << ", data:" << static_cast<evio::FileDescriptor*>(event.data.ptr) << "}";
 }
 
 namespace evio {

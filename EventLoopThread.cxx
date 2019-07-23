@@ -169,7 +169,8 @@ void EventLoopThread::main()
       FileDescriptor* device = static_cast<FileDescriptor*>(event.data.ptr);
       uint32_t already_being_processed_by_thread_pool = device->test_and_set_being_processed_by_thread_pool(event.events);
       Dout(dc::evio((already_being_processed_by_thread_pool & event.events) != 0),
-          "epoll_pwait event(s) " << epoll_events_str(already_being_processed_by_thread_pool & event.events) << " ignored because the event(s) are being handled by the thread pool.");
+          "epoll_pwait event(s) " << epoll_events_str(already_being_processed_by_thread_pool & event.events) << " of fd " << device <<
+          " ignored because the event(s) are being handled by the thread pool.");
       event.events &= ~already_being_processed_by_thread_pool;
       if (event.events == 0)
         continue;       // The FileDescriptor is being_processed_by_thread_pool for all returned events.

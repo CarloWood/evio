@@ -204,7 +204,7 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
     if (space == 0 &&
         (space = self->m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
-      // The buffer is full!
+      Dout(dc::warning, "InputDevice::VT_impl::read_from_fd(" << self << ", " << fd << ": the input buffer has reached max. capacity!");
       self->stop_input_device();        // Stop reading the filedescriptor.
       // After a call to stop_input_device() it is possible that another thread
       // starts it again and enters read_from_fd from the top. We are therefore

@@ -812,6 +812,17 @@ void StreamBuf::set_output_device(OutputDevice* device)
   m_odevice = device;
 }
 
+void StreamBuf::do_restart_input_device_if_needed()
+{
+  if (buffer_not_full_anymore())
+  {
+    Dout(dc::notice, "The buffer is not full anymore [" << this << "]");
+    m_buffer_was_full.store(false, std::memory_order_relaxed);
+    if (m_idevice)
+      m_idevice->start_input_device();
+  }
+}
+
 #ifdef DEBUGDBSTREAMBUF
 void StreamBuf::printOn(std::ostream& os) const
 {

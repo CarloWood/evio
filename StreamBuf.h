@@ -355,7 +355,6 @@ class StreamBufCommon : public std::streambuf
 {
  protected:
   friend class StreamBufConsumer;
-  std::atomic<bool> m_resetting;        // This is used to signal that the consumer thread has to reset the get area.
   std::atomic<char*> m_last_pptr;       // This is used to transfer the pptr to the consumer thread.
   std::atomic<char*> m_last_gptr;       // This is used to transfer the gptr of an EMPTY buffer to the producer thread.
 
@@ -365,11 +364,19 @@ class StreamBufCommon : public std::streambuf
   // The total accumulated amount of data that was read from this buffer.
   // This value only ever increases, it is not decreased when memory is freed.
   std::atomic<std::streamsize> m_total_read;
+  // This is used to signal that the consumer thread has to reset the get area.
+  std::atomic<bool> m_resetting;
+  // This is set by the producer when the buffer runs full, and reset by the
+  // consumer when it isn't too full anymore. Used to speed up things a little
+  // (avoiding more expensive tests), but also because otherwise we can't know
+  // when we are allowed to call buffer_not_full_anymore() (from need_producer_restart).
+  std::atomic<bool> m_buffer_was_full;
 
   // Constructor.
   StreamBufCommon() :
+    m_last_gptr(nullptr),               // See update_put_area.
     m_resetting(false),
-    m_last_gptr(nullptr)                // See update_put_area.
+    m_buffer_was_full(false)
 #ifdef DEBUGEVENTRECORDING
     , recording_pool(1024, sizeof(RecordingData))
 #endif
@@ -495,14 +502,16 @@ class StreamBufProducer : public StreamBufCommon
   // Same as above, but doesn't return 0 unless out of memory or buffer full.
   size_t force_available_contiguous_number_of_bytes()
   {
-    size_t contiguous_size;
+    size_t contiguous_size = epptr() - pptr();
+    if (contiguous_size == 0)
     {
-      contiguous_size = epptr() - pptr();
-    }
-    if (contiguous_size == 0 && overflow_a(0) != EOF)   // Write a dummy byte '\0'
-    {
-      pbump(-1);                                        // Erase dummy byte
-      contiguous_size = epptr() - pptr();
+      if (overflow_a(0) == EOF)                         // Write a dummy byte '\0'
+        m_buffer_was_full = true;
+      else
+      {
+        pbump(-1);                                      // Erase dummy byte
+        contiguous_size = epptr() - pptr();
+      }
     }
     return contiguous_size;
   }
@@ -541,13 +550,13 @@ class StreamBufProducer : public StreamBufCommon
   size_t unused_in_last_block() const { return epptr() - pptr(); }
 
   // Return the amount of allocated memory currently in the buffer.
-  std::streamsize get_allocated_upper_bound() const
+  size_t get_allocated_upper_bound() const
   {
     return m_total_allocated - m_total_freed.load(std::memory_order_acquire);
   }
 
   // Return the number of bytes currently in the buffer.
-  std::streamsize get_data_size_upper_bound() const
+  size_t get_data_size_upper_bound() const
   {
     // This is an upper bound because m_total_read might be growing.
     return m_total_allocated - unused_in_last_block() + m_total_reset - m_total_read.load(std::memory_order_acquire);
@@ -560,18 +569,14 @@ class StreamBufProducer : public StreamBufCommon
   // Public accessors
   //
 
-#if 0
   // Returns true if the output buffer is full.
   bool buffer_full() const
   {
-    bool full = used_size() >= m_buffer_full_watermark;
-#ifdef CWDEBUG
-    if (full)
-      Dout(dc::warning, "StreamBuf::buffer_full: used_size() = " << used_size() << " >= m_buffer_full_watermark = " << m_buffer_full_watermark << " [" << this << ']');
-#endif
+    bool full = get_data_size_upper_bound() >= m_buffer_full_watermark;
+    Dout(dc::warning, "StreamBufProducer::buffer_full: get_data_size_upper_bound() = " << get_data_size_upper_bound() <<
+        " >= m_buffer_full_watermark = " << m_buffer_full_watermark << " [" << this << ']');
     return full;
   }
-#endif
 
 #ifdef DEBUGEVENTRECORDING
  public:
@@ -589,6 +594,12 @@ class StreamBufConsumer
 
   // Pointer to the get area - block object.
   MemoryBlock* m_get_area_block_node;
+
+  // The input device whose constructor this StreamBuf was passed to.
+  // Used by a LinkBuffer to restart the input device writing to it
+  // once the output device read enough data from a previously full
+  // buffer.
+  InputDevice* m_idevice;
 
 #ifdef DEBUGSTREAMBUFSTATS
   size_t m_number_of_calls_to_update_get_area;
@@ -729,10 +740,6 @@ class StreamBufConsumer
 class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 {
  private:
-  // The input device whose constructor this StreamBuf was passed to.
-  InputDevice* m_idevice;
-
- private:
   // Override virtual functions.
 
   //---------------------------------------------------------------------------
@@ -823,6 +830,25 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   }
 #endif
 
+  // Returns true when we can start writing again to a buffer that was full before.
+  // This should be called by the consumer thread (after having read some data from
+  // the buffer) while the producer is inhibited from writing to the buffer because
+  // the buffer was full; therefore it is "single threaded".
+  bool buffer_not_full_anymore() const
+  {
+    // This MUST be the consumer thread, because calling unused_in_first_block() is UB otherwise!
+    // The producer may not be allocating new memory blocks while this is being called.
+    return get_allocated_upper_bound() - unused_in_first_block() < m_buffer_full_watermark;
+  }
+
+  // Edge triggered event for when the buffer went from full to not-full: calls m_idevice->start_input_device() iff m_idevice != nullptr.
+  [[gnu::always_inline]] void restart_input_device_if_needed()
+  {
+    // Relaxed because missing a beat doesn't really matter.
+    if (AI_UNLIKELY(m_buffer_was_full.load(std::memory_order_relaxed)))
+      do_restart_input_device_if_needed();
+  }
+
  protected:     // destructor
   // Should only be called by release()
   virtual ~StreamBuf() noexcept { Dout(dc::io, "~StreamBuf() [" << this << ']'); }
@@ -847,6 +873,9 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   // This can be used to speed up read/write access methods.
   // The returned value only makes sense when this is both the consumer thread and the producer thread at the same time.
   bool has_multiple_blocks() const { return m_get_area_block_node != m_put_area_block_node; }
+
+ private:
+  void do_restart_input_device_if_needed();
 
   //===========================================================================
   // Debugging stuff.

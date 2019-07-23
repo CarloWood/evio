@@ -122,9 +122,10 @@ class InputDevice : public virtual FileDescriptor
   void disable_input_device();
   void enable_input_device();
 
-  [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }
   [[gnu::always_inline]] void stop_input_device() { stop_input_device(state_t::wat(m_state)); }
   [[gnu::always_inline]] NAD_DECL(remove_input_device) { NAD_CALL(remove_input_device, state_t::wat(m_state)); }
+ public: // ONLY public because StreamBuf::do_restart_input_device_if_needed() needs to call this :/
+  [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }
 
  protected:
   // Constructor.
