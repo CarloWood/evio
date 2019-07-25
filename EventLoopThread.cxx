@@ -30,12 +30,6 @@
 #include "debug.h"
 #include <chrono>
 
-#if defined(CWDEBUG) && !defined(DOXYGEN)
-NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct evio;
-NAMESPACE_DEBUG_CHANNELS_END
-#endif
-
 #ifndef DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS
 #define DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS 0
 #endif
@@ -43,22 +37,6 @@ NAMESPACE_DEBUG_CHANNELS_END
 std::string epoll_events_str(uint32_t events);
 
 namespace evio {
-
-// EventLoop constructor.
-EventLoop::EventLoop(AIQueueHandle handler) : m_normal_exit(false)
-{
-  DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ")");
-  EventLoopThread::instance().init(handler);
-}
-
-EventLoop::~EventLoop()
-{
-  DoutEntering(dc::evio, "EventLoop::~EventLoop()");
-  if (!m_normal_exit)
-    // Normally you want to call event_loop.join() at the end of the scope of an EventLoop event_loop(handler);
-    Dout(dc::warning, "Unclean exit from EventLoop!");
-  EventLoopThread::instance().terminate(m_normal_exit);
-}
 
 // Singleton initialization.
 void EventLoopThread::init(AIQueueHandle handler)
@@ -148,7 +126,7 @@ void EventLoopThread::main()
       }
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
 #ifdef CWDEBUG
-      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
+      utils::InstanceTracker<FileDescriptorBase>::for_each([](FileDescriptorBase const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
 #endif
       nfds = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
       Dout(dc::finish|cond_error_cf(nfds == -1), nfds);

@@ -12,6 +12,8 @@ SOURCES = FileDescriptor.cxx \
 	  OutputDevice.h \
 	  StreamBuf.cxx \
 	  StreamBuf.h \
+	  EventLoop.h \
+	  EventLoop.cxx \
 	  EventLoopThread.h \
 	  EventLoopThread.cxx \
 	  Protocol.cxx \

@@ -115,11 +115,12 @@ NAD_DECL_UNUSED_ARG(ListenSocketDevice::VT_impl::read_from_fd, InputDevice* _sel
   ListenSocketDevice* self = static_cast<ListenSocketDevice*>(_self);
 
   int sock_fd;
-  SocketAddress accept_addr;
-  socklen_t addrlen = sizeof(SocketAddress);
+  char accept_addr_buf[sizeof(struct sockaddr_un)];
+  struct sockaddr* accept_addr_ptr =reinterpret_cast<struct sockaddr*>(accept_addr_buf);
+  socklen_t addrlen = sizeof(accept_addr_buf);
 
   Dout(dc::system|continued_cf, "accept4(" << fd << ", ");
-  if ((sock_fd = accept4(fd, accept_addr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
+  if ((sock_fd = accept4(fd, accept_addr_ptr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
   {
     int err = errno;
     Dout(dc::finish|error_cf, (void*)&addrlen << ") = " << sock_fd);
@@ -133,6 +134,7 @@ NAD_DECL_UNUSED_ARG(ListenSocketDevice::VT_impl::read_from_fd, InputDevice* _sel
 #endif
     return;
   }
+  SocketAddress accept_addr(accept_addr_ptr);
   Dout(dc::finish, '{' << accept_addr << "}, " << '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
   Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << accept_addr);
 

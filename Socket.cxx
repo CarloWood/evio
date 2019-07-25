@@ -112,7 +112,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
   if (!m_remote_address.is_unspecified())
     Dout(dc::warning, "Socket::init: Already connected to " << m_remote_address << " ?!");
 
-  // Call Socket::input and/or Socket::output before calling Socket::init.
+  // Call Socket::set_source and/or Socket::set_sink before calling Socket::init.
   // If you don't call either - then this socket is not usable for input/output respectively!
   ASSERT(m_ibuffer || m_obuffer);
 

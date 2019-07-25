@@ -26,7 +26,7 @@
 #include "InputDevice.h"
 #include "OutputDevice.h"
 #include "StreamBuf-threads.h"
-#include "threadpool/AIThreadPool.h"
+#include "threadpool/AIQueueHandle.h"
 #include "utils/Singleton.h"
 #include "utils/FuzzyBool.h"
 #include "utils/AISignals.h"
@@ -59,17 +59,6 @@ class FuzzyCondition : public FuzzyBool
 
 namespace evio {
 
-class EventLoop;
-
-// Usage:
-//
-//   {
-//     EventLoop event_loop(handler);
-//     ...
-//     event_loop.join();       // This blocks in the destructor of event_loop until the event loop did exit.
-//                              // Therefore, do not create other objects in this scope that are needed for
-//                              // this to work!
-//   }
 class EventLoopThread : public Singleton<EventLoopThread>
 {
   // This is a singleton.
@@ -183,21 +172,6 @@ class EventLoopThread : public Singleton<EventLoopThread>
     if (AI_UNLIKELY(m_needs_deletion_list.load(std::memory_order_relaxed)))
       flush_need_deletion();
   }
-};
-
-class EventLoop
-{
- private:
-  bool m_normal_exit;
-
- public:
-  EventLoop(AIQueueHandle handler);
-  ~EventLoop();
-
- // Call this immediately before the EventLoop leaves scope in order
- // to make the EventLoopThread *finish* what it was doing before terminating.
- // Leaving the scope by exception (without calling join()) then will force the EventLoop to terminate abruptly.
- void join() { m_normal_exit = true; }
 };
 
 } // namespace evio
