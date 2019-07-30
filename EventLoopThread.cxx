@@ -203,8 +203,7 @@ void EventLoopThread::main()
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLOUT);
                 }
               }
-              while (need_allow_deletion--)
-                device->allow_deletion();
+              device->allow_deletion(need_allow_deletion);
               return false;
             });
           }
@@ -388,16 +387,14 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
           queue_access.move_in([device](){
               int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->read_event);
-              while (need_allow_deletion--)
-                device->allow_deletion();
+              device->allow_deletion(need_allow_deletion);
               return false;
           });
         else // active_flag == FileDescriptorFlags::FDS_W_ACTIVE
           queue_access.move_in([device](){
               int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->write_event);
-              while (need_allow_deletion--)
-                device->allow_deletion();
+              device->allow_deletion(need_allow_deletion);
               return false;
           });
       }
@@ -437,9 +434,9 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
     if (needs_adding)
     {
       // Increment ref count to stop device from being deleted while being active.
-      // Object is kept alive until a call to allow_deletion(), which will be caused automatically
+      // Object is kept alive until a call to allow_deletion(), which will be indirectly caused automatically
       // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
-      // which also called InputDevice::remove_input_device()). See NAD.h.
+      // which also calls InputDevice::remove_input_device).
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
       Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
     }

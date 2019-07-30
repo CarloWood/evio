@@ -139,7 +139,7 @@ void InputDevice::enable_input_device()
     while (*disable_release_w > 0)
     {
       --*disable_release_w;
-      allow_deletion();
+      allow_deletion(1);
     }
   }
 }
@@ -176,10 +176,10 @@ NAD_DECL(InputDevice::close_input_device)
       // Remove any pending disable, if any (see the code in enable_input_device).
       if (state_w->m_flags.is_r_disabled())
       {
-        state_w->m_flags.unset_r_disabled();
-        disable_release_t::wat disable_release_w(m_disable_release);
-        need_allow_deletion += *disable_release_w;
-        *disable_release_w = 0;
+        state_w->m_flags.unset_w_disabled();
+        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
+        if (*disable_is_flushing_w)
+          state_w->m_flags.set_w_flushing();
       }
       // Mark the device as dead when it has no longer an open file descriptor.
       if (!state_w->m_flags.is_open())

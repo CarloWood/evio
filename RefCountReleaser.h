@@ -49,7 +49,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     if (m_ptr)
     {
       // Cancel the call to inhibit_deletion().
-      m_ptr->allow_deletion();
+      m_ptr->allow_deletion(1);
     }
     m_ptr = nullptr;
   }
@@ -102,8 +102,8 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     {
       ASSERT(m_ptr == ptr);
       ASSERT(m_ptr->unique().is_momentary_false());
-      // Cancel a call to inhibit_deletion().
-      m_ptr->allow_deletion();
+      // Cancel one call to inhibit_deletion().
+      m_ptr->allow_deletion(1);
     }
   }
   void operator=(FileDescriptorBase* ptr)

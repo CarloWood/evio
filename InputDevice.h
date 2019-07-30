@@ -100,8 +100,8 @@ class InputDevice : public virtual FileDescriptor
   utils::VTPtr<InputDevice> VT_ptr;
 
  private:
-  using disable_release_t = aithreadsafe::Wrapper<int, aithreadsafe::policy::Primitive<std::mutex>>;
-  disable_release_t m_disable_release;
+  using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
+  disable_is_flushing_t m_disable_is_flushing;
 #ifdef DEBUGDEVICESTATS
   size_t m_received_bytes;
 #endif

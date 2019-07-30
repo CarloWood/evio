@@ -383,7 +383,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   // Overload intrusive_ptr_release for FileDescriptorBase (as opposed to AIRefCount).
   // This is a bit dangerous: make sure you never cast a FileDescriptorBase to an AIRefCount.
   friend void intrusive_ptr_release(FileDescriptorBase const* ptr);
-  void allow_deletion() const;
+  void allow_deletion(int count) const;
 
  protected:
   alignas(cacheline_size_c) state_t m_state;    // Mutex protected state of this FileDescriptor.

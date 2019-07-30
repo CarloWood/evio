@@ -128,7 +128,7 @@ NAD_DECL_PUBLIC(OutputDevice::flush_output_device)
 //inline
 bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  // Don't call this function when the device is 'flushing', instead call close_output_device(condition).
+  // Don't call this function when the device is 'flushing', instead call stop_output_device(condition).
   ASSERT(!state_w->m_flags.is_w_flushing());
   return EventLoopThread::instance().stop_if(state_w, condition, this);
 }
@@ -136,7 +136,7 @@ bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, 
 //inline
 void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 {
-  // Don't call this function when the device is 'flushing', instead call close_output_device().
+  // Don't call this function when the device is 'flushing', instead call close_output_device.
   ASSERT(!state_w->m_flags.is_w_flushing());
   EventLoopThread::instance().stop(state_w, this);
 }
@@ -179,21 +179,21 @@ NAD_DECL_BOOL(OutputDevice::stop_output_device, utils::FuzzyCondition const& con
 
 void OutputDevice::disable_output_device()
 {
-  bool need_close = false;
+  bool is_flushing = false;
   {
     state_t::wat state_w(m_state);
     if (!state_w->m_flags.is_w_disabled())
     {
       state_w->m_flags.set_w_disabled();
-      need_close = state_w->m_flags.is_w_flushing();
-      if (!need_close)
-        stop_not_flushing_output_device(state_w);
+      is_flushing = state_w->m_flags.is_w_flushing();
+      if (is_flushing)
+      {
+        state_w->m_flags.unset_w_flushing();
+        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
+        *disable_is_flushing_w = true;
+      }
+      stop_not_flushing_output_device(state_w);
     }
-  }
-  if (need_close)
-  {
-    disable_release_t::wat disable_release_w(m_disable_release);
-    close_output_device(*disable_release_w);
   }
 }
 
@@ -205,17 +205,12 @@ void OutputDevice::enable_output_device()
     state_t::wat state_w(m_state);
     was_disabled = state_w->m_flags.is_w_disabled();
     state_w->m_flags.unset_w_disabled();
+    disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
+    if (*disable_is_flushing_w)
+      state_w->m_flags.set_w_flushing();
   }
   if (was_disabled)
-  {
     restart_if_non_active();
-    disable_release_t::wat disable_release_w(m_disable_release);
-    while (*disable_release_w > 0)
-    {
-      --*disable_release_w;
-      allow_deletion();
-    }
-  }
 }
 
 NAD_DECL(OutputDevice::close_output_device)
@@ -248,13 +243,13 @@ NAD_DECL(OutputDevice::close_output_device)
         Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
         Dout(dc::finish, err);
       }
-      // Remove any pending disable (see the code in close_output_device).
+      // Remove any pending disable, if any (see the code in enable_output_device).
       if (state_w->m_flags.is_w_disabled())
       {
         state_w->m_flags.unset_w_disabled();
-        disable_release_t::wat disable_release_w(m_disable_release);
-        need_allow_deletion += *disable_release_w;
-        *disable_release_w = 0;
+        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
+        if (*disable_is_flushing_w)
+          state_w->m_flags.set_w_flushing();
       }
       // Mark the device as dead when it has no longer an open file descriptor.
       if (!state_w->m_flags.is_open())

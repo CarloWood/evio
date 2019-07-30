@@ -231,11 +231,11 @@ void intrusive_ptr_release(FileDescriptorBase const* ptr)
   }
 }
 
-void FileDescriptorBase::allow_deletion() const
+void FileDescriptorBase::allow_deletion(int count) const
 {
-  int count = AIRefCount::allow_deletion(true);
-  Dout(dc::io, "Decremented ref count of device " << this << " to " << (count - 1));
-  if (count == 1)
+  int new_count = AIRefCount::allow_deletion(true, count);
+  Dout(dc::io, "Decremented ref count of device " << this << " to " << (new_count - count));
+  if (new_count == 1)
     EventLoopThread::instance().add_needs_deletion(this);
 }
 
