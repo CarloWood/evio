@@ -81,7 +81,8 @@
   do { \
     int need_allow_deletion = 0; \
     funcname(need_allow_deletion, ## __VA_ARGS__); \
-    while(need_allow_deletion--) nad_rcr.add(this); \
+    if (need_allow_deletion > 0) nad_rcr.add(this); \
+    if (need_allow_deletion > 1) allow_deletion(need_allow_deletion - 1); \
   } while(0)
 #define NAD_PUBLIC_END return nad_rcr;
 

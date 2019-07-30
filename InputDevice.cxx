@@ -134,13 +134,6 @@ void InputDevice::enable_input_device()
     // If the device was started while it was disabled, restart it now.
     if (state_w->m_flags.is_readable())
       start_input_device(state_w);
-    // Call the delayed allow_deletion() if the device was stopped when calling disable_input_device().
-    disable_release_t::wat disable_release_w(m_disable_release);
-    while (*disable_release_w > 0)
-    {
-      --*disable_release_w;
-      allow_deletion(1);
-    }
   }
 }
 
@@ -174,13 +167,7 @@ NAD_DECL(InputDevice::close_input_device)
         Dout(dc::finish, err);
       }
       // Remove any pending disable, if any (see the code in enable_input_device).
-      if (state_w->m_flags.is_r_disabled())
-      {
-        state_w->m_flags.unset_w_disabled();
-        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
-        if (*disable_is_flushing_w)
-          state_w->m_flags.set_w_flushing();
-      }
+      state_w->m_flags.unset_r_disabled();
       // Mark the device as dead when it has no longer an open file descriptor.
       if (!state_w->m_flags.is_open())
       {
