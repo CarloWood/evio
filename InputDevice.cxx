@@ -51,9 +51,9 @@ InputDevice::~InputDevice()
   }
   if (is_r_open)
   {
-    int need_allow_deletion = 0;
-    close_input_device(need_allow_deletion);       // This will not delete the object (again) because it isn't active.
-    ASSERT(need_allow_deletion == 0);
+    int allow_deletion_count = 0;
+    close_input_device(allow_deletion_count);       // This will not delete the object (again) because it isn't active.
+    ASSERT(allow_deletion_count == 0);
   }
   if (m_ibuffer)
   {
@@ -96,7 +96,7 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
 
 NAD_DECL(InputDevice::remove_input_device, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::remove_input_device(" NAD_DoutEntering_ARG0 "{" << *state_w << "}) [" << this << ']');
+  DoutEntering(dc::evio, "InputDevice::remove_input_device({" << allow_deletion_count << "}, {" << *state_w << "}) [" << this << ']');
   NAD_CALL(EventLoopThread::instance().remove, state_w, this);
 }
 
@@ -139,7 +139,7 @@ void InputDevice::enable_input_device()
 
 NAD_DECL(InputDevice::close_input_device)
 {
-  DoutEntering(dc::evio, "InputDevice::close_input_device(" NAD_DoutEntering_ARG ")"
+  DoutEntering(dc::evio, "InputDevice::close_input_device({" << allow_deletion_count << "})"
 #ifdef DEBUGDEVICESTATS
       " [received_bytes = " << m_received_bytes << "]"
 #endif
@@ -182,7 +182,7 @@ NAD_DECL(InputDevice::close_input_device)
 
 NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 {
-  DoutEntering(dc::evio, "InputDevice::read_from_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
   ssize_t space = self->m_ibuffer->dev2buf_contiguous();
 
   for (;;)
@@ -250,12 +250,12 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
       " [" << self << ']');
 
     // The data is now in the buffer. This is where we become the consumer thread.
-    int prev_need_allow_deletion = need_allow_deletion;
+    int prev_allow_deletion_count = allow_deletion_count;
     NAD_CALL(self->data_received, new_data, rlen);
 
-    if (AI_UNLIKELY(need_allow_deletion > prev_need_allow_deletion))
+    if (AI_UNLIKELY(allow_deletion_count > prev_allow_deletion_count))
     {
-      Dout(dc::evio, "Stopping with reading because data_received incremented need_allow_deletion.");
+      Dout(dc::evio, "Stopping with reading because data_received incremented allow_deletion_count.");
       break;    // We were closed.
     }
 
@@ -280,18 +280,18 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 
 NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::hup, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::hup(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
 NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::exceptional, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::exceptional(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::exceptional({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
 // BRWT.
 NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "InputDevice::data_received(" NAD_DoutEntering_ARG0 "self, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
+  DoutEntering(dc::io, "InputDevice::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
 
   // This function is both the Get Thread and the Put Thread; meaning that no other
   // thread should be accessing this buffer by either reading from it or writing to

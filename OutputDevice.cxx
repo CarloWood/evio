@@ -54,9 +54,9 @@ OutputDevice::~OutputDevice()
   }
   if (is_w_open)
   {
-    int need_allow_deletion = 0;
-    close_output_device(need_allow_deletion);    // This will not delete the object (again) because it isn't added.
-    ASSERT(need_allow_deletion == 0);
+    int allow_deletion_count = 0;
+    close_output_device(allow_deletion_count);    // This will not delete the object (again) because it isn't added.
+    ASSERT(allow_deletion_count == 0);
   }
   if (m_obuffer)
   {
@@ -104,7 +104,7 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
 
 NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::remove_output_device(" NAD_DoutEntering_ARG0 << *state_w << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::remove_output_device({" << allow_deletion_count << "}, " << *state_w << ") [" << this << ']');
   NAD_CALL(EventLoopThread::instance().remove, state_w, this);
   state_w->m_flags.unset_w_flushing();
 }
@@ -215,7 +215,7 @@ void OutputDevice::enable_output_device()
 
 NAD_DECL(OutputDevice::close_output_device)
 {
-  DoutEntering(dc::io, "OutputDevice::close_output_device(" NAD_DoutEntering_ARG ")"
+  DoutEntering(dc::io, "OutputDevice::close_output_device({" << allow_deletion_count << "})"
 #ifdef DEBUGDEVICESTATS
       " [sent_bytes = " << m_sent_bytes << "]"
 #endif
@@ -267,7 +267,7 @@ NAD_DECL(OutputDevice::close_output_device)
 // BRT
 NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
 {
-  DoutEntering(dc::io, "OutputDevice::VT_impl::write_to_fd(" NAD_DoutEntering_ARG0 << fd << ") [" << self << ']');
+  DoutEntering(dc::io, "OutputDevice::VT_impl::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
   OutputBuffer* const obuffer = self->m_obuffer;
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {

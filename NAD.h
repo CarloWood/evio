@@ -63,15 +63,12 @@
 
 // (Private/)Protected interface
 
-#define NAD_DECL(funcname, ...) void funcname(int& need_allow_deletion, ## __VA_ARGS__)
-#define NAD_DECL_BOOL(funcname, ...) bool funcname(int& need_allow_deletion, ## __VA_ARGS__)
-#define NAD_DECL_UNUSED_ARG(funcname, ...) void funcname(int& UNUSED_ARG(need_allow_deletion), ## __VA_ARGS__)
-#define NAD_DECL_CWDEBUG_ONLY(funcname, ...) void funcname(int& CWDEBUG_ONLY(need_allow_deletion), ## __VA_ARGS__)
+#define NAD_DECL(funcname, ...) void funcname(int& allow_deletion_count, ## __VA_ARGS__)
+#define NAD_DECL_BOOL(funcname, ...) bool funcname(int& allow_deletion_count, ## __VA_ARGS__)
+#define NAD_DECL_UNUSED_ARG(funcname, ...) void funcname(int& UNUSED_ARG(allow_deletion_count), ## __VA_ARGS__)
+#define NAD_DECL_CWDEBUG_ONLY(funcname, ...) void funcname(int& CWDEBUG_ONLY(allow_deletion_count), ## __VA_ARGS__)
 
-#define NAD_CALL(funcname, ...) funcname(need_allow_deletion, ## __VA_ARGS__)
-
-#define NAD_DoutEntering_ARG0 "{" << need_allow_deletion << "}, "
-#define NAD_DoutEntering_ARG "{" << need_allow_deletion << "}"
+#define NAD_CALL(funcname, ...) funcname(allow_deletion_count, ## __VA_ARGS__)
 
 // Public interface
 
@@ -79,10 +76,10 @@
 #define NAD_PUBLIC_BEGIN RefCountReleaser nad_rcr;
 #define NAD_CALL_FROM_PUBLIC(funcname, ...) \
   do { \
-    int need_allow_deletion = 0; \
-    funcname(need_allow_deletion, ## __VA_ARGS__); \
-    if (need_allow_deletion > 0) nad_rcr.add(this); \
-    if (need_allow_deletion > 1) allow_deletion(need_allow_deletion - 1); \
+    int allow_deletion_count = 0; \
+    funcname(allow_deletion_count, ## __VA_ARGS__); \
+    if (allow_deletion_count > 0) nad_rcr.add(this); \
+    if (allow_deletion_count > 1) allow_deletion(allow_deletion_count - 1); \
   } while(0)
 #define NAD_PUBLIC_END return nad_rcr;
 

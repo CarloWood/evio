@@ -173,18 +173,18 @@ void EventLoopThread::main()
             Dout(dc::evio, "Queuing I/O event " << event << " for " << device << " in thread pool queue " << m_handler);
             device->inhibit_deletion();
             queue_access.move_in([device, events = event.events, epoll_fd = m_epoll_fd](){
-              int need_allow_deletion = 1;      // Balance with the call to inhibit_deletion() above.
+              int allow_deletion_count = 1;      // Balance with the call to inhibit_deletion() above.
               if (AI_UNLIKELY(events & ~(EPOLLIN|EPOLLOUT)))
               {
                 if ((events & EPOLLHUP))
                 {
-                  device->hup_event(need_allow_deletion);
+                  device->hup_event(allow_deletion_count);
                   device->close();      // Leaving this alive would cause a flood of events.
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLHUP);
                 }
                 else if ((events & EPOLLERR))
                 {
-                  device->exceptional_event(need_allow_deletion);
+                  device->exceptional_event(allow_deletion_count);
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLERR);
                 }
                 else
@@ -194,16 +194,16 @@ void EventLoopThread::main()
               {
                 if ((events & EPOLLIN))
                 {
-                  device->read_event(need_allow_deletion);
+                  device->read_event(allow_deletion_count);
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLIN);
                 }
                 if ((events & EPOLLOUT))
                 {
-                  device->write_event(need_allow_deletion);
+                  device->write_event(allow_deletion_count);
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLOUT);
                 }
               }
-              device->allow_deletion(need_allow_deletion);
+              device->allow_deletion(allow_deletion_count);
               return false;
             });
           }
@@ -385,16 +385,16 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
         device->inhibit_deletion();
         if (active_flag == FileDescriptorFlags::FDS_R_ACTIVE)
           queue_access.move_in([device](){
-              int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
+              int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->read_event);
-              device->allow_deletion(need_allow_deletion);
+              device->allow_deletion(allow_deletion_count);
               return false;
           });
         else // active_flag == FileDescriptorFlags::FDS_W_ACTIVE
           queue_access.move_in([device](){
-              int need_allow_deletion = 1;      // The balance the call to inhibit_deletion above.
+              int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
               NAD_CALL(device->write_event);
-              device->allow_deletion(need_allow_deletion);
+              device->allow_deletion(allow_deletion_count);
               return false;
           });
       }
@@ -532,7 +532,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
 
 NAD_DECL(EventLoopThread::remove, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
-  DoutEntering(dc::evio, "EventLoopThread::remove({" NAD_DoutEntering_ARG0 << *state_w << "}, " << active_flag << ", " << device << ")");
+  DoutEntering(dc::evio, "EventLoopThread::remove({" << allow_deletion_count << "}, {" << *state_w << "}, " << active_flag << ", " << device << ")");
   bool needs_removal = state_w->m_flags.test_and_clear_added(active_flag) && !state_w->m_flags.is_added();
   bool cleared_active = state_w->m_flags.test_and_clear_active(active_flag);
   if (cleared_active || needs_removal)
@@ -541,7 +541,7 @@ NAD_DECL(EventLoopThread::remove, FileDescriptor::state_t::wat const& state_w, F
     {
       device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_removal);
       if (needs_removal)
-        ++need_allow_deletion;
+        ++allow_deletion_count;
     }
   }
   if (cleared_active && !state_w->m_flags.test_inferior(active_flag))

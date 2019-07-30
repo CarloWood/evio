@@ -181,14 +181,14 @@ NAD_DECL(Socket::VT_impl::write_to_fd, OutputDevice* _self, int fd)
 
 NAD_DECL_CWDEBUG_ONLY(Socket::VT_impl::connected, Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
-  DoutEntering(dc::evio, "Socket::connected(" NAD_DoutEntering_ARG0 << success << ") [" << self << "]");
+  DoutEntering(dc::evio, "Socket::connected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
   // Clone VT and override to implement this.
 }
 
 NAD_DECL(Socket::VT_impl::read_returned_zero, InputDevice* _self)
 {
   Socket* self = static_cast<Socket*>(_self);
-  DoutEntering(dc::evio, "Socket::read_returned_zero(" NAD_DoutEntering_ARG ") [" << self << "]");
+  DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << self << "]");
   self->m_connected_flags |= is_disconnected;
   NAD_CALL(self->close);
   NAD_CALL(self->disconnected, true);     // Clean termination.
@@ -197,7 +197,7 @@ NAD_DECL(Socket::VT_impl::read_returned_zero, InputDevice* _self)
 NAD_DECL(Socket::VT_impl::read_error, InputDevice* _self, int CWDEBUG_ONLY(err))
 {
   Socket* self = static_cast<Socket*>(_self);
-  DoutEntering(dc::evio, "Socket::read_error(" NAD_DoutEntering_ARG0 << err << ") [" << self << "]");
+  DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << self << "]");
   NAD_CALL(self->close);
   if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
     NAD_CALL(self->connected, false);     // Signal connect failure.
@@ -210,7 +210,7 @@ NAD_DECL(Socket::VT_impl::read_error, InputDevice* _self, int CWDEBUG_ONLY(err))
 
 NAD_DECL_CWDEBUG_ONLY(Socket::VT_impl::disconnected, Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
-  DoutEntering(dc::evio, "Socket::disconnected(" NAD_DoutEntering_ARG0 << success << ") [" << self << "]");
+  DoutEntering(dc::evio, "Socket::disconnected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
   // Clone VT and override to implement this.
 }
 

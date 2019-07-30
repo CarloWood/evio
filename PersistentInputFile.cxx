@@ -28,11 +28,11 @@ namespace evio {
 
 NAD_DECL(PersistentInputFile::closed)
 {
-  DoutEntering(dc::evio, "PersistentInputFile::closed(" NAD_DoutEntering_ARG ") [" << this << ']');
+  DoutEntering(dc::evio, "PersistentInputFile::closed({" << allow_deletion_count << "}) [" << this << ']');
   if (is_watched())
   {
     rm_watch();
-    ++need_allow_deletion;      // It is now no longer needed to keep this object alive, see below.
+    ++allow_deletion_count;     // It is now no longer needed to keep this object alive, see below.
   }
 }
 
@@ -40,7 +40,7 @@ NAD_DECL(PersistentInputFile::closed)
 NAD_DECL_CWDEBUG_ONLY(PersistentInputFile::VT_impl::read_returned_zero, InputDevice* _self)
 {
   PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
-  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero(" NAD_DoutEntering_ARG ") [" << self << ']');
+  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero({" << allow_deletion_count << "}) [" << self << ']');
   {
     // Lock m_state and then make sure that no new data was appended to the file in the meantime.
     state_t::wat state_w(self->m_state);
