@@ -111,7 +111,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void handle_regular_file(FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   void start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   void stop(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
-  NAD_DECL(remove, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
+  void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
   bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
 
@@ -120,8 +120,8 @@ class EventLoopThread : public Singleton<EventLoopThread>
   [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { start(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
   [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { stop(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
   [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { stop(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] NAD_DECL(remove, FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { NAD_CALL(remove, state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] NAD_DECL(remove, FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { NAD_CALL(remove, state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
   [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
   [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
   [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }

@@ -102,17 +102,17 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
   return EventLoopThread::instance().start_if(state_w, condition, this);
 }
 
-NAD_DECL(OutputDevice::remove_output_device, state_t::wat const& state_w)
+void OutputDevice::remove_output_device(int& allow_deletion_count, state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "OutputDevice::remove_output_device({" << allow_deletion_count << "}, " << *state_w << ") [" << this << ']');
-  NAD_CALL(EventLoopThread::instance().remove, state_w, this);
+  EventLoopThread::instance().remove(allow_deletion_count, state_w, this);
   state_w->m_flags.unset_w_flushing();
 }
 
-NAD_DECL_PUBLIC(OutputDevice::flush_output_device)
+RefCountReleaser OutputDevice::flush_output_device()
 {
   DoutEntering(dc::evio, "OutputDevice::flush_output_device() [" << this << ']');
-  NAD_PUBLIC_BEGIN;
+  RefCountReleaser nad_rcr;
   bool need_close;
   {
     state_t::wat state_w(m_state);
@@ -121,8 +121,15 @@ NAD_DECL_PUBLIC(OutputDevice::flush_output_device)
       state_w->m_flags.set_w_flushing();
   }
   if (need_close)
-    NAD_CALL_FROM_PUBLIC(close_output_device);
-  NAD_PUBLIC_END;
+  {
+    int allow_deletion_count = 0;
+    close_output_device(allow_deletion_count);
+    if (allow_deletion_count > 0)
+      nad_rcr = this;
+    if (allow_deletion_count > 1)
+      allow_deletion(allow_deletion_count - 1);
+  }
+  return nad_rcr;
 }
 
 //inline
@@ -143,7 +150,7 @@ void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 
 // Read and write threads; possibly other threads.
 // This function is thread-safe.
-NAD_DECL(OutputDevice::stop_output_device)
+void OutputDevice::stop_output_device(int& allow_deletion_count)
 {
   bool need_close = false;
   {
@@ -153,11 +160,11 @@ NAD_DECL(OutputDevice::stop_output_device)
       stop_not_flushing_output_device(state_w);
   }
   if (need_close)
-    NAD_CALL(close_output_device);
+    close_output_device(allow_deletion_count);
 }
 
 // GetThread only.
-NAD_DECL_BOOL(OutputDevice::stop_output_device, utils::FuzzyCondition const& condition)
+bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition)
 {
   bool success;
   bool need_close = false;
@@ -173,7 +180,7 @@ NAD_DECL_BOOL(OutputDevice::stop_output_device, utils::FuzzyCondition const& con
     }
   }
   if (need_close)
-    NAD_CALL(close_output_device);
+    close_output_device(allow_deletion_count);
   return success;
 }
 
@@ -213,7 +220,7 @@ void OutputDevice::enable_output_device()
     restart_if_non_active();
 }
 
-NAD_DECL(OutputDevice::close_output_device)
+void OutputDevice::close_output_device(int& allow_deletion_count)
 {
   DoutEntering(dc::io, "OutputDevice::close_output_device({" << allow_deletion_count << "})"
 #ifdef DEBUGDEVICESTATS
@@ -231,7 +238,7 @@ NAD_DECL(OutputDevice::close_output_device)
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
 #endif
-      NAD_CALL(remove_output_device, state_w);
+      remove_output_device(allow_deletion_count, state_w);
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //
@@ -260,12 +267,12 @@ NAD_DECL(OutputDevice::close_output_device)
     }
   }
   if (need_call_to_closed)
-    NAD_CALL(closed);
+    closed(allow_deletion_count);
 }
 
 // Write `m_obuffer' to fd.
 // BRT
-NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
+void OutputDevice::VT_impl::write_to_fd(int& allow_deletion_count, OutputDevice* self, int fd)
 {
   DoutEntering(dc::io, "OutputDevice::VT_impl::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
   OutputBuffer* const obuffer = self->m_obuffer;
@@ -300,7 +307,7 @@ NAD_DECL(OutputDevice::VT_impl::write_to_fd, OutputDevice* self, int fd)
       if (AI_UNLIKELY(condition_empty_buffer.is_momentary_false()))
         continue;
       // If during the cannonical test the buffer isn't empty anymore, continue reading.
-      if (AI_UNLIKELY(!NAD_CALL(self->stop_output_device, condition_empty_buffer)))
+      if (AI_UNLIKELY(!self->stop_output_device(allow_deletion_count, condition_empty_buffer)))
         continue;
       return;
     }
@@ -354,7 +361,7 @@ try_again_write1:
         return;
       }
 #endif
-      NAD_CALL(self->write_error, err);
+      self->write_error(allow_deletion_count, err);
       return;
     }
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);

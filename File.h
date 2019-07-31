@@ -96,12 +96,17 @@ class File : public InputDevice, public OutputDevice
   void open(std::string const& filename, std::ios_base::openmode mode, int prot = 0664, int additional_posix_modes = O_CLOEXEC);
 
   // Call the `close' of the base class, which does the real work.
-  NAD_DECL_PUBLIC(close)
+  RefCountReleaser close()
   {
-    NAD_PUBLIC_BEGIN;
+    RefCountReleaser nad_rcr;
     m_filename.clear();
-    NAD_CALL_FROM_PUBLIC(FileDescriptor::close);
-    NAD_PUBLIC_END;
+    int allow_deletion_count = 0;
+    FileDescriptor::close(allow_deletion_count);
+    if (allow_deletion_count > 0)
+      nad_rcr = this;
+    if (allow_deletion_count > 1)
+      allow_deletion(allow_deletion_count - 1);
+    return nad_rcr;
   }
 
   //---------------------------------------------------------------------------

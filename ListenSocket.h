@@ -105,7 +105,7 @@ class ListenSocketDevice : public InputDevice
     // Called when the listen socket is ready to accept a new client.
     //
     // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
-    static NAD_DECL(read_from_fd, InputDevice* self, int fd);                   // override
+    static void read_from_fd(int& allow_deletion_count, InputDevice* self, int fd); // override
 
     // This method is called when we are possibly out of filedescriptors.
     // It should return `true' when this is true, and can optionally take

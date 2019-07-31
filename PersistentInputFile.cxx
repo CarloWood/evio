@@ -26,7 +26,7 @@
 
 namespace evio {
 
-NAD_DECL(PersistentInputFile::closed)
+void PersistentInputFile::closed(int& allow_deletion_count)
 {
   DoutEntering(dc::evio, "PersistentInputFile::closed({" << allow_deletion_count << "}) [" << this << ']');
   if (is_watched())
@@ -37,7 +37,7 @@ NAD_DECL(PersistentInputFile::closed)
 }
 
 // Read thread.
-NAD_DECL_CWDEBUG_ONLY(PersistentInputFile::VT_impl::read_returned_zero, InputDevice* _self)
+void PersistentInputFile::VT_impl::read_returned_zero(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* _self)
 {
   PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
   DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero({" << allow_deletion_count << "}) [" << self << ']');

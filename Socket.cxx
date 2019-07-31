@@ -132,7 +132,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
   }
 }
 
-NAD_DECL(Socket::VT_impl::read_from_fd, InputDevice* _self, int fd)
+void Socket::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* _self, int fd)
 {
   Socket* self = static_cast<Socket*>(_self);
   // This is false when signal_connected is set, because in that case we monitor
@@ -143,11 +143,11 @@ NAD_DECL(Socket::VT_impl::read_from_fd, InputDevice* _self, int fd)
     self->m_connected_flags |= is_connected;
   }
   // Call base class implementation.
-  NAD_CALL(InputDevice::VT_impl::read_from_fd, _self, fd);
+  InputDevice::VT_impl::read_from_fd(allow_deletion_count, _self, fd);
 }
 
 // Read thread.
-NAD_DECL(Socket::VT_impl::write_to_fd, OutputDevice* _self, int fd)
+void Socket::VT_impl::write_to_fd(int& allow_deletion_count, OutputDevice* _self, int fd)
 {
   Socket* self = static_cast<Socket*>(_self);
   if (AI_UNLIKELY(!(self->m_connected_flags & is_connected)))
@@ -156,7 +156,7 @@ NAD_DECL(Socket::VT_impl::write_to_fd, OutputDevice* _self, int fd)
     self->m_connected_flags |= is_connected;
     if ((self->m_connected_flags & signal_connected))
     {
-      NAD_CALL(self->connected, true);    // Signal successful connect.
+      self->connected(allow_deletion_count, true); // Signal successful connect.
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
       if (self->m_obuffer)
       {
@@ -164,51 +164,51 @@ NAD_DECL(Socket::VT_impl::write_to_fd, OutputDevice* _self, int fd)
             return m_obuffer->StreamBufConsumer::buffer_empty();
         });
         if (condition_empty_buffer.is_momentary_true() &&
-            NAD_CALL(self->stop_output_device, condition_empty_buffer))
+            self->stop_output_device(allow_deletion_count, condition_empty_buffer))
           return;
       }
       else
       {
         Dout(dc::warning, "Socket::VT_impl::write_to_fd: Closing output device because it has no output buffer [" << self << "]");
-        NAD_CALL(self->stop_output_device);
+        self->stop_output_device(allow_deletion_count);
         return;
       }
     }
   }
   // Call base class implementation.
-  NAD_CALL(OutputDevice::VT_impl::write_to_fd, _self, fd);
+  OutputDevice::VT_impl::write_to_fd(allow_deletion_count, _self, fd);
 }
 
-NAD_DECL_CWDEBUG_ONLY(Socket::VT_impl::connected, Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
+void Socket::VT_impl::connected(int& CWDEBUG_ONLY(allow_deletion_count), Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
   DoutEntering(dc::evio, "Socket::connected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
   // Clone VT and override to implement this.
 }
 
-NAD_DECL(Socket::VT_impl::read_returned_zero, InputDevice* _self)
+void Socket::VT_impl::read_returned_zero(int& allow_deletion_count, InputDevice* _self)
 {
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << self << "]");
   self->m_connected_flags |= is_disconnected;
-  NAD_CALL(self->close);
-  NAD_CALL(self->disconnected, true);     // Clean termination.
+  self->close(allow_deletion_count);
+  self->disconnected(allow_deletion_count, true); // Clean termination.
 }
 
-NAD_DECL(Socket::VT_impl::read_error, InputDevice* _self, int CWDEBUG_ONLY(err))
+void Socket::VT_impl::read_error(int& allow_deletion_count, InputDevice* _self, int CWDEBUG_ONLY(err))
 {
   Socket* self = static_cast<Socket*>(_self);
   DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << self << "]");
-  NAD_CALL(self->close);
+  self->close(allow_deletion_count);
   if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
-    NAD_CALL(self->connected, false);     // Signal connect failure.
+    self->connected(allow_deletion_count, false); // Signal connect failure.
   if ((self->m_connected_flags & is_connected))
   {
     self->m_connected_flags |= is_disconnected;
-    NAD_CALL(self->disconnected, false);  // Unclean termination.
+    self->disconnected(allow_deletion_count, false); // Unclean termination.
   }
 }
 
-NAD_DECL_CWDEBUG_ONLY(Socket::VT_impl::disconnected, Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
+void Socket::VT_impl::disconnected(int& CWDEBUG_ONLY(allow_deletion_count), Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
 {
   DoutEntering(dc::evio, "Socket::disconnected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
   // Clone VT and override to implement this.

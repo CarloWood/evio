@@ -43,8 +43,8 @@ class OutputDevice : public virtual FileDescriptor
   struct VT_type
   {
     void* _output_user_data;    // Only use this after cloning a virtual table.
-    NAD_DECL((*_write_to_fd), OutputDevice*, int);
-    NAD_DECL((*_write_error), OutputDevice*, int);
+    void (*_write_to_fd)(int& allow_deletion_count, OutputDevice*, int);
+    void (*_write_error)(int& allow_deletion_count, OutputDevice*, int);
   };
 
   struct VT_impl
@@ -59,10 +59,10 @@ class OutputDevice : public virtual FileDescriptor
     // 5) write(2) returned EINTR caused by SIGPIPE.
     // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
     // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-    static NAD_DECL(write_to_fd, OutputDevice* self, int fd);
+    static void write_to_fd(int& allow_deletion_count, OutputDevice* self, int fd);
 
     // This default implementation `close's the object (which removes it).
-    static NAD_DECL(write_error, OutputDevice* self, int UNUSED_ARG(err)) { NAD_CALL(self->close); }
+    static void write_error(int& allow_deletion_count, OutputDevice* self, int UNUSED_ARG(err)) { self->close(allow_deletion_count); }
 
     // Virtual table of OutputDevice.
     static constexpr VT_type VT{
@@ -104,17 +104,17 @@ class OutputDevice : public virtual FileDescriptor
   friend class OutputDevicePtr;
   bool start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void start_output_device(state_t::wat const& state_w);
-  NAD_DECL_BOOL(stop_output_device, utils::FuzzyCondition const& condition);
-  NAD_DECL(stop_output_device);
+  bool stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition);
+  void stop_output_device(int& allow_deletion_count);
   [[gnu::always_inline]] inline bool stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   [[gnu::always_inline]] inline void stop_not_flushing_output_device(state_t::wat const& state_w);
 
-  NAD_DECL(remove_output_device, state_t::wat const& state_w);
+  void remove_output_device(int& allow_deletion_count, state_t::wat const& state_w);
   void disable_output_device();
   void enable_output_device();
 
   [[gnu::always_inline]] void start_output_device() { start_output_device(state_t::wat(m_state)); }
-  [[gnu::always_inline]] NAD_DECL(remove_output_device) { NAD_CALL(remove_output_device, state_t::wat(m_state)); }
+  [[gnu::always_inline]] void remove_output_device(int& allow_deletion_count) { remove_output_device(allow_deletion_count, state_t::wat(m_state)); }
 
  protected:
   OutputDevice();
@@ -184,12 +184,17 @@ class OutputDevice : public virtual FileDescriptor
     set_source(ptr, requested_minimum_block_size, 8 * StreamBuf::round_up_minimum_block_size(requested_minimum_block_size));
   }
 
-  NAD_DECL_PUBLIC(flush_output_device);
-  NAD_DECL_PUBLIC(close_output_device)
+  RefCountReleaser flush_output_device();
+  RefCountReleaser close_output_device()
   {
-    NAD_PUBLIC_BEGIN;
-    NAD_CALL_FROM_PUBLIC(close_output_device);
-    NAD_PUBLIC_END;
+    RefCountReleaser nad_rcr;
+    int allow_deletion_count = 0;
+    close_output_device(allow_deletion_count);
+    if (allow_deletion_count > 0)
+      nad_rcr = this;
+    if (allow_deletion_count > 1)
+      allow_deletion(allow_deletion_count - 1);
+    return nad_rcr;
   }
 
  protected:
@@ -206,11 +211,11 @@ class OutputDevice : public virtual FileDescriptor
 
   // Override base class virtual functions.
   void init_output_device(state_t::wat const& state_w) override;
-  NAD_DECL(close_output_device) override final;
-  NAD_DECL(write_event) override final { NAD_CALL(VT_ptr->_write_to_fd, this, m_fd); }
+  void close_output_device(int& allow_deletion_count) override final;
+  void write_event(int& allow_deletion_count) override final { VT_ptr->_write_to_fd(allow_deletion_count, this, m_fd); }
 
   // Events, called from VT_impl::write_to_fd.
-  NAD_DECL(write_error, int err) { NAD_CALL(VT_ptr->_write_error, this, err); }
+  void write_error(int& allow_deletion_count, int err) { VT_ptr->_write_error(allow_deletion_count, this, err); }
 };
 
 } // namespace evio

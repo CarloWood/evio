@@ -1038,7 +1038,7 @@ void StreamBufProducer::dump_stats() const
 
 void StreamBufConsumer::dump_stats() const
 {
-  std::cout << "m_number_of_calls_to_update_get_area = " << m_number_of_calls_to_update_get_area << std::endl;;
+  std::cout << "m_number_of_calls_to_update_get_area = " << m_number_of_calls_to_update_get_area << std::endl;
   std::cout << "m_number_of_get_area_resets = " << m_number_of_get_area_resets << std::endl;
   std::cout << "m_number_of_calls_to_store_last_gptr = " << m_number_of_calls_to_store_last_gptr << std::endl;
   std::cout << "m_number_of_calls_to_xsgetn_a = " << m_number_of_calls_to_xsgetn_a << std::endl;

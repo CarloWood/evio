@@ -495,22 +495,22 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
  private:
   // These are called from EventLoopThread::main().
   friend class EventLoopThread;
-  virtual NAD_DECL_UNUSED_ARG(read_event)
+  virtual void read_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
     DoutFatal(dc::core, "Calling FileDescriptorBase::read_event() on object [" << this << "] that isn't an InputDevice.");
   }
-  virtual NAD_DECL_UNUSED_ARG(write_event)
+  virtual void write_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
     DoutFatal(dc::core, "Calling FileDescriptorBase::write_event() on object [" << this << "] that isn't an OutputDevice.");
   }
-  virtual NAD_DECL_UNUSED_ARG(hup_event)
+  virtual void hup_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
     Dout(dc::warning, "Calling FileDescriptorBase::hup_event() on object [" << this << "] that isn't an InputDevice.");
   }
-  virtual NAD_DECL_UNUSED_ARG(exceptional_event)
+  virtual void exceptional_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
     Dout(dc::warning, "Calling FileDescriptorBase::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
@@ -564,45 +564,55 @@ class FileDescriptor : public FileDescriptorBase
 {
  protected:
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
-  virtual NAD_DECL_UNUSED_ARG(close_input_device) { }
-  virtual NAD_DECL_UNUSED_ARG(close_output_device) { }
+  virtual void close_input_device(int& UNUSED_ARG(allow_deletion_count)) { }
+  virtual void close_output_device(int& UNUSED_ARG(allow_deletion_count)) { }
 
   // Events.
   // The filedescriptor of this device was just closed.
   // If INTERNAL_FDS_DONT_CLOSE is set then the fd wasn't really closed, but this method is still called.
   // When we get here the object is also marked as FDS_DEAD.
-  virtual NAD_DECL_UNUSED_ARG(closed) { }
+  virtual void closed(int& UNUSED_ARG(allow_deletion_count)) { }
 
  public:
   using FileDescriptorBase::FileDescriptorBase;
 
-  NAD_DECL_PUBLIC(close_input_device)
+  RefCountReleaser close_input_device()
   {
-    NAD_PUBLIC_BEGIN;
-    NAD_CALL_FROM_PUBLIC(close_input_device);
-    NAD_PUBLIC_END;
+    RefCountReleaser nad_rcr;
+    int allow_deletion_count = 0;
+    close_input_device(allow_deletion_count);
+    if (allow_deletion_count > 0)
+      nad_rcr = this;
+    if (allow_deletion_count > 1)
+      allow_deletion(allow_deletion_count - 1);
+    return nad_rcr;
   }
 
-  NAD_DECL_PUBLIC(close_output_device)
+  RefCountReleaser close_output_device()
   {
-    NAD_PUBLIC_BEGIN;
-    NAD_CALL_FROM_PUBLIC(close_output_device);
-    NAD_PUBLIC_END;
+    RefCountReleaser nad_rcr;
+    int allow_deletion_count = 0;
+    close_output_device(allow_deletion_count);
+    if (allow_deletion_count > 0)
+      nad_rcr = this;
+    if (allow_deletion_count > 1)
+      allow_deletion(allow_deletion_count - 1);
+    return nad_rcr;
   }
 
-  NAD_DECL_PUBLIC(close)
+  RefCountReleaser close()
   {
-    NAD_PUBLIC_BEGIN;
-    NAD_CALL_PUBLIC(close_input_device);
-    NAD_CALL_PUBLIC(close_output_device);
-    NAD_PUBLIC_END;
+    RefCountReleaser nad_rcr;
+    nad_rcr += close_input_device();
+    nad_rcr += close_output_device();
+    return nad_rcr;
   }
 
   // Overload for internal (non-public) call.
-  NAD_DECL(close)
+  void close(int& allow_deletion_count)
   {
-    NAD_CALL(close_input_device);
-    NAD_CALL(close_output_device);
+    close_input_device(allow_deletion_count);
+    close_output_device(allow_deletion_count);
   }
 };
 

@@ -94,10 +94,10 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   EventLoopThread::instance().start(state_w, this);
 }
 
-NAD_DECL(InputDevice::remove_input_device, state_t::wat const& state_w)
+void InputDevice::remove_input_device(int& allow_deletion_count, state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "InputDevice::remove_input_device({" << allow_deletion_count << "}, {" << *state_w << "}) [" << this << ']');
-  NAD_CALL(EventLoopThread::instance().remove, state_w, this);
+  EventLoopThread::instance().remove(allow_deletion_count, state_w, this);
 }
 
 void InputDevice::stop_input_device(state_t::wat const& state_w)
@@ -137,7 +137,7 @@ void InputDevice::enable_input_device()
   }
 }
 
-NAD_DECL(InputDevice::close_input_device)
+void InputDevice::close_input_device(int& allow_deletion_count)
 {
   DoutEntering(dc::evio, "InputDevice::close_input_device({" << allow_deletion_count << "})"
 #ifdef DEBUGDEVICESTATS
@@ -154,7 +154,7 @@ NAD_DECL(InputDevice::close_input_device)
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << m_fd << ".");
 #endif
-      NAD_CALL(remove_input_device, state_w);
+      remove_input_device(allow_deletion_count, state_w);
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //
@@ -177,10 +177,10 @@ NAD_DECL(InputDevice::close_input_device)
     }
   }
   if (need_call_to_closed)
-    NAD_CALL(closed);
+    closed(allow_deletion_count);
 }
 
-NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
+void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* self, int fd)
 {
   DoutEntering(dc::evio, "InputDevice::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
   ssize_t space = self->m_ibuffer->dev2buf_contiguous();
@@ -213,7 +213,7 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
         if (err != EINTR)
         {
           if (err != EAGAIN && err != EWOULDBLOCK)
-            NAD_CALL(self->read_error, err);
+            self->read_error(allow_deletion_count, err);
           return;
         }
       }
@@ -225,7 +225,7 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
       try
       {
-        NAD_CALL(self->read_returned_zero);
+        self->read_returned_zero(allow_deletion_count);
         // In the case of a PersistentInputFile, read_returned_zero calls stop_input_device() and returns.
         // Therefore we must also return immediately from read_returned_zero, see above.
         return;
@@ -251,7 +251,7 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
 
     // The data is now in the buffer. This is where we become the consumer thread.
     int prev_allow_deletion_count = allow_deletion_count;
-    NAD_CALL(self->data_received, new_data, rlen);
+    self->data_received(allow_deletion_count, new_data, rlen);
 
     if (AI_UNLIKELY(allow_deletion_count > prev_allow_deletion_count))
     {
@@ -278,18 +278,18 @@ NAD_DECL(InputDevice::VT_impl::read_from_fd, InputDevice* self, int fd)
   }
 }
 
-NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::hup, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+void InputDevice::VT_impl::hup(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
-NAD_DECL_CWDEBUG_ONLY(InputDevice::VT_impl::exceptional, InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+void InputDevice::VT_impl::exceptional(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "InputDevice::exceptional({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
 // BRWT.
-NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new_data, size_t rlen)
+void InputDevice::VT_impl::data_received(int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "InputDevice::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
 
@@ -312,7 +312,7 @@ NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new
 
       if (self->m_ibuffer->is_contiguous(msg_len))
       {
-        NAD_CALL(input_decoder->decode, MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
+        input_decoder->decode(allow_deletion_count, MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
         self->m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -323,7 +323,7 @@ NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new
         MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        NAD_CALL(input_decoder->decode, MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        input_decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
@@ -346,7 +346,7 @@ NAD_DECL(InputDevice::VT_impl::data_received, InputDevice* self, char const* new
     {
       char* start = self->m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      NAD_CALL(input_decoder->decode, MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
+      input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
       self->m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(self->m_ibuffer->get_data_size() == rlen - len);

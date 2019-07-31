@@ -386,14 +386,14 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
         if (active_flag == FileDescriptorFlags::FDS_R_ACTIVE)
           queue_access.move_in([device](){
               int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
-              NAD_CALL(device->read_event);
+              device->read_event(allow_deletion_count);
               device->allow_deletion(allow_deletion_count);
               return false;
           });
         else // active_flag == FileDescriptorFlags::FDS_W_ACTIVE
           queue_access.move_in([device](){
               int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
-              NAD_CALL(device->write_event);
+              device->write_event(allow_deletion_count);
               device->allow_deletion(allow_deletion_count);
               return false;
           });
@@ -530,7 +530,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
   return true;
 }
 
-NAD_DECL(EventLoopThread::remove, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
+void EventLoopThread::remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
   DoutEntering(dc::evio, "EventLoopThread::remove({" << allow_deletion_count << "}, {" << *state_w << "}, " << active_flag << ", " << device << ")");
   bool needs_removal = state_w->m_flags.test_and_clear_added(active_flag) && !state_w->m_flags.is_added();

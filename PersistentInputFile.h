@@ -32,7 +32,7 @@ class PersistentInputFile : public File, private INotify
 {
  private:
   // Override FileDescriptor::closed() event to remove any inotify watch when it exists.
-  NAD_DECL(closed) override;
+  void closed(int& allow_deletion_count) override;
 
  public:
   using VT_type = File::VT_type;
@@ -40,7 +40,7 @@ class PersistentInputFile : public File, private INotify
   struct VT_impl : File::VT_impl
   {
     // Override InputDevice::read_returned_zero().
-    static NAD_DECL(read_returned_zero, InputDevice* self);
+    static void read_returned_zero(int& allow_deletion_count, InputDevice* self);
 
     // Virtual table of PersistentInputFile.
     static constexpr VT_type VT{

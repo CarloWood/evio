@@ -48,7 +48,7 @@ class INotifyDecoder : public InputDecoder
 
  protected:
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
-  NAD_DECL(decode, MsgBlock&& msg) override;
+  void decode(int& allow_deletion_count, MsgBlock&& msg) override;
 };
 
 //=============================================================================
@@ -208,7 +208,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
   return msg_len;
 }
 
-NAD_DECL_UNUSED_ARG(INotifyDecoder::decode, MsgBlock&& msg)
+void INotifyDecoder::decode(int& UNUSED_ARG(allow_deletion_count), MsgBlock&& msg)
 {
   inotify_event const* event = reinterpret_cast<inotify_event const*>(msg.get_start());
   ASSERT(sizeof(int) + 12 + event->len == msg.get_size());
