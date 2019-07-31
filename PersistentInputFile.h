@@ -36,6 +36,7 @@ class PersistentInputFile : public File, private INotify
 
  public:
   using VT_type = File::VT_type;
+  #define VT_evio_PersistentInputFile VT_evio_File
 
   struct VT_impl : File::VT_impl
   {
@@ -43,21 +44,7 @@ class PersistentInputFile : public File, private INotify
     static void read_returned_zero(int& allow_deletion_count, InputDevice* self);
 
     // Virtual table of PersistentInputFile.
-    static constexpr VT_type VT{
-      /*File*/
-        /*InputDevice*/
-      { nullptr,
-        read_from_fd,
-        hup,
-        exceptional,
-        read_returned_zero,
-        read_error,
-        data_received },
-        /*OutputDevice*/
-      { nullptr,
-        write_to_fd,
-        write_error }
-    };
+    static constexpr VT_type VT VT_evio_PersistentInputFile;
   };
 
   // Make a deep copy of VT_ptr.

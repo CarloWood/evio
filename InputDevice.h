@@ -43,13 +43,15 @@ class InputDevice : public virtual FileDescriptor
  public:
   struct VT_type
   {
-    void* _input_user_data;     // Only use this after cloning a virtual table.
-    void (*_read_from_fd)(int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_hup)(int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_exceptional)(int& allow_deletion_count, InputDevice* self, int fd);
+    void* _input_user_data;    // Only use this after cloning a virtual table.
+    void (*_read_from_fd)      (int& allow_deletion_count, InputDevice* self, int fd);
+    void (*_hup)               (int& allow_deletion_count, InputDevice* self, int fd);
+    void (*_exceptional)       (int& allow_deletion_count, InputDevice* self, int fd);
     void (*_read_returned_zero)(int& allow_deletion_count, InputDevice* self);
-    void (*_read_error)(int& allow_deletion_count, InputDevice* self, int err);
-    void (*_data_received)(int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
+    void (*_read_error)        (int& allow_deletion_count, InputDevice* self, int err);
+    void (*_data_received)     (int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
+
+    #define VT_evio_InputDevice { nullptr, read_from_fd, hup, exceptional, read_returned_zero, read_error, data_received }
   };
 
   struct VT_impl
@@ -82,21 +84,10 @@ class InputDevice : public virtual FileDescriptor
     static void data_received(int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
 
     // Virtual table of InputDevice.
-    static constexpr VT_type VT{
-      /*InputDevice*/
-      nullptr,
-      read_from_fd,
-      hup,
-      exceptional,
-      read_returned_zero,
-      read_error,
-      data_received
-    };
+    static constexpr VT_type VT VT_evio_InputDevice;
   };
 
-  // Make a deep copy of VT_ptr.
   virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
-
   utils::VTPtr<InputDevice> VT_ptr;
 
  private:

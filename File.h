@@ -44,30 +44,16 @@ class File : public InputDevice, public OutputDevice
  public:
   struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
   {
+    #define VT_evio_File { VT_evio_InputDevice, VT_evio_OutputDevice }
   };
 
   struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
   {
     // Virtual table of File.
-    static constexpr VT_type VT{
-      /*InputDevice*/
-    { nullptr,
-      read_from_fd,
-      hup,
-      exceptional,
-      read_returned_zero,
-      read_error,
-      data_received },
-      /*OutputDevice*/
-    { nullptr,
-      write_to_fd,
-      write_error }
-    };
+    static constexpr VT_type VT VT_evio_File;
   };
 
-  // Make a deep copy of VT_ptr.
   VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
   utils::VTPtr<File, InputDevice, OutputDevice> VT_ptr;
 
  private:

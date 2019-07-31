@@ -41,6 +41,41 @@ namespace evio {
 
 class ListenSocketDevice : public InputDevice
 {
+ public:
+  struct VT_type : InputDevice::VT_type
+  {
+    bool (*_maybe_out_of_fds)(ListenSocketDevice* self);
+    // Called by read_from_fd() to actually spawn a SOCK_TYPE for the accepted fd.
+    void (*_spawn_accepted)  (ListenSocketDevice* self, int fd, SocketAddress const& remote_address);
+
+    #define VT_evio_ListenSocketDevice { VT_evio_InputDevice, maybe_out_of_fds, spawn_accepted }
+  };
+
+  struct VT_impl : InputDevice::VT_impl
+  {
+    // Called when the listen socket is ready to accept a new client.
+    //
+    // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
+    static void read_from_fd(int& allow_deletion_count, InputDevice* self, int fd); // override
+
+    // This method is called when we are possibly out of filedescriptors.
+    // It should return `true' when this is true, and can optionally take
+    // some action by overriding this function.
+    //
+    // The default `listen_sockstream_dct::maybe_out_of_fds' returns
+    // true when `socket()' fails.
+    static bool maybe_out_of_fds(ListenSocketDevice* self);			// New virtual function.
+
+    // New pure virtual function.
+    static constexpr std::nullptr_t spawn_accepted = nullptr;
+
+    // Virtual table of ListenSocketDevice.
+    static constexpr VT_type VT VT_evio_ListenSocketDevice;
+  };
+
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
+  utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
+
  private:
   SocketAddress m_bind_addr;            // The address we bind to.
 
@@ -92,49 +127,6 @@ class ListenSocketDevice : public InputDevice
 
   struct sockaddr const* get_bind_addr() const { return m_bind_addr; }
 
- public:
-  struct VT_type : InputDevice::VT_type
-  {
-    bool (*_maybe_out_of_fds)(ListenSocketDevice* self);
-    // Called by read_from_fd() to actually spawn a SOCK_TYPE for the accepted fd.
-    void (*_spawn_accepted)(ListenSocketDevice* self, int fd, SocketAddress const& remote_address);        // Pure virtual.
-  };
-
-  struct VT_impl : InputDevice::VT_impl
-  {
-    // Called when the listen socket is ready to accept a new client.
-    //
-    // The default `ListenSocket::read_from_fd' accepts a new client and spawns a new `SOCK_TYPE' accociated with the new client.
-    static void read_from_fd(int& allow_deletion_count, InputDevice* self, int fd); // override
-
-    // This method is called when we are possibly out of filedescriptors.
-    // It should return `true' when this is true, and can optionally take
-    // some action by overriding this function.
-    //
-    // The default `listen_sockstream_dct::maybe_out_of_fds' returns
-    // true when `socket()' fails.
-    static bool maybe_out_of_fds(ListenSocketDevice* self);			// New virtual function.
-
-    // Virtual table of ListenSocketDevice.
-    static constexpr VT_type VT{
-      /*ListenSocketDevice*/
-        /*InputDevice*/
-      { nullptr,
-        read_from_fd,
-        hup,
-        exceptional,
-        read_returned_zero,
-        read_error,
-        data_received },
-      maybe_out_of_fds,
-      nullptr   // _spawn_accepted
-    };
-  };
-
-  // Make a deep copy of VT_ptr.
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }
-  utils::VTPtr<ListenSocketDevice, InputDevice> VT_ptr;
-
 protected:
   //---------------------------------------------------------------------------
   // Protected events:
@@ -169,6 +161,8 @@ class ListenSocket : public ListenSocketDevice
   struct VT_type : ListenSocketDevice::VT_type
   {
     void (*_new_connection)(ListenSocket* self, accepted_socket_type& accepted_socket);
+
+    #define VT_evio_ListenSocket { VT_evio_ListenSocketDevice, new_connection }
   };
 
   struct VT_impl : ListenSocketDevice::VT_impl
@@ -180,24 +174,10 @@ class ListenSocket : public ListenSocketDevice
     static void new_connection(ListenSocket* UNUSED_ARG(self), accepted_socket_type& UNUSED_ARG(accepted_socket)) { }
 
     // Virtual table of ListenSocket.
-    static constexpr VT_type VT{
-      /*ListenSocket*/
-        /*ListenSocketDevice*/
-      {   /*InputDevice*/
-        { nullptr,
-          read_from_fd,
-          hup,
-          exceptional,
-          read_returned_zero,
-          read_error,
-          data_received },
-        maybe_out_of_fds,
-        spawn_accepted },       // Overridden
-      new_connection
-    };
+    static constexpr VT_type VT VT_evio_ListenSocket;
   };
 
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }   // Make a deep copy of VT_ptr.
+  VT_type* clone_VT() override { return VT_ptr.clone(this); }
   utils::VTPtr<ListenSocket, ListenSocketDevice> VT_ptr;
 
  protected:

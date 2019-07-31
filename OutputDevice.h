@@ -45,6 +45,8 @@ class OutputDevice : public virtual FileDescriptor
     void* _output_user_data;    // Only use this after cloning a virtual table.
     void (*_write_to_fd)(int& allow_deletion_count, OutputDevice*, int);
     void (*_write_error)(int& allow_deletion_count, OutputDevice*, int);
+
+    #define VT_evio_OutputDevice { nullptr, write_to_fd, write_error }
   };
 
   struct VT_impl
@@ -65,12 +67,7 @@ class OutputDevice : public virtual FileDescriptor
     static void write_error(int& allow_deletion_count, OutputDevice* self, int UNUSED_ARG(err)) { self->close(allow_deletion_count); }
 
     // Virtual table of OutputDevice.
-    static constexpr VT_type VT{
-      /*OutputDevice*/
-      nullptr,
-      write_to_fd,
-      write_error
-    };
+    static constexpr VT_type VT VT_evio_OutputDevice;
   };
 
   // Make a deep copy of VT_ptr.

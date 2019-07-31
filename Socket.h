@@ -49,8 +49,10 @@ class Socket : public InputDevice, public OutputDevice
  public:
   struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
   {
-    void (*_connected)(int& allow_deletion_count, Socket*, bool);
+    void (*_connected)   (int& allow_deletion_count, Socket*, bool);
     void (*_disconnected)(int& allow_deletion_count, Socket*, bool success);
+
+    #define VT_evio_Socket { VT_evio_InputDevice, VT_evio_OutputDevice, connected, disconnected }
   };
 
   struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
@@ -68,28 +70,10 @@ class Socket : public InputDevice, public OutputDevice
     // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
     static void disconnected(int& allow_deletion_count, Socket* self, bool success);
 
-    static constexpr VT_type VT{
-      /*Socket*/
-        /*InputDevice*/
-      { nullptr,
-        read_from_fd,
-        hup,
-        exceptional,
-        read_returned_zero,
-        read_error,
-        data_received },
-        /*OutputDevice*/
-      { nullptr,
-        write_to_fd,
-        write_error },
-      connected,
-      disconnected
-    };
+    static constexpr VT_type VT VT_evio_Socket;
   };
 
-  // Make a deep copy of VT_ptr.
   VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
   utils::VTPtr<Socket, InputDevice, OutputDevice> VT_ptr;
 
  protected:
