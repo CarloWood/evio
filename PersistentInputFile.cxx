@@ -57,8 +57,7 @@ void PersistentInputFile::VT_impl::read_returned_zero(int& CWDEBUG_ONLY(allow_de
   {
     self->add_watch(self->open_filename().c_str(), IN_MODIFY);
     CWDEBUG_ONLY(int count =) self->inhibit_deletion(); // Keep this object alive because the call to add_watch registered m_inotify as callback object.
-                                                        // Object is kept alive until a call to allow_deletion() caused by a call to
-                                                        // PersistentInputFile::closed(). See NAD.h for more info.
+                                                        // Object is kept alive until a call to allow_deletion() caused by a call to PersistentInputFile::closed().
     Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << self << ']');
   }
 }

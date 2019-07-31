@@ -24,7 +24,6 @@
 #ifndef EVIO_FILEDESCRIPTOR_H
 #define EVIO_FILEDESCRIPTOR_H
 
-#include "NAD.h"
 #include "utils/AIRefCount.h"
 #include "utils/log2.h"
 #include "utils/InstanceTracker.h"
