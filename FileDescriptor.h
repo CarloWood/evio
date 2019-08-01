@@ -509,10 +509,10 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
     ASSERT(!is_destructed());
     Dout(dc::warning, "Calling FileDescriptorBase::hup_event() on object [" << this << "] that isn't an InputDevice.");
   }
-  virtual void exceptional_event(int& UNUSED_ARG(allow_deletion_count))
+  virtual void err_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptorBase::exceptional_event() on object [" << this << "] that isn't an InputDevice.");
+    Dout(dc::warning, "Calling FileDescriptorBase::err_event() on object [" << this << "] that isn't an InputDevice.");
   }
 #if 0
   // Returns the events that were not busy before.

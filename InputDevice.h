@@ -46,7 +46,7 @@ class InputDevice : public virtual FileDescriptor
     void* _input_user_data;    // Only use this after cloning a virtual table.
     void (*_read_from_fd)      (int& allow_deletion_count, InputDevice* self, int fd);
     void (*_hup)               (int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_exceptional)       (int& allow_deletion_count, InputDevice* self, int fd);
+    void (*_err)               (int& allow_deletion_count, InputDevice* self, int fd);
     void (*_read_returned_zero)(int& allow_deletion_count, InputDevice* self);
     void (*_read_error)        (int& allow_deletion_count, InputDevice* self, int err);
     void (*_data_received)     (int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
@@ -192,7 +192,7 @@ class InputDevice : public virtual FileDescriptor
   void init_input_device(state_t::wat const& state_w) override;
   void read_event(int& allow_deletion_count) override final { VT_ptr->_read_from_fd(allow_deletion_count, this, m_fd); }
   void hup_event(int& allow_deletion_count) override { VT_ptr->_hup(allow_deletion_count, this, m_fd); }
-  void exceptional_event(int& allow_deletion_count) override { VT_ptr->_exceptional(allow_deletion_count, this, m_fd); }
+  void err_event(int& allow_deletion_count) override { VT_ptr->_err(allow_deletion_count, this, m_fd); }
 
   // Events, called from VT_impl::read_from_fd.
   void read_returned_zero(int& allow_deletion_count) { VT_ptr->_read_returned_zero(allow_deletion_count, this); }

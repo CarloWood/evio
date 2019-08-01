@@ -184,7 +184,7 @@ void EventLoopThread::main()
                 }
                 else if ((events & EPOLLERR))
                 {
-                  device->exceptional_event(allow_deletion_count);
+                  device->err_event(allow_deletion_count);
                   device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLERR);
                 }
                 else
