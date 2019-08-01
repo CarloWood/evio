@@ -112,7 +112,6 @@ void OutputDevice::remove_output_device(int& allow_deletion_count, state_t::wat 
 RefCountReleaser OutputDevice::flush_output_device()
 {
   DoutEntering(dc::evio, "OutputDevice::flush_output_device() [" << this << ']');
-  RefCountReleaser nad_rcr;
   bool need_close;
   {
     state_t::wat state_w(m_state);
@@ -120,16 +119,10 @@ RefCountReleaser OutputDevice::flush_output_device()
     if (!need_close)
       state_w->m_flags.set_w_flushing();
   }
+  int allow_deletion_count = 0;
   if (need_close)
-  {
-    int allow_deletion_count = 0;
     close_output_device(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-  }
-  return nad_rcr;
+  return {this, allow_deletion_count};
 }
 
 //inline

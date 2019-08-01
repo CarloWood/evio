@@ -184,14 +184,9 @@ class OutputDevice : public virtual FileDescriptor
   RefCountReleaser flush_output_device();
   RefCountReleaser close_output_device()
   {
-    RefCountReleaser nad_rcr;
     int allow_deletion_count = 0;
     close_output_device(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-    return nad_rcr;
+    return {this, allow_deletion_count};
   }
 
  protected:

@@ -136,9 +136,9 @@ bool is_valid(int fd)
 #endif
 }
 
-void FileDescriptorBase::init(int fd)
+void FileDescriptor::init(int fd)
 {
-  DoutEntering(dc::evio, "FileDescriptorBase::init(" << fd << ") [" << this << ']');
+  DoutEntering(dc::evio, "FileDescriptor::init(" << fd << ") [" << this << ']');
   // Close the device before opening it again.
   ASSERT(!is_valid(m_fd));
   // Only call init() with a valid, open filedescriptor.
@@ -214,12 +214,12 @@ std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, FileDescriptorBase::State const& state)
+std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state)
 {
   return os << "{m_flags:" << state.m_flags << ", m_epoll_event:" << state.m_epoll_event << "}";
 }
 
-void intrusive_ptr_release(FileDescriptorBase const* ptr)
+void intrusive_ptr_release(FileDescriptor const* ptr)
 {
   int count = ptr->AIRefCount::allow_deletion(true);
   if (count == 1)
@@ -231,7 +231,7 @@ void intrusive_ptr_release(FileDescriptorBase const* ptr)
   }
 }
 
-void FileDescriptorBase::allow_deletion(int count) const
+void FileDescriptor::allow_deletion(int count) const
 {
   int new_count = AIRefCount::allow_deletion(true, count);
   Dout(dc::io, "Decremented ref count of device " << this << " to " << (new_count - count));

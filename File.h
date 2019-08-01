@@ -84,15 +84,10 @@ class File : public InputDevice, public OutputDevice
   // Call the `close' of the base class, which does the real work.
   RefCountReleaser close()
   {
-    RefCountReleaser nad_rcr;
     m_filename.clear();
     int allow_deletion_count = 0;
     FileDescriptor::close(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-    return nad_rcr;
+    return {this, allow_deletion_count};
   }
 
   //---------------------------------------------------------------------------

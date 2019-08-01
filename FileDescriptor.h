@@ -24,6 +24,7 @@
 #ifndef EVIO_FILEDESCRIPTOR_H
 #define EVIO_FILEDESCRIPTOR_H
 
+#include "RefCountReleaser.h"
 #include "utils/AIRefCount.h"
 #include "utils/log2.h"
 #include "utils/InstanceTracker.h"
@@ -369,7 +370,7 @@ class FileDescriptorFlags
   friend std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags);
 };
 
-class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<FileDescriptorBase>
+class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDescriptor>
 {
  public:
   struct State
@@ -379,9 +380,9 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   };
   using state_t = aithreadsafe::Wrapper<State, aithreadsafe::policy::Primitive<std::mutex>>;
 
-  // Overload intrusive_ptr_release for FileDescriptorBase (as opposed to AIRefCount).
-  // This is a bit dangerous: make sure you never cast a FileDescriptorBase to an AIRefCount.
-  friend void intrusive_ptr_release(FileDescriptorBase const* ptr);
+  // Overload intrusive_ptr_release for FileDescriptor (as opposed to AIRefCount).
+  // This is a bit dangerous: make sure you never cast a FileDescriptor to an AIRefCount.
+  friend void intrusive_ptr_release(FileDescriptor const* ptr);
   void allow_deletion(int count) const;
 
  protected:
@@ -389,7 +390,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   int m_fd;                                     // The file descriptor. In the case of a device that is derived from both,
                                                 // InputDevice and OutputDevice using multiple inheritance -- this fd is
                                                 // used for both input and output.
-  mutable FileDescriptorBase const* m_next;     // A singly linked list of FileDescriptorBase (derived) objects that need to be deleted by the EventLoopThead.
+  mutable FileDescriptor const* m_next;     // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
                                                 // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
   alignas(cacheline_size_c) std::atomic<uint32_t> m_being_processed_by_thread_pool;     // Mask of events being handled by the thread pool.
 
@@ -431,7 +432,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
     return m_being_processed_by_thread_pool.fetch_or(events, std::memory_order_relaxed);
   }
 
-  void do_epoll_ctl(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, int op)
+  void do_epoll_ctl(FileDescriptor::state_t::wat const& state_w, int epoll_fd, int op)
   {
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
     DEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
@@ -449,8 +450,8 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   // This is called by an AIThreadPool thread after it processed an event.
   void clear_being_processed_by_thread_pool(int epoll_fd, uint32_t event)
   {
-    DoutEntering(dc::evio, "FileDescriptorBase::clear_being_processed_by_thread_pool(" << epoll_fd << ", " << epoll_events_str(event) << ") [" << this << "]");
-    FileDescriptorBase::state_t::wat state_w(m_state);
+    DoutEntering(dc::evio, "FileDescriptor::clear_being_processed_by_thread_pool(" << epoll_fd << ", " << epoll_events_str(event) << ") [" << this << "]");
+    FileDescriptor::state_t::wat state_w(m_state);
     // Allow a new event to be added to the thread pool for this fd/event.
     m_being_processed_by_thread_pool.fetch_and(~event, std::memory_order_release);
     // Rearm fd/event if the current event is still interesting.
@@ -468,7 +469,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
     return (m_being_processed_by_thread_pool.load(std::memory_order_relaxed) & event);
   }
 
-  void start_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_adding)
+  void start_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_adding)
   {
     state_w->m_epoll_event.events |= event | EPOLLET;
     int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
@@ -480,7 +481,7 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
     do_epoll_ctl(state_w, epoll_fd, op);
   }
 
-  void stop_watching(FileDescriptorBase::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_removal)
+  void stop_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_removal)
   {
     state_w->m_epoll_event.events &= ~event;
     int op = needs_removal ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
@@ -497,22 +498,22 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   virtual void read_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptorBase::read_event() on object [" << this << "] that isn't an InputDevice.");
+    DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object [" << this << "] that isn't an InputDevice.");
   }
   virtual void write_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptorBase::write_event() on object [" << this << "] that isn't an OutputDevice.");
+    DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object [" << this << "] that isn't an OutputDevice.");
   }
   virtual void hup_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptorBase::hup_event() on object [" << this << "] that isn't an InputDevice.");
+    Dout(dc::warning, "Calling FileDescriptor::hup_event() on object [" << this << "] that isn't an InputDevice.");
   }
   virtual void err_event(int& UNUSED_ARG(allow_deletion_count))
   {
     ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptorBase::err_event() on object [" << this << "] that isn't an InputDevice.");
+    Dout(dc::warning, "Calling FileDescriptor::err_event() on object [" << this << "] that isn't an InputDevice.");
   }
 #if 0
   // Returns the events that were not busy before.
@@ -539,28 +540,17 @@ class FileDescriptorBase : public AIRefCount, public utils::InstanceTracker<File
   virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptorBase() : m_fd(-1), m_being_processed_by_thread_pool(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
-  ~FileDescriptorBase() noexcept { }
+  FileDescriptor() : m_fd(-1), m_being_processed_by_thread_pool(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
+  ~FileDescriptor() noexcept { }
 
  protected:
 #ifdef CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, FileDescriptorBase const* fdptr)
+  friend std::ostream& operator<<(std::ostream& os, FileDescriptor const* fdptr)
   {
     return os << "FD:" << static_cast<void const*>(fdptr);
   }
 #endif
-};
 
-std::ostream& operator<<(std::ostream& os, FileDescriptorBase::State const& state);
-
-} // namespace evio
-
-#include "RefCountReleaser.h"
-
-namespace evio {
-
-class FileDescriptor : public FileDescriptorBase
-{
  protected:
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual void close_input_device(int& UNUSED_ARG(allow_deletion_count)) { }
@@ -573,38 +563,26 @@ class FileDescriptor : public FileDescriptorBase
   virtual void closed(int& UNUSED_ARG(allow_deletion_count)) { }
 
  public:
-  using FileDescriptorBase::FileDescriptorBase;
-
   RefCountReleaser close_input_device()
   {
-    RefCountReleaser nad_rcr;
     int allow_deletion_count = 0;
     close_input_device(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-    return nad_rcr;
+    return {this, allow_deletion_count};
   }
 
   RefCountReleaser close_output_device()
   {
-    RefCountReleaser nad_rcr;
     int allow_deletion_count = 0;
     close_output_device(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-    return nad_rcr;
+    return {this, allow_deletion_count};
   }
 
   RefCountReleaser close()
   {
-    RefCountReleaser nad_rcr;
-    nad_rcr += close_input_device();
-    nad_rcr += close_output_device();
-    return nad_rcr;
+    int allow_deletion_count = 0;
+    close_input_device(allow_deletion_count);
+    close_output_device(allow_deletion_count);
+    return {this, allow_deletion_count};
   }
 
   // Overload for internal (non-public) call.
@@ -614,6 +592,8 @@ class FileDescriptor : public FileDescriptorBase
     close_output_device(allow_deletion_count);
   }
 };
+
+std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state);
 
 // Convenience function to create devices.
 template<typename DeviceType, typename... ARGS, typename = typename std::enable_if<std::is_base_of<FileDescriptor, DeviceType>::value>::type>

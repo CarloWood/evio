@@ -171,14 +171,9 @@ class InputDevice : public virtual FileDescriptor
 
   RefCountReleaser close_input_device()
   {
-    RefCountReleaser nad_rcr;
     int allow_deletion_count = 0;
     close_input_device(allow_deletion_count);
-    if (allow_deletion_count > 0)
-      nad_rcr = this;
-    if (allow_deletion_count > 1)
-      allow_deletion(allow_deletion_count - 1);
-    return nad_rcr;
+    return {this, allow_deletion_count};
   }
 
  private:

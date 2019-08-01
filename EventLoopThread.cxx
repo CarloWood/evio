@@ -126,7 +126,7 @@ void EventLoopThread::main()
       }
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
 #ifdef CWDEBUG
-      utils::InstanceTracker<FileDescriptorBase>::for_each([](FileDescriptorBase const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
+      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
 #endif
       nfds = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
       Dout(dc::finish|cond_error_cf(nfds == -1), nfds);
@@ -630,7 +630,7 @@ void EventLoopThread::stop_running()
   m_stop_running = true;
 }
 
-void EventLoopThread::add_needs_deletion(FileDescriptorBase const* node)
+void EventLoopThread::add_needs_deletion(FileDescriptor const* node)
 {
   // Even though node is const -- this is like an initialization of m_next and therefore we're allowed to change m_next.
   node->m_next = m_needs_deletion_list.load(std::memory_order_relaxed);
@@ -640,10 +640,10 @@ void EventLoopThread::add_needs_deletion(FileDescriptorBase const* node)
 
 void EventLoopThread::flush_need_deletion()
 {
-  FileDescriptorBase const* head = m_needs_deletion_list.exchange(nullptr, std::memory_order_acquire);
+  FileDescriptor const* head = m_needs_deletion_list.exchange(nullptr, std::memory_order_acquire);
   while (head)
   {
-    FileDescriptorBase const* orphan = head;
+    FileDescriptor const* orphan = head;
     head = orphan->m_next;
     DEBUG_ONLY(orphan->mark_deleted());
     delete orphan;
