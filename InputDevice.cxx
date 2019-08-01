@@ -283,9 +283,9 @@ void InputDevice::VT_impl::hup(int& CWDEBUG_ONLY(allow_deletion_count), InputDev
   DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
-void InputDevice::VT_impl::exceptional(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+void InputDevice::VT_impl::err(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::exceptional({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::err({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
 }
 
 // BRWT.

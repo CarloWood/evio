@@ -51,7 +51,7 @@ class InputDevice : public virtual FileDescriptor
     void (*_read_error)        (int& allow_deletion_count, InputDevice* self, int err);
     void (*_data_received)     (int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
 
-    #define VT_evio_InputDevice { nullptr, read_from_fd, hup, exceptional, read_returned_zero, read_error, data_received }
+    #define VT_evio_InputDevice { nullptr, read_from_fd, hup, err, read_returned_zero, read_error, data_received }
   };
 
   struct VT_impl
@@ -71,8 +71,8 @@ class InputDevice : public virtual FileDescriptor
     // Stream socket peer closed connection, or shut down writing half of connection.
     static void hup(int& allow_deletion_count, InputDevice* self, int fd);
 
-    // There is some exceptional condition on the file descriptor. For example out-of-band data on a TCP socket.
-    static void exceptional(int& allow_deletion_count, InputDevice* self, int fd);
+    // There is some error condition on the file descriptor.
+    static void err(int& allow_deletion_count, InputDevice* self, int fd);
 
     // The default behaviour is to close() the filedescriptor.
     static void read_returned_zero(int& allow_deletion_count, InputDevice* self) { self->close_input_device(allow_deletion_count); } // Read thread.
