@@ -32,7 +32,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
+InputDevice::InputDevice() : m_sink(nullptr), m_ibuffer(nullptr)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
@@ -300,10 +300,10 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   // it while we're here, or the program is ill-formed.
 
   size_t len;
-  while ((len = m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
+  while ((len = m_sink->end_of_msg_finder(new_data, rlen)) > 0)
   {
-    // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
-    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_input_device_events_handler);
+    // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a InputDecoder.
+    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_sink);
     // We seem to have a complete new message and need to call `decode'
     if (m_ibuffer->has_multiple_blocks())
     {

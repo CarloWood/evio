@@ -34,10 +34,23 @@
 
 namespace evio {
 
-// This class is used as the base class of InputDecoder or LinkBufferPlus.
-// Any class that is not (an) InputDecoder that derives from this class
-// must define a end_of_msg_finder that returns 0.
-class InputDeviceEventsHandler : public Protocol
+// Protocol
+//  |
+//  v                  ::set_sink()
+// Sink <============= InputDevice <=== fd
+// ::m_input_device ->
+//  |
+//  v
+// InputDecoder (defines decode())
+//
+// The size of the input buffer is derived from the (average) message size as hinted by the Protocol.
+//
+// This class is used as the base class of InputDecoder or LinkBufferPlus. Any class that is not (an)
+// InputDecoder that derives from this class must define a end_of_msg_finder that returns 0.
+// Only InputDecoder::end_of_msg_finder is allowed to return a non-zero value, in that case the
+// Sink is static_cast-ed to InputDecoder and decode() is called on the new message.
+
+class Sink : public Protocol
 {
  protected:
   InputDevice* m_input_device;
@@ -62,7 +75,7 @@ class InputDeviceEventsHandler : public Protocol
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 
-class InputDecoder : public InputDeviceEventsHandler
+class InputDecoder : public Sink
 {
  private:
   InputBuffer* create_buffer(InputDevice* input_device, size_t buffer_full_watermark, size_t max_alloc) override
@@ -74,8 +87,8 @@ class InputDecoder : public InputDeviceEventsHandler
   }
 
  protected:
-  // Given the char array new_data of size rlen, returns the length of the string (starting a new_data) up to and
-  // including the first newline, char if any. Otherwise returns 0.
+  // Given the char array new_data of size rlen, returns the length of the string (starting at new_data) up to and
+  // including the first newline char, if any. Otherwise returns 0.
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override
   {
     DoutEntering(dc::io, "InputDecoder::end_of_msg_finder(..., " << rlen << ")");

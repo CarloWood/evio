@@ -32,7 +32,7 @@
 
 namespace evio {
 
-OutputDevice::OutputDevice() : m_output_device_ptr(nullptr), m_obuffer(nullptr)
+OutputDevice::OutputDevice() : m_source(nullptr), m_obuffer(nullptr)
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.

@@ -34,14 +34,21 @@
 
 namespace evio {
 
-class OutputDevicePtr : public Protocol
+// Protocol
+//   |
+//   v                  ::set_source()
+// Source ============> OutputDevice ==> fd
+// ::m_output_device ->
+//
+// The size of the output buffer is derived from the (average) message size as hinted by the Protocol.
+class Source : public Protocol
 {
  protected:
   OutputDevice* m_output_device;
 
   void start_output_device()
   {
-    DoutEntering(dc::evio, "OutputDevicePtr::start_output_device() [" << m_output_device << ']');
+    DoutEntering(dc::evio, "Source::start_output_device() [" << m_output_device << ']');
     FileDescriptor::state_t::wat state_w(m_output_device->m_state);
     if (!state_w->m_flags.is_active_output_device())
       m_output_device->start_output_device(state_w);
@@ -56,7 +63,7 @@ class OutputDevicePtr : public Protocol
       { /* Should never be used. */ return nullptr; }
 };
 
-class OutputStream : public std::ostream, public OutputDevicePtr
+class OutputStream : public std::ostream, public Source
 {
  protected:
   OutputBuffer* create_buffer(OutputDevice* output_device, size_t buffer_full_watermark, size_t max_alloc) override

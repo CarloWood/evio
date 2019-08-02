@@ -48,6 +48,7 @@ class Protocol
   virtual size_t average_message_length() const { return 512; }
 
   virtual size_t minimum_block_size_estimate() const { return 16 * average_message_length(); }
+
   // This should be treated as a requested_minimum_block_size because the user can override it.
   virtual size_t minimum_block_size() const
   {

@@ -33,8 +33,9 @@ class FuzzyCondition;
 
 namespace evio {
 
-class OutputDevicePtr;
+class Source;
 class OutputBuffer;
+class LinkBufferPlus;
 
 class OutputDevice : public virtual FileDescriptor
 {
@@ -66,7 +67,7 @@ class OutputDevice : public virtual FileDescriptor
   // The output buffer
   //
 
-  OutputDevicePtr* m_output_device_ptr; // A pointer to an object that points back to us.
+  Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
 
  protected:
@@ -78,7 +79,7 @@ class OutputDevice : public virtual FileDescriptor
   // that either the caller *is* the producer thread, or is certain the device is
   // stopped and producer thread is running -- aka nobody is writing to the device
   // when this function is being called.
-  friend class OutputDevicePtr;
+  friend class Source;
   bool start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void start_output_device(state_t::wat const& state_w);
   bool stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition);
@@ -148,7 +149,7 @@ class OutputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_source(OutputDevicePtr& output_device_ptr, Args... output_create_buffer_arguments);
+  void set_source(Source& output_device_ptr, Args... output_create_buffer_arguments);
 
   template<typename INPUT_DEVICE>
   void set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr,
@@ -176,10 +177,7 @@ class OutputDevice : public virtual FileDescriptor
 
  private:
   // Called by the second set_source above.
-  void set_source(LinkBuffer* link_buffer)
-  {
-    m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
-  }
+  inline void set_source(LinkBufferPlus* link_buffer);
 
   // Override base class virtual functions.
   void init_output_device(state_t::wat const& state_w) override;
@@ -193,12 +191,18 @@ class OutputDevice : public virtual FileDescriptor
 
 namespace evio {
 
+void OutputDevice::set_source(LinkBufferPlus* link_buffer)
+{
+  m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
+  m_source = link_buffer;
+}
+
 template<typename... Args>
-void OutputDevice::set_source(OutputDevicePtr& output_device_ptr, Args... output_create_buffer_arguments)
+void OutputDevice::set_source(Source& output_device_ptr, Args... output_create_buffer_arguments)
 {
   Dout(dc::evio, "OutputDevice::set_source(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
-  m_output_device_ptr = &output_device_ptr;
-  m_obuffer = m_output_device_ptr->create_buffer(this, output_create_buffer_arguments...);
+  m_source = &output_device_ptr;
+  m_obuffer = m_source->create_buffer(this, output_create_buffer_arguments...);
 }
 
 template<typename INPUT_DEVICE>

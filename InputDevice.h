@@ -35,7 +35,7 @@ namespace evio {
 class InputDecoder;
 class InputBuffer;
 class LinkBufferPlus;
-class InputDeviceEventsHandler;
+class Sink;
 
 class InputDevice : public virtual FileDescriptor
 {
@@ -77,11 +77,11 @@ class InputDevice : public virtual FileDescriptor
   // The input buffer
   //
 
-  InputDeviceEventsHandler* m_input_device_events_handler;      // The object that this device writes to.
-  InputBuffer* m_ibuffer;                                       // A pointer to the input buffer.
+  Sink* m_sink;                                         // The sink object that this device writes to.
+  InputBuffer* m_ibuffer;                               // A pointer to the input buffer.
 
  protected:
-  friend class InputDeviceEventsHandler;
+  friend class Sink;
   void start_input_device(state_t::wat const& state_w);
   void stop_input_device(state_t::wat const& state_w);
   void remove_input_device(int& allow_deletion_count, state_t::wat const& state_w);
@@ -174,14 +174,23 @@ template<typename... Args>
 void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments)
 {
   Dout(dc::evio, "InputDevice::set_sink(" << (void*)&input_decoder << ", ...) [" << this << ']');
-  m_ibuffer = static_cast<InputDeviceEventsHandler&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
-  m_input_device_events_handler = &input_decoder;
+  m_ibuffer = static_cast<Sink&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
+  m_sink = &input_decoder;
 }
 
 // Device-device link declarations.
 
-// A LinkBufferPlus plays the role of link buffer, InputDeviceEventsHandler and OutputDevicePtr all at once.
-class LinkBufferPlus : public LinkBuffer, public InputDeviceEventsHandler, public OutputDevicePtr
+//                     _ Source
+//                    /  ::m_output_device ->
+//        vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+// fd ==> InputDevice ==> LinkBufferPlus ==> OutputDevice ==> fd.
+//                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                         \__ Sink
+//                    <------- ::m_input_device
+//
+// A LinkBufferPlus plays the role of link buffer, Sink and Source all at once.
+//
+class LinkBufferPlus : public LinkBuffer, public Sink, public Source
 {
  public:
   LinkBufferPlus(InputDevice* input_device, OutputDevice* output_device, size_t minimum_block_size, size_t buffer_full_watermark, size_t max_alloc) :
@@ -205,7 +214,7 @@ void InputDevice::set_sink(LinkBufferPlus* link_buffer)
   //
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
-  m_input_device_events_handler = link_buffer;
+  m_sink = link_buffer;
 }
 
 // This can be thrown from read_returned_zero when you want read_from_fd to continue reading anyway.

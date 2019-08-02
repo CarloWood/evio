@@ -105,7 +105,7 @@ int INotifyDevice::add_watch(char const* pathname, uint32_t mask, INotify* obj)
       init(fd);
       state_t::wat state_w(m_state);
       // Call set_sink() before calling add_watch(). The library should have done this!
-      ASSERT(m_input_device_events_handler && m_ibuffer);
+      ASSERT(m_sink && m_ibuffer);
       // Exit ev_run even when this device is still running.
       state_w->m_flags.set_r_inferior();
       start_input_device(state_w);
