@@ -53,7 +53,7 @@ class AcceptedSocket : public Socket
     set_source(m_output);
   }
 
-  ~AcceptedSocket() noexcept
+  ~AcceptedSocket()
   {
 #if CWDEBUG_LOCATION
     Dout(dc::evio, "~AcceptedSocket<" << libcwd::type_info_of<INPUTDECODER>().demangled_name() << ", " << libcwd::type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">()");

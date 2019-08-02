@@ -36,7 +36,7 @@ namespace evio {
 class Protocol
 {
  public:
-  virtual ~Protocol() noexcept { }
+  virtual ~Protocol() { }
 
   // This really should be defined in the derived Protocol class; however, a size of 512 isn't so large that it would be a disadvantage
   // and in most cases is will be actually larger than the real average message length, so using this as default should be possible

@@ -451,7 +451,7 @@ class StreamBufProducer : public StreamBufCommon
   {
   }
 
-  ~StreamBufProducer() noexcept
+  ~StreamBufProducer()
   {
     // ~StreamBufConsumer should have freed all blocks (~StreamBufConsumer should be called before ~StreamBufProducer due to inheritance order).
     ASSERT(m_total_allocated == m_total_freed);
@@ -632,7 +632,7 @@ class StreamBufConsumer
  protected:
   inline StreamBufConsumer();
 
-  ~StreamBufConsumer() noexcept
+  ~StreamBufConsumer()
   {
     while (release_memory_block(m_get_area_block_node))
       ;
@@ -851,7 +851,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 
  protected:     // destructor
   // Should only be called by release()
-  virtual ~StreamBuf() noexcept { Dout(dc::io, "~StreamBuf() [" << this << ']'); }
+  virtual ~StreamBuf() { Dout(dc::io, "~StreamBuf() [" << this << ']'); }
 
  public:
   // When both (or the only) associated devices call this function, then we delete ourselfs.

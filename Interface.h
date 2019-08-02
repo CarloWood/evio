@@ -96,7 +96,7 @@ class Interfaces
       ;
     Dout(dc::notice, "Found " << m_size << " interfaces.");
   }
-  ~Interfaces() noexcept
+  ~Interfaces()
   {
     freeifaddrs(m_ifaddrs);
   }

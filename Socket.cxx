@@ -228,7 +228,7 @@ SocketAddress Socket::local_address() const
   return result;
 }
 
-Socket::~Socket() noexcept
+Socket::~Socket()
 {
 }
 
