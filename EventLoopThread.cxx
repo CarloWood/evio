@@ -153,6 +153,17 @@ void EventLoopThread::main()
       if (event.events == 0)
         continue;       // The FileDescriptor is being_processed_by_thread_pool for all returned events.
       Dout(dc::evio, "epoll_pwait new event: " << event);
+      if (AI_UNLIKELY(device->inhibit_deletion(false) == 0))
+      {
+        // If inhibit_deletion returned zero then this device was marked for deletion in between
+        // returning from epoll_pwait and the call to test_and_set_being_processed_by_thread_pool.
+        // In that case we may not increment the reference count because decrementing it later
+        // would delete it twice (not to mention that we could access it after it was already
+        // deleted because this device is now in the m_needs_deletion_list list and will be deleted
+        // at the end of this loop.
+        device->AIRefCount::allow_deletion(true);
+        continue;
+      }
 
       CWDEBUG_ONLY(bool queue_was_full = false;)
       {
@@ -165,30 +176,24 @@ void EventLoopThread::main()
             // Queue is full! Wait for a broadcast.
             Dout(dc::warning(!queue_was_full), "Thread pool queue " << m_handler << " is full! Now no longer handling any socket etc. I/O until this is resolved.");
             Debug(queue_was_full = true);
-            queue_access.wait();                    // Wait until queue_access.notify_one() is called.
+            queue_access.wait();                                // Wait until queue_access.notify_one() is called.
           }
           else
           {
             Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
             Dout(dc::evio, "Queuing I/O event " << event << " for " << device << " in thread pool queue " << m_handler);
-            device->inhibit_deletion();
             queue_access.move_in([device, events = event.events, epoll_fd = m_epoll_fd](){
-              int allow_deletion_count = 1;      // Balance with the call to inhibit_deletion() above.
+              int allow_deletion_count = 1;                     // Balance with the call to inhibit_deletion(false) above.
               if (AI_UNLIKELY(events & ~(EPOLLIN|EPOLLOUT)))
               {
                 if ((events & EPOLLHUP))
-                {
                   device->hup_event(allow_deletion_count);
-                  device->close();      // Leaving this alive would cause a flood of events.
-                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLHUP);
-                }
                 else if ((events & EPOLLERR))
-                {
-                  device->err_event(allow_deletion_count);
-                  device->clear_being_processed_by_thread_pool(epoll_fd, EPOLLERR);
-                }
+                  device->err_event(allow_deletion_count);      // Only call err_event when EPOLLHUP isn't set.
                 else
                   DoutFatal(dc::core, "event.events = " << std::hex << events);
+                device->close();      // Leaving this alive would cause a flood of events.
+                device->clear_being_processed_by_thread_pool(epoll_fd, events);
               }
               else
               {
