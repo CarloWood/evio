@@ -29,7 +29,6 @@
 
 #include "FileDescriptor.h"
 #include "StreamBuf.h"
-#include "utils/VTPtr.h"
 
 namespace evio {
 
@@ -41,54 +40,32 @@ class InputDeviceEventsHandler;
 class InputDevice : public virtual FileDescriptor
 {
  public:
-  struct VT_type
-  {
-    void* _input_user_data;    // Only use this after cloning a virtual table.
-    void (*_read_from_fd)      (int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_hup)               (int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_err)               (int& allow_deletion_count, InputDevice* self, int fd);
-    void (*_read_returned_zero)(int& allow_deletion_count, InputDevice* self);
-    void (*_read_error)        (int& allow_deletion_count, InputDevice* self, int err);
-    void (*_data_received)     (int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
+  // Event: 'fd' is readable.
+  //
+  // This default implementation reads data from the fd into the buffer until
+  // 1) read(2) reads less than the available buffer space, or
+  // 2) read(2) returns 0.
+  // 3) The buffer is full and max_alloc was reached.
+  // When the buffer is full stop_input_device is called.
+  // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
+  // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
+  // it calls the virtual function read_error, see below.
+  void read_from_fd(int& allow_deletion_count, int fd) override;
 
-    #define VT_evio_InputDevice { nullptr, read_from_fd, hup, err, read_returned_zero, read_error, data_received }
-  };
+  // Stream socket peer closed connection, or shut down writing half of connection.
+  void hup         (int& allow_deletion_count, int fd) override;
 
-  struct VT_impl
-  {
-    // Event: 'fd' is readable.
-    //
-    // This default implementation reads data from the fd into the buffer until
-    // 1) read(2) reads less than the available buffer space, or
-    // 2) read(2) returns 0.
-    // 3) The buffer is full and max_alloc was reached.
-    // When the buffer is full stop_input_device is called.
-    // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
-    // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
-    // it calls the virtual function read_error, see below.
-    static void read_from_fd(int& allow_deletion_count, InputDevice* self, int fd);
+  // There is some error condition on the file descriptor.
+  void err         (int& allow_deletion_count, int fd) override;
 
-    // Stream socket peer closed connection, or shut down writing half of connection.
-    static void hup(int& allow_deletion_count, InputDevice* self, int fd);
+  // The default behaviour is to close() the filedescriptor.
+  virtual void read_returned_zero(int& allow_deletion_count) { close_input_device(allow_deletion_count); }
 
-    // There is some error condition on the file descriptor.
-    static void err(int& allow_deletion_count, InputDevice* self, int fd);
+  // The default behaviour is to close() the filedescriptor.
+  virtual void read_error        (int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
 
-    // The default behaviour is to close() the filedescriptor.
-    static void read_returned_zero(int& allow_deletion_count, InputDevice* self) { self->close_input_device(allow_deletion_count); } // Read thread.
-
-    // The default behaviour is to close() the filedescriptor.
-    static void read_error(int& allow_deletion_count, InputDevice* self, int UNUSED_ARG(err)) { return self->close(allow_deletion_count); } // Read thread.
-
-    // The default behavior is to do nothing.
-    static void data_received(int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen);
-
-    // Virtual table of InputDevice.
-    static constexpr VT_type VT VT_evio_InputDevice;
-  };
-
-  virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
-  utils::VTPtr<InputDevice> VT_ptr;
+  // The default behavior is to do nothing.
+  virtual void data_received     (int& allow_deletion_count, char const* new_data, size_t rlen);
 
  private:
 #ifdef DEBUGDEVICESTATS
@@ -185,14 +162,6 @@ class InputDevice : public virtual FileDescriptor
 
   // Override base class virtual functions.
   void init_input_device(state_t::wat const& state_w) override;
-  void read_event(int& allow_deletion_count) override final { VT_ptr->_read_from_fd(allow_deletion_count, this, m_fd); }
-  void hup_event(int& allow_deletion_count) override { VT_ptr->_hup(allow_deletion_count, this, m_fd); }
-  void err_event(int& allow_deletion_count) override { VT_ptr->_err(allow_deletion_count, this, m_fd); }
-
-  // Events, called from VT_impl::read_from_fd.
-  void read_returned_zero(int& allow_deletion_count) { VT_ptr->_read_returned_zero(allow_deletion_count, this); }
-  void read_error(int& allow_deletion_count, int err) { VT_ptr->_read_error(allow_deletion_count, this, err); }
-  void data_received(int& allow_deletion_count, char const* new_data, size_t rlen) { VT_ptr->_data_received(allow_deletion_count, this, new_data, rlen); }
 };
 
 } // namespace evio

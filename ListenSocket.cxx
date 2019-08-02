@@ -110,10 +110,8 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog, size_t r
   start_input_device(state_w);
 }
 
-void ListenSocketDevice::VT_impl::read_from_fd(int& UNUSED_ARG(allow_deletion_count), InputDevice* _self, int fd)
+void ListenSocketDevice::read_from_fd(int& UNUSED_ARG(allow_deletion_count), int fd)
 {
-  ListenSocketDevice* self = static_cast<ListenSocketDevice*>(_self);
-
   int sock_fd;
   char accept_addr_buf[sizeof(struct sockaddr_un)];
   struct sockaddr* accept_addr_ptr =reinterpret_cast<struct sockaddr*>(accept_addr_buf);
@@ -124,13 +122,13 @@ void ListenSocketDevice::VT_impl::read_from_fd(int& UNUSED_ARG(allow_deletion_co
   {
     int err = errno;
     Dout(dc::finish|error_cf, (void*)&addrlen << ") = " << sock_fd);
-    if (err != EWOULDBLOCK && err != EAGAIN && self->maybe_out_of_fds())
+    if (err != EWOULDBLOCK && err != EAGAIN && maybe_out_of_fds())
       err = EMFILE;
 #ifdef CWDEBUG
     errno = err;
-    Dout(dc::warning|error_cf, "ListenSocketDevice::VT_impl::read_from_fd: accept");
+    Dout(dc::warning|error_cf, "ListenSocketDevice::read_from_fd: accept");
     if (err != EWOULDBLOCK && err != EAGAIN)
-      Dout(dc::warning, "ListenSocketDevice::VT_impl::read_from_fd: Need to throw exception: accept failed");
+      Dout(dc::warning, "ListenSocketDevice::read_from_fd: Need to throw exception: accept failed");
 #endif
     return;
   }
@@ -138,11 +136,11 @@ void ListenSocketDevice::VT_impl::read_from_fd(int& UNUSED_ARG(allow_deletion_co
   Dout(dc::finish, '{' << accept_addr << "}, " << '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
   Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << accept_addr);
 
-  self->spawn_accepted(sock_fd, accept_addr);
+  spawn_accepted(sock_fd, accept_addr);
 }
 
 //static
-bool ListenSocketDevice::VT_impl::maybe_out_of_fds(ListenSocketDevice* UNUSED_ARG(self))
+bool ListenSocketDevice::maybe_out_of_fds()
 {
   int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd >= 0)

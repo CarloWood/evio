@@ -26,7 +26,6 @@
 #include "FileDescriptor.h"
 #include "StreamBuf.h"
 #include "Protocol.h"
-#include "utils/VTPtr.h"
 
 namespace utils {
 class FuzzyCondition;
@@ -40,39 +39,20 @@ class OutputBuffer;
 class OutputDevice : public virtual FileDescriptor
 {
  public:
-  struct VT_type
-  {
-    void* _output_user_data;    // Only use this after cloning a virtual table.
-    void (*_write_to_fd)(int& allow_deletion_count, OutputDevice*, int);
-    void (*_write_error)(int& allow_deletion_count, OutputDevice*, int);
+  // Event: fd is writable.
+  //
+  // This default implementation writes data from the buffer to the fd until
+  // 1) the buffer is empty, or
+  // 2) write(2) wrote less than the number of bytes passed to it, or
+  // 3) write(2) returned an error other than EAGAIN or EINTR, or
+  // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
+  // 5) write(2) returned EINTR caused by SIGPIPE.
+  // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
+  // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
+  void write_to_fd(int& allow_deletion_count, int fd) override;
 
-    #define VT_evio_OutputDevice { nullptr, write_to_fd, write_error }
-  };
-
-  struct VT_impl
-  {
-    // Event: fd is writable.
-    //
-    // This default implementation writes data from the buffer to the fd until
-    // 1) the buffer is empty, or
-    // 2) write(2) wrote less than the number of bytes passed to it, or
-    // 3) write(2) returned an error other than EAGAIN or EINTR, or
-    // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
-    // 5) write(2) returned EINTR caused by SIGPIPE.
-    // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
-    // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-    static void write_to_fd(int& allow_deletion_count, OutputDevice* self, int fd);
-
-    // This default implementation `close's the object (which removes it).
-    static void write_error(int& allow_deletion_count, OutputDevice* self, int UNUSED_ARG(err)) { self->close(allow_deletion_count); }
-
-    // Virtual table of OutputDevice.
-    static constexpr VT_type VT VT_evio_OutputDevice;
-  };
-
-  // Make a deep copy of VT_ptr.
-  virtual VT_type* clone_VT() { return VT_ptr.clone(this); }
-  utils::VTPtr<OutputDevice> VT_ptr;
+  // This default implementation `close's the object (which removes it).
+  virtual void write_error(int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
 
  private:
   using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
@@ -204,10 +184,6 @@ class OutputDevice : public virtual FileDescriptor
   // Override base class virtual functions.
   void init_output_device(state_t::wat const& state_w) override;
   void close_output_device(int& allow_deletion_count) override final;
-  void write_event(int& allow_deletion_count) override final { VT_ptr->_write_to_fd(allow_deletion_count, this, m_fd); }
-
-  // Events, called from VT_impl::write_to_fd.
-  void write_error(int& allow_deletion_count, int err) { VT_ptr->_write_error(allow_deletion_count, this, err); }
 };
 
 } // namespace evio

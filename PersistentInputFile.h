@@ -35,22 +35,8 @@ class PersistentInputFile : public File, private INotify
   void closed(int& allow_deletion_count) override;
 
  public:
-  using VT_type = File::VT_type;
-  #define VT_evio_PersistentInputFile VT_evio_File
-
-  struct VT_impl : File::VT_impl
-  {
-    // Override InputDevice::read_returned_zero().
-    static void read_returned_zero(int& allow_deletion_count, InputDevice* self);
-
-    // Virtual table of PersistentInputFile.
-    static constexpr VT_type VT VT_evio_PersistentInputFile;
-  };
-
-  // Make a deep copy of VT_ptr.
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
-  utils::VTPtr<PersistentInputFile, File> VT_ptr;
+  // Override InputDevice::read_returned_zero().
+  void read_returned_zero(int& allow_deletion_count) override;
 
  protected:
   // Override method of INotify.
@@ -65,7 +51,7 @@ class PersistentInputFile : public File, private INotify
   }
 
  public:
-  PersistentInputFile() : VT_ptr(this) { }
+  PersistentInputFile() { }
 };
 
 } // namespace evio

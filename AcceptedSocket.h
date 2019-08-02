@@ -30,8 +30,6 @@ namespace evio {
 template<typename INPUTDECODER, typename OUTPUTDEVICEPTR>
 class AcceptedSocket : public Socket
 {
-  #define VT_evio_AcceptedSocket VT_evio_Socket
-
   static_assert(std::is_base_of_v<InputDecoder, INPUTDECODER>, "INPUTDECODER must be derived from evio::InputDecoder.");
   static_assert(std::is_base_of_v<OutputDevicePtr, OUTPUTDEVICEPTR>, "OUTPUTDEVICEPTR must be derived from evio::OutputDevicePtr (e.g. evio::OutputStream).");
  public:

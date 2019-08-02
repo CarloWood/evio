@@ -132,86 +132,82 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
   }
 }
 
-void Socket::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* _self, int fd)
+void Socket::read_from_fd(int& allow_deletion_count, int fd)
 {
-  Socket* self = static_cast<Socket*>(_self);
   // This is false when signal_connected is set, because in that case we monitor
   // this socket for writablity and use that to detect when it is connected.
   // Otherwise it is only true at most once.
-  if (AI_UNLIKELY(!(self->m_connected_flags & (signal_connected|is_connected))))
+  if (AI_UNLIKELY(!(m_connected_flags & (signal_connected|is_connected))))
   {
-    self->m_connected_flags |= is_connected;
+    m_connected_flags |= is_connected;
   }
   // Call base class implementation.
-  InputDevice::VT_impl::read_from_fd(allow_deletion_count, _self, fd);
+  InputDevice::read_from_fd(allow_deletion_count, fd);
 }
 
 // Read thread.
-void Socket::VT_impl::write_to_fd(int& allow_deletion_count, OutputDevice* _self, int fd)
+void Socket::write_to_fd(int& allow_deletion_count, int fd)
 {
-  Socket* self = static_cast<Socket*>(_self);
-  if (AI_UNLIKELY(!(self->m_connected_flags & is_connected)))
+  if (AI_UNLIKELY(!(m_connected_flags & is_connected)))
   {
     // As soon as we can write to a file descriptor, we are connected.
-    self->m_connected_flags |= is_connected;
-    if ((self->m_connected_flags & signal_connected))
+    m_connected_flags |= is_connected;
+    if ((m_connected_flags & signal_connected))
     {
-      self->connected(allow_deletion_count, true); // Signal successful connect.
+      connected(allow_deletion_count, true); // Signal successful connect.
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
-      if (self->m_obuffer)
+      if (m_obuffer)
       {
-        utils::FuzzyCondition condition_empty_buffer([m_obuffer = self->m_obuffer]{
+        utils::FuzzyCondition condition_empty_buffer([m_obuffer = m_obuffer]{
             return m_obuffer->StreamBufConsumer::buffer_empty();
         });
         if (condition_empty_buffer.is_momentary_true() &&
-            self->stop_output_device(allow_deletion_count, condition_empty_buffer))
+            stop_output_device(allow_deletion_count, condition_empty_buffer))
           return;
       }
       else
       {
-        Dout(dc::warning, "Socket::VT_impl::write_to_fd: Closing output device because it has no output buffer [" << self << "]");
-        self->stop_output_device(allow_deletion_count);
+        Dout(dc::warning, "Socket::write_to_fd: Closing output device because it has no output buffer [" << this << "]");
+        stop_output_device(allow_deletion_count);
         return;
       }
     }
   }
   // Call base class implementation.
-  OutputDevice::VT_impl::write_to_fd(allow_deletion_count, _self, fd);
+  OutputDevice::write_to_fd(allow_deletion_count, fd);
 }
 
-void Socket::VT_impl::connected(int& CWDEBUG_ONLY(allow_deletion_count), Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
+void Socket::connected(int& CWDEBUG_ONLY(allow_deletion_count), bool CWDEBUG_ONLY(success))
 {
-  DoutEntering(dc::evio, "Socket::connected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
-  // Clone VT and override to implement this.
+  DoutEntering(dc::evio, "Socket::connected({" << allow_deletion_count << "}, " << success << ") [" << this << "]");
+  // Override to implement this.
 }
 
-void Socket::VT_impl::read_returned_zero(int& allow_deletion_count, InputDevice* _self)
+void Socket::read_returned_zero(int& allow_deletion_count)
 {
-  Socket* self = static_cast<Socket*>(_self);
-  DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << self << "]");
-  self->m_connected_flags |= is_disconnected;
-  self->close(allow_deletion_count);
-  self->disconnected(allow_deletion_count, true); // Clean termination.
+  DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << this << "]");
+  m_connected_flags |= is_disconnected;
+  close(allow_deletion_count);
+  disconnected(allow_deletion_count, true); // Clean termination.
 }
 
-void Socket::VT_impl::read_error(int& allow_deletion_count, InputDevice* _self, int CWDEBUG_ONLY(err))
+void Socket::read_error(int& allow_deletion_count, int CWDEBUG_ONLY(err))
 {
-  Socket* self = static_cast<Socket*>(_self);
-  DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << self << "]");
-  self->close(allow_deletion_count);
-  if ((self->m_connected_flags & (signal_connected|is_connected)) == signal_connected)
-    self->connected(allow_deletion_count, false); // Signal connect failure.
-  if ((self->m_connected_flags & is_connected))
+  DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << this << "]");
+  close(allow_deletion_count);
+  if ((m_connected_flags & (signal_connected|is_connected)) == signal_connected)
+    connected(allow_deletion_count, false); // Signal connect failure.
+  if ((m_connected_flags & is_connected))
   {
-    self->m_connected_flags |= is_disconnected;
-    self->disconnected(allow_deletion_count, false); // Unclean termination.
+    m_connected_flags |= is_disconnected;
+    disconnected(allow_deletion_count, false); // Unclean termination.
   }
 }
 
-void Socket::VT_impl::disconnected(int& CWDEBUG_ONLY(allow_deletion_count), Socket* CWDEBUG_ONLY(self), bool CWDEBUG_ONLY(success))
+void Socket::disconnected(int& CWDEBUG_ONLY(allow_deletion_count), bool CWDEBUG_ONLY(success))
 {
-  DoutEntering(dc::evio, "Socket::disconnected({" << allow_deletion_count << "}, " << success << ") [" << self << "]");
-  // Clone VT and override to implement this.
+  DoutEntering(dc::evio, "Socket::disconnected({" << allow_deletion_count << "}, " << success << ") [" << this << "]");
+  // Override to implement this.
 }
 
 SocketAddress Socket::local_address() const

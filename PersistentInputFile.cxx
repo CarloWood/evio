@@ -37,28 +37,27 @@ void PersistentInputFile::closed(int& allow_deletion_count)
 }
 
 // Read thread.
-void PersistentInputFile::VT_impl::read_returned_zero(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* _self)
+void PersistentInputFile::read_returned_zero(int& CWDEBUG_ONLY(allow_deletion_count))
 {
-  PersistentInputFile* self = static_cast<PersistentInputFile*>(_self);
-  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero({" << allow_deletion_count << "}) [" << self << ']');
+  DoutEntering(dc::evio, "PersistentInputFile::read_returned_zero({" << allow_deletion_count << "}) [" << this << ']');
   {
     // Lock m_state and then make sure that no new data was appended to the file in the meantime.
-    state_t::wat state_w(self->m_state);
+    state_t::wat state_w(m_state);
     char buf[1];
     int rlen;
-    while ((rlen = ::read(self->m_fd, buf, 1)) == -1 && errno == EAGAIN)
+    while ((rlen = ::read(m_fd, buf, 1)) == -1 && errno == EAGAIN)
       ;
     if (AI_UNLIKELY(rlen == 1))
       throw OneMoreByte{buf[0]};
-    self->stop_input_device(state_w);
+    stop_input_device(state_w);
   }
   // Add an inotify watch for modification of the corresponding path (if not already watched).
-  if (!self->is_watched() && !self->open_filename().empty())
+  if (!is_watched() && !open_filename().empty())
   {
-    self->add_watch(self->open_filename().c_str(), IN_MODIFY);
-    CWDEBUG_ONLY(int count =) self->inhibit_deletion(); // Keep this object alive because the call to add_watch registered m_inotify as callback object.
+    add_watch(open_filename().c_str(), IN_MODIFY);
+    CWDEBUG_ONLY(int count =) inhibit_deletion(); // Keep this object alive because the call to add_watch registered m_inotify as callback object.
                                                         // Object is kept alive until a call to allow_deletion() caused by a call to PersistentInputFile::closed().
-    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << self << ']');
+    Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") of this device [" << this << ']');
   }
 }
 

@@ -47,34 +47,18 @@ class Socket;
 class Socket : public InputDevice, public OutputDevice
 {
  public:
-  struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
-  {
-    void (*_connected)   (int& allow_deletion_count, Socket*, bool);
-    void (*_disconnected)(int& allow_deletion_count, Socket*, bool success);
-
-    #define VT_evio_Socket { VT_evio_InputDevice, VT_evio_OutputDevice, connected, disconnected }
-  };
-
-  struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
-  {
-    // Overridden to detect successful connections.
-    static void read_from_fd(int& allow_deletion_count, InputDevice* _self, int fd);
-    // Overridden to detect connection termination.
-    static void read_returned_zero(int& allow_deletion_count, InputDevice* _self);
-    // Overridden to detect connect failures and connection abortions.
-    static void read_error(int& allow_deletion_count, InputDevice* _self, int err);
-    // Overridden to detect connects.
-    static void write_to_fd(int& allow_deletion_count, OutputDevice* _self, int fd);
-    // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
-    static void connected(int& allow_deletion_count, Socket* self, bool success);
-    // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
-    static void disconnected(int& allow_deletion_count, Socket* self, bool success);
-
-    static constexpr VT_type VT VT_evio_Socket;
-  };
-
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }
-  utils::VTPtr<Socket, InputDevice, OutputDevice> VT_ptr;
+  // Overridden to detect successful connections.
+  void read_from_fd(int& allow_deletion_count, int fd) override;
+  // Overridden to detect connection termination.
+  void read_returned_zero(int& allow_deletion_count) override;
+  // Overridden to detect connect failures and connection abortions.
+  void read_error(int& allow_deletion_count, int err) override;
+  // Overridden to detect connects.
+  void write_to_fd(int& allow_deletion_count, int fd) override;
+  // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
+  virtual void connected(int& allow_deletion_count, bool success);
+  // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
+  virtual void disconnected(int& allow_deletion_count, bool success);
 
  protected:
   //---------------------------------------------------------------------------
@@ -109,18 +93,12 @@ class Socket : public InputDevice, public OutputDevice
     return reinterpret_cast<struct sockaddr_un const*>(static_cast<struct sockaddr const*>(m_remote_address))->sun_path;
   }
 
- private:
-  // Event, called from VT_impl::write_to_fd (success) and VT_impl::read_error (failure).
-  void connected(int& allow_deletion_count, bool success) { VT_ptr->_connected(allow_deletion_count, this, success); }
-  // Event, called from VT_impl::read_returned_zero (success) and VT_impl::read_error (failure).
-  void disconnected(int& allow_deletion_count, bool success) { VT_ptr->_disconnected(allow_deletion_count, this, success); }
-
  public:
   //---------------------------------------------------------------------------
   // Constructor
   //
 
-  Socket() : VT_ptr(this) { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
+  Socket() { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
   ~Socket() noexcept;
 
   // Set the socket buffer sizes.

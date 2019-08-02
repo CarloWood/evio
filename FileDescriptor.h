@@ -390,7 +390,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   int m_fd;                                     // The file descriptor. In the case of a device that is derived from both,
                                                 // InputDevice and OutputDevice using multiple inheritance -- this fd is
                                                 // used for both input and output.
-  mutable FileDescriptor const* m_next;     // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
+  mutable FileDescriptor const* m_next;         // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
                                                 // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
   alignas(cacheline_size_c) std::atomic<uint32_t> m_being_processed_by_thread_pool;     // Mask of events being handled by the thread pool.
 
@@ -432,19 +432,11 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     return m_being_processed_by_thread_pool.fetch_or(events, std::memory_order_relaxed);
   }
 
-  void do_epoll_ctl(FileDescriptor::state_t::wat const& state_w, int epoll_fd, int op)
+  bool is_being_processed_by_thread_pool(uint32_t event)
   {
-    Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
-    DEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
-    Dout(dc::finish|cond_error_cf(ret == -1), ret);
-    // If epoll_fd == -1 and errno EBADF: did you create an EventLoop object at the start of main?
-    // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.
-    if (AI_UNLIKELY(ret == -1))
-    {
-      // This is an unrecoverable error... Application should print this information and terminate.
-      THROW_FALERTE("epoll_ctl([EPOLL_FD], [EPOLL_OP_STR], [FD], [EPOLL_EVENT]) = -1",
-          AIArgs("[EPOLL_FD]", epoll_fd)("[EPOLL_OP_STR]", epoll_op_str(op))("[FD]", m_fd)("[EPOLL_EVENT]", state_w->m_epoll_event));
-    }
+    // This is expected to be a single event (active_flag).
+    ASSERT(utils::is_power_of_two(event));
+    return (m_being_processed_by_thread_pool.load(std::memory_order_relaxed) & event);
   }
 
   // This is called by an AIThreadPool thread after it processed an event.
@@ -462,11 +454,19 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     }
   }
 
-  bool is_being_processed_by_thread_pool(uint32_t event)
+  void do_epoll_ctl(FileDescriptor::state_t::wat const& state_w, int epoll_fd, int op)
   {
-    // This is expected to be a single event (active_flag).
-    ASSERT(utils::is_power_of_two(event));
-    return (m_being_processed_by_thread_pool.load(std::memory_order_relaxed) & event);
+    Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
+    DEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
+    Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    // If epoll_fd == -1 and errno EBADF: did you create an EventLoop object at the start of main?
+    // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.
+    if (AI_UNLIKELY(ret == -1))
+    {
+      // This is an unrecoverable error... Application should print this information and terminate.
+      THROW_FALERTE("epoll_ctl([EPOLL_FD], [EPOLL_OP_STR], [FD], [EPOLL_EVENT]) = -1",
+          AIArgs("[EPOLL_FD]", epoll_fd)("[EPOLL_OP_STR]", epoll_op_str(op))("[FD]", m_fd)("[EPOLL_EVENT]", state_w->m_epoll_event));
+    }
   }
 
   void start_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_adding)
@@ -495,26 +495,11 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
  private:
   // These are called from EventLoopThread::main().
   friend class EventLoopThread;
-  virtual void read_event(int& UNUSED_ARG(allow_deletion_count))
-  {
-    ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptor::read_event() on object [" << this << "] that isn't an InputDevice.");
-  }
-  virtual void write_event(int& UNUSED_ARG(allow_deletion_count))
-  {
-    ASSERT(!is_destructed());
-    DoutFatal(dc::core, "Calling FileDescriptor::write_event() on object [" << this << "] that isn't an OutputDevice.");
-  }
-  virtual void hup_event(int& UNUSED_ARG(allow_deletion_count))
-  {
-    ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::hup_event() on object [" << this << "] that isn't an InputDevice.");
-  }
-  virtual void err_event(int& UNUSED_ARG(allow_deletion_count))
-  {
-    ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::err_event() on object [" << this << "] that isn't an InputDevice.");
-  }
+  void read_event(int& allow_deletion_count) { read_from_fd(allow_deletion_count, m_fd); }
+  void write_event(int& allow_deletion_count) { write_to_fd(allow_deletion_count, m_fd); }
+  void hup_event(int& allow_deletion_count) { hup(allow_deletion_count, m_fd); }
+  void err_event(int& allow_deletion_count) { err(allow_deletion_count, m_fd); }
+
 #if 0
   // Returns the events that were not busy before.
   uint32_t test_and_set_busy(uint32_t events)
@@ -541,7 +526,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
 
  protected:
   FileDescriptor() : m_fd(-1), m_being_processed_by_thread_pool(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
-  ~FileDescriptor() noexcept { }
+  virtual ~FileDescriptor() { }
 
  protected:
 #ifdef CWDEBUG
@@ -552,6 +537,30 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
 #endif
 
  protected:
+  virtual void read_from_fd(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
+  {
+    ASSERT(!is_destructed());
+    DoutFatal(dc::core, "Calling FileDescriptor::read_read_fd() on object [" << this << "] that isn't an InputDevice.");
+  }
+
+  virtual void write_to_fd(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
+  {
+    ASSERT(!is_destructed());
+    DoutFatal(dc::core, "Calling FileDescriptor::write_to_fd() on object [" << this << "] that isn't an OutputDevice.");
+  }
+
+  virtual void hup(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
+  {
+    ASSERT(!is_destructed());
+    Dout(dc::warning, "Calling FileDescriptor::hup() on object [" << this << "] that isn't an InputDevice.");
+  }
+
+  virtual void err(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
+  {
+    ASSERT(!is_destructed());
+    Dout(dc::warning, "Calling FileDescriptor::err() on object [" << this << "] that isn't an InputDevice.");
+  }
+
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual void close_input_device(int& UNUSED_ARG(allow_deletion_count)) { }
   virtual void close_output_device(int& UNUSED_ARG(allow_deletion_count)) { }

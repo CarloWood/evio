@@ -41,21 +41,6 @@ namespace evio {
 
 class File : public InputDevice, public OutputDevice
 {
- public:
-  struct VT_type : InputDevice::VT_type, OutputDevice::VT_type
-  {
-    #define VT_evio_File { VT_evio_InputDevice, VT_evio_OutputDevice }
-  };
-
-  struct VT_impl : InputDevice::VT_impl, OutputDevice::VT_impl
-  {
-    // Virtual table of File.
-    static constexpr VT_type VT VT_evio_File;
-  };
-
-  VT_type* clone_VT() override { return VT_ptr.clone(this); }
-  utils::VTPtr<File, InputDevice, OutputDevice> VT_ptr;
-
  private:
   std::string m_filename;       // The name of the opened file.
 
@@ -65,7 +50,7 @@ class File : public InputDevice, public OutputDevice
   //
 
   // Default constructor.
-  File() : VT_ptr(this) { DoutEntering(dc::evio, "File::File() [" << this << "]"); }
+  File() { DoutEntering(dc::evio, "File::File() [" << this << "]"); }
 
   //---------------------------------------------------------------------------
   // Public manipulators.

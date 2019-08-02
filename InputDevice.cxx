@@ -32,7 +32,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : VT_ptr(this), m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
+InputDevice::InputDevice() : m_input_device_events_handler(nullptr), m_ibuffer(nullptr)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
@@ -87,8 +87,6 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   // auto device = evio::create<File<InputDevice>>();
   // device->open("filename.txt");
   ASSERT(!is_destructed());
-  // Call set_sink() on an InputDevice before starting it (except when the InputDevice overrides read_from_fd).
-  ASSERT(m_ibuffer || VT_ptr->_read_from_fd != VT_impl::VT._read_from_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an InputDevice.
   // The reason being that we need to enforce that *only* a GetThread starts an input watcher.
   EventLoopThread::instance().start(state_w, this);
@@ -180,19 +178,24 @@ void InputDevice::close_input_device(int& allow_deletion_count)
     closed(allow_deletion_count);
 }
 
-void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* self, int fd)
+void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
 {
-  DoutEntering(dc::evio, "InputDevice::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
-  ssize_t space = self->m_ibuffer->dev2buf_contiguous();
+  DoutEntering(dc::evio, "InputDevice::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
+#ifdef CWDEBUG
+  // Call set_sink() on an InputDevice before starting it.
+  if (!m_ibuffer)
+    DoutFatal(dc::core, "Error: m_ibuffer == nullptr; call set_sink() on an InputDevice before starting it.");
+#endif
+  ssize_t space = m_ibuffer->dev2buf_contiguous();
 
   for (;;)
   {
     // Allocate more space in the buffer if needed.
     if (space == 0 &&
-        (space = self->m_ibuffer->dev2buf_contiguous_forced()) == 0)
+        (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
-      Dout(dc::warning, "InputDevice::VT_impl::read_from_fd(" << self << ", " << fd << ": the input buffer has reached max. capacity!");
-      self->stop_input_device();        // Stop reading the filedescriptor.
+      Dout(dc::warning, "InputDevice::read_from_fd(" << fd << "): the input buffer has reached max. capacity!");
+      stop_input_device();      // Stop reading the filedescriptor.
       // After a call to stop_input_device() it is possible that another thread
       // starts it again and enters read_from_fd from the top. We are therefore
       // no longer allowed to do anything. We also don't need to do anything
@@ -201,7 +204,7 @@ void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* 
     }
 
     ssize_t rlen;
-    char* new_data = self->m_ibuffer->dev2buf_ptr();
+    char* new_data = m_ibuffer->dev2buf_ptr();
 
     for (;;)                                            // Loop for EINTR.
     {
@@ -213,7 +216,7 @@ void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* 
         if (err != EINTR)
         {
           if (err != EAGAIN && err != EWOULDBLOCK)
-            self->read_error(allow_deletion_count, err);
+            read_error(allow_deletion_count, err);
           return;
         }
       }
@@ -225,7 +228,7 @@ void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* 
       Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = 0 (EOF)");
       try
       {
-        self->read_returned_zero(allow_deletion_count);
+        read_returned_zero(allow_deletion_count);
         // In the case of a PersistentInputFile, read_returned_zero calls stop_input_device() and returns.
         // Therefore we must also return immediately from read_returned_zero, see above.
         return;
@@ -238,20 +241,20 @@ void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* 
       }
     }
 
-    self->m_ibuffer->dev2buf_bump(rlen);
+    m_ibuffer->dev2buf_bump(rlen);
     Dout(dc::system|dc::evio, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = " << rlen);
 #ifdef DEBUGDEVICESTATS
-    self->m_received_bytes += rlen;
+    m_received_bytes += rlen;
 #endif
     Dout(dc::evio, "Read " << rlen << " bytes from fd " << fd <<
 #ifdef DEBUGDEVICESTATS
-    " [total received now: " << self->m_received_bytes << " bytes]"
+    " [total received now: " << m_received_bytes << " bytes]"
 #endif
-      " [" << self << ']');
+      " [" << this << ']');
 
     // The data is now in the buffer. This is where we become the consumer thread.
     int prev_allow_deletion_count = allow_deletion_count;
-    self->data_received(allow_deletion_count, new_data, rlen);
+    data_received(allow_deletion_count, new_data, rlen);
 
     if (AI_UNLIKELY(allow_deletion_count > prev_allow_deletion_count))
     {
@@ -278,59 +281,58 @@ void InputDevice::VT_impl::read_from_fd(int& allow_deletion_count, InputDevice* 
   }
 }
 
-void InputDevice::VT_impl::hup(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+void InputDevice::hup(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
 }
 
-void InputDevice::VT_impl::err(int& CWDEBUG_ONLY(allow_deletion_count), InputDevice* CWDEBUG_ONLY(self), int CWDEBUG_ONLY(fd))
+void InputDevice::err(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
 {
-  DoutEntering(dc::evio, "InputDevice::err({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
+  DoutEntering(dc::evio, "InputDevice::err({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
 }
 
-// BRWT.
-void InputDevice::VT_impl::data_received(int& allow_deletion_count, InputDevice* self, char const* new_data, size_t rlen)
+void InputDevice::data_received(int& allow_deletion_count, char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "InputDevice::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << self << ']');
+  DoutEntering(dc::io, "InputDevice::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << this << ']');
 
   // This function is both the Get Thread and the Put Thread; meaning that no other
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
 
   size_t len;
-  while ((len = self->m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
+  while ((len = m_input_device_events_handler->end_of_msg_finder(new_data, rlen)) > 0)
   {
     // If end_of_msg_finder returns a value larger than 0 then m_input_device_events_handler must be (derived from) a InputDecoder.
-    InputDecoder* input_decoder = static_cast<InputDecoder*>(self->m_input_device_events_handler);
+    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_input_device_events_handler);
     // We seem to have a complete new message and need to call `decode'
-    if (self->m_ibuffer->has_multiple_blocks())
+    if (m_ibuffer->has_multiple_blocks())
     {
       // The new message must start at the beginning of the buffer,
       // so the total length of the new message is total size of
       // the buffer minus what was read on top of it.
-      size_t msg_len = self->m_ibuffer->get_data_size() - (rlen - len);
+      size_t msg_len = m_ibuffer->get_data_size() - (rlen - len);
 
-      if (self->m_ibuffer->is_contiguous(msg_len))
+      if (m_ibuffer->is_contiguous(msg_len))
       {
-        input_decoder->decode(allow_deletion_count, MsgBlock(self->m_ibuffer->raw_gptr(), msg_len, self->m_ibuffer->get_get_area_block_node()));
-        self->m_ibuffer->raw_gbump(msg_len);
+        input_decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
+        m_ibuffer->raw_gbump(msg_len);
       }
       else
       {
-        size_t block_size = self->m_ibuffer->m_minimum_block_size;
+        size_t block_size = m_ibuffer->m_minimum_block_size;
         if (AI_UNLIKELY(msg_len > block_size))
           block_size = utils::malloc_size(msg_len + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
         MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
-        self->m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
+        m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
         input_decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
-      ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
+      ASSERT(m_ibuffer->get_data_size() == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_readable())
+      m_ibuffer->raw_reduce_buffer_if_empty();
+      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
         return;
       rlen -= len;
       if (rlen == 0)
@@ -344,15 +346,15 @@ void InputDevice::VT_impl::data_received(int& allow_deletion_count, InputDevice*
     // The next loop eats up all complete messages in this last block.
     do
     {
-      char* start = self->m_ibuffer->raw_gptr();
+      char* start = m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, self->m_ibuffer->get_get_area_block_node()));
-      self->m_ibuffer->raw_gbump(msg_len);
+      input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
+      m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(self->m_ibuffer->get_data_size() == rlen - len);
+      ASSERT(m_ibuffer->get_data_size() == rlen - len);
 
-      self->m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_readable())
+      m_ibuffer->raw_reduce_buffer_if_empty();
+      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
         return;
       rlen -= len;
       if (rlen == 0)
@@ -371,7 +373,7 @@ size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_
   start_output_device();
   // This function MUST return 0 (returning a value larger than 0 is only allowed
   // by InputDecoder::end_of_msg_finder() or classes derived from InputDecoder).
-  // See the cast to InputDecoder in InputDevice::VT_impl::data_received.
+  // See the cast to InputDecoder in InputDevice::data_received.
   return 0;
 }
 

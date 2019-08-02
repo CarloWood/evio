@@ -32,7 +32,7 @@
 
 namespace evio {
 
-OutputDevice::OutputDevice() : VT_ptr(this), m_output_device_ptr(nullptr), m_obuffer(nullptr)
+OutputDevice::OutputDevice() : m_output_device_ptr(nullptr), m_obuffer(nullptr)
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
@@ -83,8 +83,6 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   // Call OutputDevice::init before calling OutputDevice::start_output_device and
   // don't call start_output_device when the device was closed.
   ASSERT(state_w->m_flags.is_w_open());
-  // Call set_source() on an OutputDevice before starting it (except when the OutputDevice overrides write_to_fd).
-  ASSERT(m_obuffer || VT_ptr->_write_to_fd != VT_impl::VT._write_to_fd);
   // This should be the ONLY place where EventLoopThread::start is called for an OutputDevice!
   // The reason being that we need to enforce that *only* a PutThread starts an output watcher.
   EventLoopThread::instance().start(state_w, this);
@@ -265,10 +263,15 @@ void OutputDevice::close_output_device(int& allow_deletion_count)
 
 // Write `m_obuffer' to fd.
 // BRT
-void OutputDevice::VT_impl::write_to_fd(int& allow_deletion_count, OutputDevice* self, int fd)
+void OutputDevice::write_to_fd(int& allow_deletion_count, int fd)
 {
-  DoutEntering(dc::io, "OutputDevice::VT_impl::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << self << ']');
-  OutputBuffer* const obuffer = self->m_obuffer;
+  DoutEntering(dc::io, "OutputDevice::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
+#ifdef CWDEBUG
+  // Call set_source() on an OutputDevice before starting it.
+  if (!m_obuffer)
+    DoutFatal(dc::core, "Error: m_obuffer == nullptr; call set_source() on an OutputDevice before starting it.");
+#endif
+  OutputBuffer* const obuffer = m_obuffer;
   for (;;) // This runs over all allocated blocks, when we are done we 'return'.
   {
     size_t len; // Available number of characters in current block.
@@ -300,7 +303,7 @@ void OutputDevice::VT_impl::write_to_fd(int& allow_deletion_count, OutputDevice*
       if (AI_UNLIKELY(condition_empty_buffer.is_momentary_false()))
         continue;
       // If during the cannonical test the buffer isn't empty anymore, continue reading.
-      if (AI_UNLIKELY(!self->stop_output_device(allow_deletion_count, condition_empty_buffer)))
+      if (AI_UNLIKELY(!stop_output_device(allow_deletion_count, condition_empty_buffer)))
         continue;
       return;
     }
@@ -314,12 +317,12 @@ try_again_write1:
       int err = errno;
       int const is_debug_channel =
 #ifdef CWDEBUG
-        FileDescriptor::state_t::wat(self->m_state)->m_flags.is_debug_channel();
+        FileDescriptor::state_t::wat(m_state)->m_flags.is_debug_channel();
 #else
         false;
 #endif
       // It can happen that the fd is already closed by another thread, as a result of a read event on this fd.
-      if (err == EBADF && FileDescriptor::state_t::wat(self->m_state)->m_flags.is_dead())
+      if (err == EBADF && FileDescriptor::state_t::wat(m_state)->m_flags.is_dead())
       {
         if (!is_debug_channel)
           Dout(dc::evio, "Leaving OutputDevice::write_to_fd() because fd was already closed.");
@@ -341,7 +344,7 @@ try_again_write1:
         // not support epoll) is supposedly because they CAN'T block(?). If this DOES
         // happen then I can't think of another solution then to immediately call write(2)
         // again though.
-        ASSERT(!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_regular_file());
+        ASSERT(!FileDescriptor::state_t::wat(m_state)->m_flags.is_regular_file());
         return;
       }
 #if EWOULDBLOCK != EAGAIN
@@ -350,21 +353,21 @@ try_again_write1:
         if (nr_eagain_errors--)
           goto try_again_write1;
         // See above.
-        ASSERT(!FileDescriptor::state_t::wat(self->m_state)->m_flags.is_regular_file());
+        ASSERT(!FileDescriptor::state_t::wat(m_state)->m_flags.is_regular_file());
         return;
       }
 #endif
-      self->write_error(allow_deletion_count, err);
+      write_error(allow_deletion_count, err);
       return;
     }
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
     obuffer->buf2dev_bump(wlen);
 #ifdef DEBUGDEVICESTATS
-    self->m_sent_bytes += wlen;
+    m_sent_bytes += wlen;
 #endif
     Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd
 #ifdef DEBUGDEVICESTATS
-      << " [total sent now " << self->m_sent_bytes << " bytes]"
+      << " [total sent now " << m_sent_bytes << " bytes]"
 #endif
       );
     obuffer->restart_input_device_if_needed();
@@ -373,10 +376,10 @@ try_again_write1:
       // This means we can't write more at the moment. In the case of regular
       // files that should really be true. For other cases it would be ok when
       // that is not the case: then we will get a new EPOLLOUT event.
-      Dout(dc::finish, " (Tried to write " << len << " bytes) [" << self << ']');
+      Dout(dc::finish, " (Tried to write " << len << " bytes) [" << this << ']');
       return;			// We wrote as much as currently possible.
     }
-    Dout(dc::finish, " [" << self << ']');
+    Dout(dc::finish, " [" << this << ']');
   }
 }
 
