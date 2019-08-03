@@ -38,7 +38,9 @@ SOURCES = FileDescriptor.cxx \
 	  PersistentInputFile.cxx \
 	  PersistentInputFile.h \
 	  INotify.cxx \
-	  INotify.h
+	  INotify.h \
+	  Pipe.cxx \
+	  Pipe.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@

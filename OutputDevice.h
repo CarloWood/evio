@@ -40,6 +40,9 @@ class LinkBufferPlus;
 class OutputDevice : public virtual FileDescriptor
 {
  public:
+  // The remote peer closed the connection.
+  void hup(int& allow_deletion_count, int UNUSED_ARG(fd)) override { close_output_device(allow_deletion_count); }
+
   // Event: fd is writable.
   //
   // This default implementation writes data from the buffer to the fd until
@@ -200,7 +203,14 @@ void OutputDevice::set_source(LinkBufferPlus* link_buffer)
 template<typename... Args>
 void OutputDevice::set_source(Source& output_device_ptr, Args... output_create_buffer_arguments)
 {
-  Dout(dc::evio, "OutputDevice::set_source(" << (void*)&output_device_ptr << ", ...) [" << this << ']');
+#ifdef CWDEBUG
+  LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
+  LibcwDoutStream << "Entering OutputDevice::set_source<";
+  LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
+    (void*)&output_device_ptr << join_more(", ", output_create_buffer_arguments...) << ") [" << this << ']';
+  LibcwDoutScopeEnd;
+  NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
+#endif
   m_source = &output_device_ptr;
   m_obuffer = m_source->create_buffer(this, output_create_buffer_arguments...);
 }
@@ -208,7 +218,7 @@ void OutputDevice::set_source(Source& output_device_ptr, Args... output_create_b
 template<typename INPUT_DEVICE>
 void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc)
 {
-  Dout(dc::evio, "OutputDevice::set_source([" << &*ptr << "], " << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::set_source<" << libcwd::type_info_of<INPUT_DEVICE>().demangled_name() << ">([" << &*ptr << "], " << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
 
   // We need to create a link buffer and use it to link the following two devices.
   InputDevice* input_device = ptr.get();

@@ -281,16 +281,6 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
   }
 }
 
-void InputDevice::hup(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
-{
-  DoutEntering(dc::evio, "InputDevice::hup({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
-}
-
-void InputDevice::err(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
-{
-  DoutEntering(dc::evio, "InputDevice::err({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
-}
-
 void InputDevice::data_received(int& allow_deletion_count, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "InputDevice::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << this << ']');

@@ -52,12 +52,6 @@ class InputDevice : public virtual FileDescriptor
   // it calls the virtual function read_error, see below.
   void read_from_fd(int& allow_deletion_count, int fd) override;
 
-  // Stream socket peer closed connection, or shut down writing half of connection.
-  void hup         (int& allow_deletion_count, int fd) override;
-
-  // There is some error condition on the file descriptor.
-  void err         (int& allow_deletion_count, int fd) override;
-
   // The default behaviour is to close() the filedescriptor.
   virtual void read_returned_zero(int& allow_deletion_count) { close_input_device(allow_deletion_count); }
 
@@ -173,7 +167,14 @@ namespace evio {
 template<typename... Args>
 void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments)
 {
-  Dout(dc::evio, "InputDevice::set_sink(" << (void*)&input_decoder << ", ...) [" << this << ']');
+#ifdef CWDEBUG
+  LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
+  LibcwDoutStream << "Entering InputDevice::set_sink<";
+  LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
+    (void*)&input_decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
+  LibcwDoutScopeEnd;
+  NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
+#endif
   m_ibuffer = static_cast<Sink&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
   m_sink = &input_decoder;
 }

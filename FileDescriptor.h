@@ -404,29 +404,37 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
 #endif
 
  public:
-  // This is called by the EventLoopThread to see if an event that was just returned
-  // by epoll_pwait() is still in the thread pool queue (or being processed by a thread).
+  // This is called by the EventLoopThread to see if an event that was just returned by epoll_pwait()
+  // is still (in the thread pool queue or) being processed by a thread.
+  //
+  // If one or two threads are handling EPOLLIN and/or EPOLLOUT still then we want
+  // to suppress any EPOLLHUP and/or EPOLLERR event too, but that is being handled
+  // in EventLoopThread::main.
+  //
   // Adds the events to m_being_processed_by_thread_pool.
   // Returns the events that are already being processed by thread pool.
   uint32_t test_and_set_being_processed_by_thread_pool(uint32_t events)
   {
     // events is what is returned by epoll_pwait and should only contain one or more of these four events.
     ASSERT((events & ~(EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR)) == 0);
-    // This is EventLoopThread, the only thread that sets bits in m_being_processed_by_thread_pool.
-    // Therefore, when m_being_processed_by_thread_pool is zero, it will remain zero and there is no need to use a RMW operation.
-    uint32_t prev_busy = m_being_processed_by_thread_pool.load(std::memory_order_acquire);
-    // Fast track the case where we suppress the same events over and over.
-    if (AI_LIKELY(events == prev_busy))
+
+    uint32_t prev_busy = m_being_processed_by_thread_pool.load(std::memory_order_relaxed);
+
+    // We fast-track the case where this function is called many times with the same events,
+    // because although it is possible that after reading the value of m_being_processed_by_thread_pool
+    // bits in it get reset by another thread. We can still assume that the load() was the
+    // fetch_or (which is a non-op when events == m_being_processed_by_thread_pool).
+    if (AI_LIKELY((prev_busy & events) == events))      // In this case the fetch_or is non-OP.
+      return events;
+
+    if (prev_busy == 0)
     {
-      // All events are to be suppressed.
-      return prev_busy;
-    }
-    else if (prev_busy == 0)
-    {
-      // There are no other threads accessing this variable.
+      // This is the only thread that sets bits m_being_processed_by_thread_pool.
+      // Therefore if that value is zero then it will stay zero and we can avoid the RMW.
       m_being_processed_by_thread_pool.store(events, std::memory_order_relaxed);
       return 0;
     }
+
     // Relaxed because this adds event bits and we're only interested to stop this
     // thread from calling this function again and then getting back those events.
     return m_being_processed_by_thread_pool.fetch_or(events, std::memory_order_relaxed);
@@ -512,6 +520,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   }
 #endif
  public:
+  // Used by the testsuite.
   bool is_busy() const
   {
     Dout(dc::notice, m_being_processed_by_thread_pool);
@@ -549,17 +558,21 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     DoutFatal(dc::core, "Calling FileDescriptor::write_to_fd() on object [" << this << "] that isn't an OutputDevice.");
   }
 
-  virtual void hup(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
-  {
-    ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::hup() on object [" << this << "] that isn't an InputDevice.");
-  }
 
-  virtual void err(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
-  {
-    ASSERT(!is_destructed());
-    Dout(dc::warning, "Calling FileDescriptor::err() on object [" << this << "] that isn't an InputDevice.");
-  }
+  // Stream socket peer closed connection before reading all data that was sent, or shut down writing half of connection (ie a pipe(2)).
+  //
+  // If this is not an OutputDevice then this default will be used: the HUP is ignored. The idea is that in most cases this will
+  // be an InputDevice and a HUP on a pure InputDevice is most likely a PipeReadEnd where the writing end of the pipe(2) was closed.
+  // We cannot and should not close the read end too: there might still be more data to read. Note that getting here in that case
+  // is extremely rare because normally we handle EPOLLIN before EPOLLHUP and should reach the EOF (read(2) returning 0) before
+  // handling the HUP. However, if the receive buffer is full - then we stop reading (remove EPOLLIN from the epoll interest list)
+  // while there is still more to read. In that case, if the writing half of the connection was closed, we get here and do nothing
+  // thus, so that we get a chance to read the rest in the pipe line.
+  virtual void hup(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd)) { }
+
+  // There is some error condition on the file descriptor (not a HUP).
+  // FIXME: when do we get here? Is closing always the right thing to do?
+  virtual void err(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd)) { close(); }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
   virtual void close_input_device(int& UNUSED_ARG(allow_deletion_count)) { }
