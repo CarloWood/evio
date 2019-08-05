@@ -392,7 +392,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
                                                 // used for both input and output.
   mutable FileDescriptor const* m_next;         // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
                                                 // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
-  alignas(cacheline_size_c) std::atomic<uint32_t> m_being_processed_by_thread_pool;     // Mask of events being handled by the thread pool.
+  alignas(cacheline_size_c) std::atomic<uint32_t> m_pending_events;     // Mask of events being handled by the thread pool.
 
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
@@ -411,55 +411,40 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   // to suppress any EPOLLHUP and/or EPOLLERR event too, but that is being handled
   // in EventLoopThread::main.
   //
-  // Adds the events to m_being_processed_by_thread_pool.
+  // Adds the events to m_pending_events.
   // Returns the events that are already being processed by thread pool.
-  uint32_t test_and_set_being_processed_by_thread_pool(uint32_t events)
+  uint32_t test_and_set_pending_events(uint32_t events)
   {
     // events is what is returned by epoll_pwait and should only contain one or more of these four events.
     ASSERT((events & ~(EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR)) == 0);
 
-    uint32_t prev_busy = m_being_processed_by_thread_pool.load(std::memory_order_relaxed);
+    uint32_t prev_busy = m_pending_events.load(std::memory_order_relaxed);
 
     // We fast-track the case where this function is called many times with the same events,
-    // because although it is possible that after reading the value of m_being_processed_by_thread_pool
+    // because although it is possible that after reading the value of m_pending_events
     // bits in it get reset by another thread. We can still assume that the load() was the
-    // fetch_or (which is a non-op when events == m_being_processed_by_thread_pool).
+    // fetch_or (which is a non-op when events == m_pending_events).
     if (AI_LIKELY((prev_busy & events) == events))      // In this case the fetch_or is non-OP.
       return events;
 
     if (prev_busy == 0)
     {
-      // This is the only thread that sets bits m_being_processed_by_thread_pool.
+      // This is the only thread that sets bits m_pending_events.
       // Therefore if that value is zero then it will stay zero and we can avoid the RMW.
-      m_being_processed_by_thread_pool.store(events, std::memory_order_relaxed);
+      m_pending_events.store(events, std::memory_order_relaxed);
       return 0;
     }
 
     // Relaxed because this adds event bits and we're only interested to stop this
     // thread from calling this function again and then getting back those events.
-    return m_being_processed_by_thread_pool.fetch_or(events, std::memory_order_relaxed);
+    return m_pending_events.fetch_or(events, std::memory_order_relaxed);
   }
 
-  bool is_being_processed_by_thread_pool(uint32_t event)
+  bool is_pending_events(uint32_t event)
   {
     // This is expected to be a single event (active_flag).
     ASSERT(utils::is_power_of_two(event));
-    return (m_being_processed_by_thread_pool.load(std::memory_order_relaxed) & event);
-  }
-
-  // This is called by an AIThreadPool thread after it processed an event.
-  void clear_being_processed_by_thread_pool(int epoll_fd, uint32_t event)
-  {
-    DoutEntering(dc::evio, "FileDescriptor::clear_being_processed_by_thread_pool(" << epoll_fd << ", " << epoll_events_str(event) << ") [" << this << "]");
-    FileDescriptor::state_t::wat state_w(m_state);
-    // Allow a new event to be added to the thread pool for this fd/event.
-    m_being_processed_by_thread_pool.fetch_and(~event, std::memory_order_release);
-    // Rearm fd/event if the current event is still interesting.
-    if ((state_w->m_epoll_event.events & event))
-    {
-      // Rearm fd.
-      do_epoll_ctl(state_w, epoll_fd, EPOLL_CTL_MOD);
-    }
+    return (m_pending_events.load(std::memory_order_relaxed) & event);
   }
 
   void do_epoll_ctl(FileDescriptor::state_t::wat const& state_w, int epoll_fd, int op)
@@ -477,12 +462,65 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     }
   }
 
+  void clear_pending_events(uint32_t events)
+  {
+    DoutEntering(dc::evio, "FileDescriptor::clear_pending_events(" << epoll_events_str(events) << ") [" << this << "]");
+    m_pending_events.fetch_and(~events, std::memory_order_release);
+  }
+
+  void clear_pending_input_event(int epoll_fd)
+  {
+    DoutEntering(dc::evio, "FileDescriptor::clear_pending_input_event(" << epoll_fd << ") [" << this << "]");
+    m_pending_events.fetch_and(~EPOLLIN, std::memory_order_release);
+
+    // Rearm fd/event if the current event is still interesting.
+    {
+      FileDescriptor::state_t::wat state_w(m_state);
+      if ((state_w->m_epoll_event.events & EPOLLIN))
+      {
+        // Rearm fd.
+        do_epoll_ctl(state_w, epoll_fd, EPOLL_CTL_MOD);
+      }
+    }
+  }
+
+  // This is called by an AIThreadPool thread after it processed an event.
+  // Returns new events that need to be handled by this thread.
+  void clear_pending_output_events(int epoll_fd, uint32_t& events)
+  {
+    DoutEntering(dc::evio|continued_cf, "FileDescriptor::clear_pending_output_events(" << epoll_fd << ", " << epoll_events_str(events) << ") [" << this << "] returning new events: ");
+
+    // Allow a new events to be added to the thread pool for this fd/event.
+    // Clear the just handled event(s) and get any pending error events.
+    events = m_pending_events.fetch_and(~events, std::memory_order_release) & ~(events | EPOLLIN | EPOLLOUT);
+
+    // Were there any EPOLLHUP and/or EPOLLERR events ignored in the meantime?
+    if (AI_UNLIKELY(events))
+    {
+      Dout(dc::finish, epoll_events_str(events));
+      // Handle those events in the same thread.
+      return;
+    }
+
+    // Rearm fd/event if EPOLLOUT is still interesting.
+    {
+      FileDescriptor::state_t::wat state_w(m_state);
+      if ((state_w->m_epoll_event.events & EPOLLOUT))
+      {
+        // Rearm fd.
+        do_epoll_ctl(state_w, epoll_fd, EPOLL_CTL_MOD);
+      }
+    }
+
+    Dout(dc::finish, "none");
+  }
+
   void start_watching(FileDescriptor::state_t::wat const& state_w, int epoll_fd, uint32_t event, bool needs_adding)
   {
     state_w->m_epoll_event.events |= event | EPOLLET;
     int op = needs_adding ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
 #if 0
-    if (AI_LIKELY(is_being_processed_by_thread_pool(event)))
+    if (AI_LIKELY(is_pending_events(event)))
       Dout(dc::notice, "Delaying addition of event " << epoll_events_str(event) << " with epoll_ctl [" << this << "]");
     else
 #endif
@@ -523,8 +561,8 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   // Used by the testsuite.
   bool is_busy() const
   {
-    Dout(dc::notice, m_being_processed_by_thread_pool);
-    return m_being_processed_by_thread_pool;
+    Dout(dc::notice, m_pending_events);
+    return m_pending_events;
   }
 
  private:
@@ -534,7 +572,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   virtual void init_output_device(state_t::wat const& UNUSED_ARG(state_w)) { }
 
  protected:
-  FileDescriptor() : m_fd(-1), m_being_processed_by_thread_pool(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
+  FileDescriptor() : m_fd(-1), m_pending_events(0) { state_t::wat state_w(m_state); state_w->m_epoll_event = {0, {this}}; }
   virtual ~FileDescriptor() { }
 
  protected:

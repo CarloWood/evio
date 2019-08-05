@@ -56,6 +56,8 @@ void Socket::set_sock_buffers(int fd, size_t input_minimum_block_size, size_t ou
 
 bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress if_addr)
 {
+  DoutEntering(dc::evio, "Socket::connect(" << remote_address << ", " << rcvbuf_size << ", " << sndbuf_size << ", " << if_addr << ") [" << this << "]");
+
   if (state_t::rat(m_state)->m_flags.is_open())
     return false;
 

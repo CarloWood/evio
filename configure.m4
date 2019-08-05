@@ -7,6 +7,12 @@ CW_SYS_MALLOC_OVERHEAD
 # Determine the kind of nonblocking sockets that we have.
 CW_SYS_NONBLOCK
 
+# Check for GNUTLS.
+PKG_CHECK_MODULES([LIBGNUTLS], [gnutls >= 3.5.18])
+
+AC_SUBST([LIBGNUTLS_CFLAGS])
+AC_SUBST([LIBGNUTLS_LIBS])
+
 # evio depends on utils, threadsafe and threadpool.
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [utils threadsafe threadpool], [ ])])
 
@@ -28,18 +34,5 @@ if test "$cw_config_debug_buffers" = yes; then
 fi
 
 m4_append_uniq([CW_SUBMODULE_CONFIG_FILES], cwm4_quote(cwm4_submodule_path[/config.h]), [ ])
-
-# We are on linux, so we should have epoll.
-# Do not include the select and poll backends to keep the library small.
-AC_DEFINE([EV_USE_POLL], 0, [Don't use poll(2)])
-AC_DEFINE([EV_USE_SELECT], 0, [Don't use select(2)])
-# Disable as many watchers as possible.
-AC_DEFINE([EV_FORK_ENABLE], 0, [No support for fork watchers])
-AC_DEFINE([EV_PREPARE_ENABLE], 0, [No prepare watchers])
-AC_DEFINE([EV_IDLE_ENABLE], 0, [No idle watchers])
-AC_DEFINE([EV_CHECK_ENABLE], 0, [No check watchers])
-# We only need one loop.
-AC_DEFINE([EV_MULTIPLICITY], 0, [Don't support multiple loops])
-AC_DEFINE([EV_COMPAT3], 0, [No backwards compatibility needed])
 
 AH_BOTTOM([#include "evio/config.h"])

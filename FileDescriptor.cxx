@@ -221,8 +221,9 @@ std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state)
 
 void intrusive_ptr_release(FileDescriptor const* ptr)
 {
-  int count = ptr->AIRefCount::allow_deletion(true);
-  if (count == 1)
+  int prev_count = ptr->AIRefCount::allow_deletion(true);
+  Dout(dc::io, "Decremented ref count of device " << ptr << " to " << (prev_count - 1));
+  if (prev_count == 1)
   {
     std::atomic_thread_fence(std::memory_order_acquire);
     // We must use delayed deletion, because the EventLoopThread might already have gotten a pointer to the object from epoll_pwait().
@@ -233,9 +234,14 @@ void intrusive_ptr_release(FileDescriptor const* ptr)
 
 void FileDescriptor::allow_deletion(int count) const
 {
-  int new_count = AIRefCount::allow_deletion(true, count);
-  Dout(dc::io, "Decremented ref count of device " << this << " to " << (new_count - count));
-  if (new_count == 1)
+  // Prevent a double deletion.
+  if (AI_UNLIKELY(count == 0))
+    return;
+  int prev_count = AIRefCount::allow_deletion(true, count);
+  Dout(dc::io, "Decremented ref count of device " << this << " to " << (prev_count - count));
+  // Paranoia check. Fix library if this ever fires again.
+  ASSERT(count <= prev_count);
+  if (prev_count == count)
     EventLoopThread::instance().add_needs_deletion(this);
 }
 
