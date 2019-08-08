@@ -27,41 +27,10 @@
 #ifndef EVIO_OUTPUT_STREAM_H
 #define EVIO_OUTPUT_STREAM_H
 
-#include "StreamBuf.h"
-#include "Protocol.h"
-#include <iostream>
-#include <limits>
+#include "Source.h"
+#include <ostream>
 
 namespace evio {
-
-// Protocol
-//   |
-//   v                  ::set_source()
-// Source ============> OutputDevice ==> fd
-// ::m_output_device ->
-//
-// The size of the output buffer is derived from the (average) message size as hinted by the Protocol.
-class Source : public Protocol
-{
- protected:
-  OutputDevice* m_output_device;
-
-  void start_output_device()
-  {
-    DoutEntering(dc::evio, "Source::start_output_device() [" << m_output_device << ']');
-    FileDescriptor::state_t::wat state_w(m_output_device->m_state);
-    if (!state_w->m_flags.is_active_output_device())
-      m_output_device->start_output_device(state_w);
-  }
-
-  friend class OutputDevice;
-  OutputBuffer* create_buffer(OutputDevice* output_device)
-      { return create_buffer(output_device, 8 * StreamBuf::round_up_minimum_block_size(minimum_block_size()), std::numeric_limits<size_t>::max()); }
-  OutputBuffer* create_buffer(OutputDevice* output_device, size_t buffer_full_watermark)
-      { return create_buffer(output_device, buffer_full_watermark, std::numeric_limits<size_t>::max()); }
-  virtual OutputBuffer* create_buffer(OutputDevice*, size_t, size_t)
-      { /* Should never be used. */ return nullptr; }
-};
 
 class OutputStream : public std::ostream, public Source
 {

@@ -7,11 +7,10 @@ CW_SYS_MALLOC_OVERHEAD
 # Determine the kind of nonblocking sockets that we have.
 CW_SYS_NONBLOCK
 
-# Check for GNUTLS.
-PKG_CHECK_MODULES([LIBGNUTLS], [gnutls >= 3.5.18])
-
-AC_SUBST([LIBGNUTLS_CFLAGS])
-AC_SUBST([LIBGNUTLS_LIBS])
+MATRIXSSL_INCLUDE_FLAGS='-I${top_srcdir}/evio/matrixssl/matrixssl -I${top_srcdir}/evio/matrixssl/core/include -I${top_srcdir}/evio/matrixssl/core/config -I${top_srcdir}/evio/matrixssl/core/osdep/include'
+AC_SUBST(MATRIXSSL_INCLUDE_FLAGS)
+matrixssl_include=include
+AC_SUBST(matrixssl_include)
 
 # evio depends on utils, threadsafe and threadpool.
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [utils threadsafe threadpool], [ ])])
@@ -34,5 +33,7 @@ if test "$cw_config_debug_buffers" = yes; then
 fi
 
 m4_append_uniq([CW_SUBMODULE_CONFIG_FILES], cwm4_quote(cwm4_submodule_path[/config.h]), [ ])
+
+AC_CONFIG_FILES([evio/protocol/Makefile evio/matrixssl/core/makefile])
 
 AH_BOTTOM([#include "evio/config.h"])

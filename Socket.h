@@ -108,7 +108,7 @@ class Socket : public InputDevice, public OutputDevice
   void init(int fd, SocketAddress const& socket_address, bool signal_connected = false);
 
   // Create a socket(2), bind it to if_addr, and call init().
-  bool connect(SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress if_addr = {});
+  bool connect(SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {});
 };
 
 } // namespace evio

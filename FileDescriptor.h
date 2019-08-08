@@ -398,6 +398,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   void init(int fd);
 
 #ifdef CWDEBUG
+ public:
   // For inspection only.
   int get_fd() const { return m_fd; }
   FileDescriptorFlags const get_flags() const { return state_t::crat(m_state)->m_flags; }

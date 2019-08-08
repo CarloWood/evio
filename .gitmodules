@@ -1,0 +1,3 @@
+[submodule "matrixssl"]
+	path = matrixssl
+	url = https://github.com/matrixssl/matrixssl.git
