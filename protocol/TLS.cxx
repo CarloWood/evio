@@ -5,165 +5,212 @@
 #include <libcwd/buf2str.h>
 #include <alloca.h>
 
-extern "C" {
-
-#if 0
-static void tls_audit_log_function(gnutls_session_t UNUSED_ARG(session), char const* message)
-{
-  // Message already contain a newline.
-  Dout(dc::warning|nonewline_cf, "GNUTLS audit: " << message);
-}
-
-static void tls_log_function(int UNUSED_ARG(level), char const* message)
-{
-  // Message contains sometimes a newline.
-  size_t len = std::strlen(message);
-  bool has_new_line = message[len - 1] == '\n';
-  if (has_new_line)
-  {
-    char* buf = reinterpret_cast<char*>(alloca(len));
-    buf[len - 1] = 0;
-    Dout(dc::gnutls, std::strncpy(buf, message, len - 1));
-  }
-  else
-    Dout(dc::gnutls, message);
-}
-
-static int system_recv_timeout(gnutls_transport_ptr_t ptr, unsigned int ms)
-{
-  fd_set rfds;
-  struct timeval tv;
-  int fd = (long)ptr;
-
-  DoutEntering(dc::notice, "system_recv_timeout(" << fd << ", " << ms << ")");
-
-  FD_ZERO(&rfds);
-  FD_SET(fd, &rfds);
-
-  tv.tv_sec = 0;
-  tv.tv_usec = ms * 1000;
-  while (tv.tv_usec >= 1000000) {
-          tv.tv_usec -= 1000000;
-          tv.tv_sec++;
-  }
-
-  return select(fd + 1, &rfds, NULL, NULL, &tv);
-}
-
-static ssize_t system_write(gnutls_transport_ptr_t ptr, void const* data, size_t data_size)
-{
-  evio::InputDevice* input_device = static_cast<evio::InputDevice*>(ptr);
-  DoutEntering(dc::notice|continued_cf, "system_write(" << input_device << ", \"" << libcwd::buf2str((char const*)data, data_size) << "\") = ");
-  ssize_t ret = send(input_device->get_fd(), data, data_size, 0);
-  Dout(dc::finish|cond_error_cf(ret < 0), ret);
-  return ret;
-}
-
-static ssize_t system_read(gnutls_transport_ptr_t ptr, void* data, size_t data_size)
-{
-  evio::OutputDevice* output_device = static_cast<evio::OutputDevice*>(ptr);
-  DoutEntering(dc::notice|continued_cf, "system_read(" << output_device << ", {")
-  ssize_t ret = recv(output_device->get_fd(), data, data_size, 0);
-  Dout(dc::finish|cond_error_cf(ret < 0), libcwd::buf2str((char*)data, ret < 0 ? 0 : data_size) << "}) = " << ret);
-  return ret;
-}
-#endif
-
-} // extern "C"
-
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct gnutls("GNUTLS");
+channel_ct tls("TLS");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
 namespace evio {
 namespace protocol {
 
-struct gnutls_error_codes
+struct matrixssl_error_code
 {
-  int mCode;
+  int32 mCode;
 
-  gnutls_error_codes(int code) : mCode(code) { }
-  operator int() const { return mCode; }
+  matrixssl_error_code(int32 code) : mCode(code) { }
+  operator int32() const { return mCode; }
 };
 
-std::error_code make_error_code(gnutls_error_codes);
+std::error_code make_error_code(matrixssl_error_code);
 
 } // namespace protocol
 } // namespace evio
 
-// Register evio::gnutls_error_codes as valid error code.
+// Register evio::matrixssl_error_code as valid error code.
 namespace std {
 
-template<> struct is_error_code_enum<evio::protocol::gnutls_error_codes> : true_type { };
+template<> struct is_error_code_enum<evio::protocol::matrixssl_error_code> : true_type { };
 
 } // namespace std
 
 namespace evio {
 namespace protocol {
 
-//gnutls_certificate_credentials_t TLS::s_xcred;
-//int TLS::s_debug_level = 0;
-
-#if 0
-//static
-void TLS::set_debug_level(int debug_level)
-{
-  s_debug_level = debug_level;
-#ifndef CWDEBUG
-  if (s_debug_level > 0)
-    std::cerr << "Warning: TLS::set_debug_level(" << debug_level << ") called without CWDEBUG being defined." << std::endl;
-#endif
-}
-#endif
-
 std::once_flag TLS::s_flag;
+
+namespace {
+
+sslKeys_t* s_keys;
+
+// Signature algorithms that we are willing to support.
+uint16_t const sigalgs[] = {
+#ifdef USE_ECC
+    sigalg_ecdsa_secp256r1_sha256,
+# ifdef USE_SECP384R1
+    sigalg_ecdsa_secp384r1_sha384,
+# endif
+# ifdef USE_SECP521R1
+    sigalg_ecdsa_secp521r1_sha512,
+# endif
+#endif // USE_ECC
+#ifdef USE_RSA
+# ifdef USE_PKCS1_PSS
+    sigalg_rsa_pss_rsae_sha256,
+#   ifdef USE_SHA384
+    sigalg_rsa_pss_rsae_sha384,
+#   endif
+# endif // USE_RSA
+    sigalg_rsa_pkcs1_sha256,
+#endif
+    0
+};
+constexpr int32_t sigalgs_len = sizeof(sigalgs) / sizeof(sigalgs[0]) - 1; // -1: remove the trailing 0.
+
+// Ciphersuites that we are willing to support.
+psCipher16_t const ciphersuites[] = {
+#ifdef USE_TLS_1_3
+    TLS_AES_128_GCM_SHA256,
+#endif
+#ifdef USE_ECC
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+#endif
+#ifdef USE_RSA
+# ifdef USE_ECC
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+# endif
+    TLS_RSA_WITH_AES_128_GCM_SHA256,
+#endif // USE_RSA
+    0
+};
+constexpr int32_t ciphersuites_len = sizeof(ciphersuites) / sizeof(ciphersuites[0]) - 1;
+
+// The protocol versions that we're willing to support.
+psProtocolVersion_t const versions[] =
+{
+# ifdef USE_TLS_1_3
+    v_tls_1_3,
+# endif
+# ifdef USE_TLS_1_2
+    v_tls_1_2,
+# endif
+    0
+};
+constexpr int32_t versions_len = sizeof(versions) / sizeof(versions[0]) - 1;
+
+} // namespace
+
+//inline
+auto const TLS::session() const
+{
+  return static_cast<ssl_t*>(m_session);
+}
+
+//inline
+auto const TLS::session_opts() const
+{
+  return static_cast<sslSessOpts_t*>(m_session_opts);
+}
+
 void TLS::global_tls_initialization()
 {
   DoutEntering(dc::notice, "evio::protocol::TLS::global_tls_initialization()");
 
-  if (matrixSslOpen() != PS_SUCCESS)
-  {
-    THROW_FALERTE("matrixSslOpen");
-  }
-
-#if 0
-#ifdef CWDEBUG
-  gnutls_global_set_audit_log_function(tls_audit_log_function);
-  gnutls_global_set_log_function(tls_log_function);
-#endif
-  if (s_debug_level > 0)
-  {
-    gnutls_global_set_log_level(s_debug_level);
-    Dout(dc::gnutls|dc::notice, "GNU TLS debug level set to " << s_debug_level);
-  }
-
-  // X509 stuff.
-  gnutls_certificate_allocate_credentials(&s_xcred);
-  // Sets the system trusted CAs for Internet PKI.
-  gnutls_error_codes ret = gnutls_certificate_set_x509_system_trust(s_xcred);
+  matrixssl_error_code ret = matrixSslOpen();
   if (ret < 0)
-    THROW_FALERTC(ret, "gnutls_certificate_set_x509_system_trust");
-  else
-    Dout(dc::gnutls, "Number of trusted system certificates processed: " << ret);
-#endif
+    THROW_FALERTC(ret, "matrixSslOpen");
+
+  ret = matrixSslNewKeys(&s_keys, NULL);
+  if (ret < 0)
+  {
+    s_keys = nullptr;
+    THROW_FALERTC(ret, "matrixSslNewKeys");
+  }
+
+  ret = matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, "/etc/ssl/certs/ca-certificates.crt");
+  if (ret < 0)
+  {
+    matrixSslDeleteKeys(s_keys);
+    s_keys = nullptr;
+    THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
+  }
 }
 
-TLS::TLS() /*: m_session(nullptr)*/
+void TLS::global_tls_deinitialization()
 {
-  DoutEntering(dc::gnutls, "TLS::TLS() [" << this << "]");
+  DoutEntering(dc::notice, "evio::protocol::TLS::global_tls_deinitialization()");
+
+  if (s_keys)
+  {
+    matrixSslDeleteKeys(s_keys);
+    s_keys = nullptr;
+  }
+
+  matrixSslClose();
+}
+
+TLS::TLS() : m_session(nullptr), m_session_opts(nullptr)
+{
+  DoutEntering(dc::tls, "TLS::TLS() [" << this << "]");
   std::call_once(s_flag, global_tls_initialization);
 }
 
 TLS::~TLS()
 {
-  DoutEntering(dc::gnutls, "TLS::~TLS()");
-  //gnutls_deinit(m_session);
+  DoutEntering(dc::tls, "TLS::~TLS()");
+  matrixSslDeleteSession(session());
+  free(m_session_opts);
+}
+
+// Certificate callback. See section 6 in the API manual for details.
+static int32_t certCb(ssl_t* UNUSED_ARG(ssl), psX509Cert_t* UNUSED_ARG(cert), int32_t alert)
+{
+  // No extra checks of our own; simply accept the result of MatrixSSL's internal certificate validation.
+  return alert;
 }
 
 void TLS::session_init(char const* http_server_name, size_t http_server_name_length)
 {
+  DoutEntering(dc::tls, "TLS::session_init(\"" << http_server_name << "\", " << http_server_name_length << ")");
+  // Only call session_init() once.
+  ASSERT(!m_session_opts);
+  m_session_opts = calloc(sizeof(sslSessOpts_t), 1);
+
+  // Set supported protocol versions.
+  matrixssl_error_code ret = matrixSslSessOptsSetClientTlsVersions(session_opts(), versions, versions_len);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslSessOptsSetClientTlsVersions");
+
+#ifdef USE_ECC
+  // Set supported ECC curves for signatures and key exchange The RoT Edition only supports the P-256, P-384 and P-521 curves.
+  session_opts()->ecFlags = IS_SECP256R1;
+#ifdef USE_SECP384R1
+  session_opts()->ecFlags |= IS_SECP384R1;
+#endif
+#ifdef USE_SECP521R1
+  session_opts()->ecFlags |= IS_SECP521R1;
+#endif
+#endif // USE_ECC
+
+  // Set supported signature algorithms.
+  ret = matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslSessOptsSetSigAlgs");
+
+  ret = matrixSslNewClientSession(
+      reinterpret_cast<ssl_t**>(&m_session),
+      s_keys,
+      NULL,
+      ciphersuites,
+      ciphersuites_len,
+      certCb,
+      NULL,
+      NULL,
+      NULL,
+      session_opts());
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslNewClientSession");
+
 #if 0
   // Initialize TLS session.
   gnutls_error_codes err = gnutls_init(&m_session, GNUTLS_CLIENT|GNUTLS_NONBLOCK);
@@ -254,33 +301,44 @@ std::error_code make_error_code(error_codes code)
 }
 
 //----------------------------------------------------------------------------
-// gnutls error codes (as returned by gnutls_certificate_set_x509_system_trust(3), etc)
+// matrixssl error codes (as returned by matrixSslOpen, matrixSslNewKeys, matrixSslLoadRsaKeys, etc)
 
 namespace {
 
-struct GNUTLSErrorCategory : std::error_category
+struct MatrixSSLErrorCategory : std::error_category
 {
   char const* name() const noexcept override;
-  std::string message(int ev) const override;
+  std::string message(int32 ev) const override;
 };
 
-char const* GNUTLSErrorCategory::name() const noexcept
+char const* MatrixSSLErrorCategory::name() const noexcept
 {
-  return "gnutls";
+  return "matrixssl";
 }
 
-std::string GNUTLSErrorCategory::message(int ev) const
+std::string MatrixSSLErrorCategory::message(int32 ev) const
 {
-  return "huh"; //gnutls_strerror(ev);
+  switch (ev)
+  {
+    AI_CASE_RETURN(PS_SUCCESS);
+    AI_CASE_RETURN(PS_FAILURE);
+    AI_CASE_RETURN(PS_MEM_FAIL);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL);
+    AI_CASE_RETURN(PS_PLATFORM_FAIL);
+    AI_CASE_RETURN(PS_ARG_FAIL);
+    AI_CASE_RETURN(PS_PARSE_FAIL);
+    AI_CASE_RETURN(PS_UNSUPPORTED_FAIL);
+  }
+  return "Unknown error " + std::to_string(ev);
 }
 
-GNUTLSErrorCategory const theGNUTLSErrorCategory { };
+MatrixSSLErrorCategory const theMatrixSSLErrorCategory { };
 
 } // namespace
 
-std::error_code make_error_code(gnutls_error_codes code)
+std::error_code make_error_code(matrixssl_error_code code)
 {
-  return std::error_code(static_cast<int>(code), theGNUTLSErrorCategory);
+  return std::error_code(static_cast<int32>(code), theMatrixSSLErrorCategory);
 }
 
 } // namespace protocol

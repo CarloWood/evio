@@ -50,6 +50,7 @@ class TLS
  private:
   static std::once_flag s_flag;
   static void global_tls_initialization();
+  static void global_tls_deinitialization();
 //  static gnutls_certificate_credentials_t s_xcred;
   static int s_debug_level;
 
@@ -57,8 +58,14 @@ class TLS
   boost::intrusive_ptr<OutputDevice> m_output_device;   // The underlaying output device.
   TLSSink m_tls_sink;                                   // The sink that the underlaying input device should use.
   TLSSource m_tls_source;                               // The source that the underlaying output device should use.
-//  gnutls_session_t m_session;                           // Session state.
-//  gnutls_datum_t m_rdata;                               // Resumption data.
+  void* m_session;                                      // ssl_t* m_session; Session state.
+  void* m_session_opts;                                 // sslSessOpts_t* m_session_opts; Session options.
+
+  // Accessor for m_session.
+  inline auto const session() const;                    // Returns a ssl_t* const.
+
+  // Accessor for m_session_opts.
+  inline auto const session_opts() const;               // Returns a sslSessOpts_t* const.
 
  public:
   TLS();
