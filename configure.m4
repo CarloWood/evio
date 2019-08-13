@@ -8,7 +8,7 @@ CW_SYS_NONBLOCK
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [utils threadsafe threadpool], [ ])])
 
 LIBEVIO_CXXFLAGS='$(MATRIXSSL_CFLAGS)'
-LIBEVIO_LIBS='$(MATRIXSSL_LIBS)'
+LIBEVIO_LIBS='${top_builddir}/evio/libevio.la $(MATRIXSSL_LIBS)'
 
 AC_SUBST([LIBEVIO_CXXFLAGS])
 AC_SUBST([LIBEVIO_LIBS])
