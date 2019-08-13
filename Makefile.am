@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-SUBDIRS = protocol
+SUBDIRS = matrixssl protocol
 
 noinst_LTLIBRARIES = libevio.la
 
@@ -44,15 +44,4 @@ SOURCES = FileDescriptor.cxx \
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@
-libevio_la_LIBADD = protocol/libprotocol.la matrixssl/matrixssl/libssl_s.a matrixssl/core/libcore_s.a matrixssl/crypto/libcrypt_s.a ../threadpool/libthreadpool.la ../threadsafe/libthreadsafe.la ../utils/libutils_r.la @LIBCWD_R_LIBS@
-
-matrixssl/matrixssl/libssl_s.a matrixssl/core/libcore_s.a matrixssl/crypto/libcrypt_s.a:
-	@(cd $(abs_srcdir)/matrixssl; \
-	  find . -type d \( -name doc -o -name 'test*' -o -name xcode -o -name thirdparty \) ! -name 'testsupp*' -false -prune -o \
-	         \( -type d -exec mkdir -p $(abs_builddir)/matrixssl/{} \; \) -o \
-		 \( -type f -exec ln -sf $(abs_srcdir)/matrixssl/{} $(abs_builddir)/matrixssl/{} \; \) \
-	)
-	$(MAKE) MATRIX_DEBUG=1 CFLAGS_EXTRA="-fPIC" -C matrixssl libs
-
-clean-local:
-	rm -rf $(abs_builddir)/matrixssl
+libevio_la_LIBADD = protocol/libprotocol.la matrixssl/matrixssl/libssl_s.la matrixssl/core/libcore_s.la matrixssl/crypto/libcrypt_s.la ../threadpool/libthreadpool.la ../threadsafe/libthreadsafe.la ../utils/libutils_r.la @LIBCWD_R_LIBS@

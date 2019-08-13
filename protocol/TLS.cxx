@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "TLS.h"
+#include "matrixssl/matrixsslApi.h"
 #include "utils/debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
 #include <alloca.h>
@@ -122,6 +123,11 @@ void TLS::global_tls_initialization()
 {
   DoutEntering(dc::notice, "evio::protocol::TLS::global_tls_initialization()");
 
+  if (matrixSslOpen() != PS_SUCCESS)
+  {
+    THROW_FALERTE("matrixSslOpen");
+  }
+
 #if 0
 #ifdef CWDEBUG
   gnutls_global_set_audit_log_function(tls_audit_log_function);
@@ -144,7 +150,7 @@ void TLS::global_tls_initialization()
 #endif
 }
 
-TLS::TLS() : m_session(nullptr)
+TLS::TLS() /*: m_session(nullptr)*/
 {
   DoutEntering(dc::gnutls, "TLS::TLS() [" << this << "]");
   std::call_once(s_flag, global_tls_initialization);
@@ -158,6 +164,7 @@ TLS::~TLS()
 
 void TLS::session_init(char const* http_server_name, size_t http_server_name_length)
 {
+#if 0
   // Initialize TLS session.
   gnutls_error_codes err = gnutls_init(&m_session, GNUTLS_CLIENT|GNUTLS_NONBLOCK);
   if (err < 0)
@@ -205,6 +212,7 @@ void TLS::session_init(char const* http_server_name, size_t http_server_name_len
     }
   }
   while (err < 0 && gnutls_error_is_fatal(err) == 0);
+#endif
 }
 
 //============================================================================

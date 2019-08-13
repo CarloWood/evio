@@ -6,7 +6,7 @@
 #include "evio/Sink.h"
 #include "evio/SocketAddress.h"
 //#include <gnutls/gnutls.h>
-#include "matrixsslApi.h"
+//#include "matrixsslApi.h"
 #include "debug.h"
 #include <libcwd/buf2str.h>
 
@@ -72,6 +72,7 @@ class TLS
   //
   // See https://gnutls.org/manual/html_node/Core-TLS-API.html#gnutls_005fglobal_005fset_005flog_005flevel
   static void set_debug_level(int debug_level);
+#endif
 
   void set_device(InputDevice* input_device, OutputDevice* output_device)
   {
@@ -81,7 +82,6 @@ class TLS
     input_device->set_sink(m_tls_sink);
     output_device->set_source(m_tls_source);
   }
-#endif
 
   void session_init(char const* http_server_name, size_t http_server_name_length);
   void session_init(SocketAddress const& remote_address)
