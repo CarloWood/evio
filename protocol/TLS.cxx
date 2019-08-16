@@ -6,6 +6,7 @@
 #include "testkeys/RSA/2048_RSA.h"
 #include "testkeys/RSA/2048_RSA_KEY.h"
 #include "testkeys/RSA/ALL_RSA_CAS.h"
+#include "testkeys/PSK/tls13_psk.h"
 #endif
 #include "utils/debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
@@ -32,7 +33,13 @@ std::error_code make_error_code(matrixssl_error_code);
 
 std::ostream& operator<<(std::ostream& os, matrixssl_error_code code)
 {
-  return os << make_error_code(code).category().message(code);
+  // Also support printing positive values as just integers...
+  int32 val = code;
+  if (val > 0)
+    os << val;
+  else
+    os << make_error_code(code).category().message(code);
+  return os;
 }
 
 } // namespace protocol
@@ -139,6 +146,21 @@ auto const TLS::session_id() const
   return static_cast<sslSessionId_t*>(m_session_id);
 }
 
+std::string TLS::get_CA_files()
+{
+  // TODO: Add other standard file paths and directories and support for environment variables
+  // like REQUESTS_CA_BUNDLE, SSL_CERT_FILE and SSL_CERT_DIR.
+  // See also https://serverfault.com/a/722646.
+
+  // Debian/Ubuntu/Gentoo etc (debian based distributions):
+  return "/etc/ssl/certs/ca-certificates.crt";
+  // RHEL 6:
+  // "/etc/pki/tls/certs/ca-bundle.crt"
+  // RHEL 7 / CentOS:
+  // "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+  // See also https://techjourney.net/update-add-ca-certificates-bundle-in-redhat-centos/
+}
+
 void TLS::global_tls_initialization()
 {
   DoutEntering(dc::tls|dc::notice, "evio::protocol::TLS::global_tls_initialization()");
@@ -149,20 +171,60 @@ void TLS::global_tls_initialization()
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslOpen");
 
+  Dout(dc::tls|continued_cf, "matrixSslNewKeys(&s_keys, NULL) = ");
   ret = matrixSslNewKeys(&s_keys, NULL);
+  Dout(dc::finish, ret);
   if (ret < 0)
   {
     s_keys = nullptr;
     THROW_FALERTC(ret, "matrixSslNewKeys");
   }
 
-  ret = matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, "/etc/ssl/certs/ca-certificates.crt");
+  Dout(dc::tls|continued_cf, "matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, \"" << get_CA_files() << "\") = ");
+  ret = matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, get_CA_files().c_str());
+  Dout(dc::finish, ret);
   if (ret < 0)
   {
+    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
     matrixSslDeleteKeys(s_keys);
     s_keys = nullptr;
     THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
   }
+
+#ifdef CWDEBUG
+  // Load RSA2048 test key pair.
+  unsigned char const* cert_buf = RSA2048;
+  int32 cert_buf_len = sizeof(RSA2048);
+  unsigned char const* key_buf = RSA2048KEY;
+  int32 key_buf_len = sizeof(RSA2048KEY);
+  int32 trustedCALen = sizeof(RSACAS);
+  unsigned char* trustedCABuf = (unsigned char*)psMalloc(NULL, trustedCALen);
+  std::memcpy(trustedCABuf, RSACAS, trustedCALen);
+
+  Dout(dc::tls|continued_cf, "matrixSslLoadRsaKeysMem(s_keys, RSA2048, " << cert_buf_len << ", RSA2048KEY, " << key_buf_len << ", RSACAS, " << trustedCALen << ") = ");
+  ret = matrixSslLoadRsaKeysMem(s_keys, cert_buf, cert_buf_len, key_buf, key_buf_len, trustedCABuf, trustedCALen);
+  Dout(dc::finish, ret);
+  if (ret < 0)
+  {
+    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
+    matrixSslDeleteKeys(s_keys);
+    s_keys = nullptr;
+    THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
+  }
+
+  // Load the TLS 1.3 test PSKs.
+  Dout(dc::tls|continued_cf, "matrixSslLoadTls13Psk(g_tls13_test_psk_256, " << sizeof(g_tls13_test_psk_256) <<
+      ", g_tls13_test_psk_id_sha256, " << sizeof(g_tls13_test_psk_id_sha256) << ", NULL) = ");
+  ret = matrixSslLoadTls13Psk(s_keys,
+      g_tls13_test_psk_256,
+      sizeof(g_tls13_test_psk_256),
+      g_tls13_test_psk_id_sha256,
+      sizeof(g_tls13_test_psk_id_sha256),
+      NULL);
+  Dout(dc::finish, ret);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslLoadTls13Psk");
+#endif // CWDEBUG
 }
 
 void TLS::global_tls_deinitialization()
@@ -171,10 +233,12 @@ void TLS::global_tls_deinitialization()
 
   if (s_keys)
   {
+    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
     matrixSslDeleteKeys(s_keys);
     s_keys = nullptr;
   }
 
+  Dout(dc::tls, "matrixSslClose()");
   matrixSslClose();
 }
 
@@ -187,6 +251,7 @@ TLS::TLS() : m_session(nullptr), m_session_opts(nullptr), m_session_id(nullptr)
 TLS::~TLS()
 {
   DoutEntering(dc::tls, "TLS::~TLS()");
+  Dout(dc::tls, "matrixSslDeleteSession(" << session() << ")");
   matrixSslDeleteSession(session());
   free(m_session_opts);
 }
@@ -207,7 +272,9 @@ void TLS::session_init(char const* http_server_name)
   session_opts()->userPtr = static_cast<FileDescriptor*>(m_output_device.get());
 
   // Set supported protocol versions.
+  Dout(dc::tls|continued_cf, "matrixSslSessOptsSetClientTlsVersions(...) = ");
   matrixssl_error_code ret = matrixSslSessOptsSetClientTlsVersions(session_opts(), versions, versions_len);
+  Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslSessOptsSetClientTlsVersions");
 
@@ -222,15 +289,21 @@ void TLS::session_init(char const* http_server_name)
 #endif
 #endif // USE_ECC
 
-  matrixssl_error_code ret = matrixSslNewSessionId(reinterpret_cast<sslSessionId_t**>(&m_session_id), NULL);
+  Dout(dc::tls|continued_cf, "matrixSslNewSessionId(&m_session_id, NULL) = ");
+  ret = matrixSslNewSessionId(reinterpret_cast<sslSessionId_t**>(&m_session_id), NULL);
+  Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslNewSessionId");
 
   // Set supported signature algorithms.
+  Dout(dc::tls|continued_cf, "matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len) = ");
   ret = matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len);
+  Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslSessOptsSetSigAlgs");
 
+  Dout(dc::tls|continued_cf, "matrixSslNewClientSession(&m_session, s_keys, session_id(), ciphersuites, " <<
+      ciphersuites_len << ", certCb, \"" << http_server_name << "\", NULL, NULL, session_opts()) = ");
   ret = matrixSslNewClientSession(
       reinterpret_cast<ssl_t**>(&m_session),
       s_keys,
@@ -242,15 +315,21 @@ void TLS::session_init(char const* http_server_name)
       NULL,
       NULL,
       session_opts());
+  Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslNewClientSession");
 }
 
 int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
 {
+  Dout(dc::tls|continued_cf, "matrixSslGetOutdata({" << *session() << "}, {");
   matrixssl_error_code ret = ::matrixSslGetOutdata(session(), reinterpret_cast<unsigned char**>(buf_ptr));
   if (AI_UNLIKELY(ret < 0))
+  {
+    Dout(dc::finish, "-}) = " << ret);
     THROW_FALERTC(ret, "matrixSslGetOutdata");
+  }
+  Dout(dc::finish, "...}) = " << ret);
   return ret;
 }
 
@@ -277,52 +356,74 @@ TLS::data_result_type TLS::matrixSslSentData(ssize_t wlen)
 
 int32_t TLS::matrixSslGetReadbuf(char** buf_ptr)
 {
+  Dout(dc::tls|continued_cf, "matrixSslGetReadbuf({");
   matrixssl_error_code ret = ::matrixSslGetReadbuf(session(), reinterpret_cast<unsigned char**>(buf_ptr));
   if (AI_UNLIKELY(ret < 0))
+  {
+    Dout(dc::finish, "...}) = " << ret);
     THROW_FALERTC(ret, "matrixSslGetReadbuf");
+  }
+  Dout(dc::finish, (void*)*buf_ptr << "}) = " << ret);
   return ret;
 }
 
 TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char** buf_ptr, uint32_t* buf_len_ptr)
 {
+  Dout(dc::tls|continued_cf, "matrixSslReceivedData({" << *session() << "}, " << rlen << ", {");
   matrixssl_error_code ret = ::matrixSslReceivedData(session(), rlen, reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
-  Dout(dc::tls, "matrixSslReceivedData({" << *session() << "}, " << rlen << ", buf_ptr, buf_len_ptr) = " << ret);
 
   if (AI_UNLIKELY(ret < 0))
+  {
+    Dout(dc::finish, "...}, {...}) = " << ret);
     THROW_FALERTC(ret, "matrixSslReceivedData");
+  }
+
+  Dout(dc::continued, buf2str(*buf_ptr, *buf_len_ptr) << "}, {" << *buf_len_ptr << "}) = ");
 
   switch (ret)
   {
     case PS_SUCCESS:
+      Dout(dc::finish, ret);
       return SUCCESS;
 
     case MATRIXSSL_REQUEST_SEND:
+      Dout(dc::finish, "MATRIXSSL_REQUEST_SEND");
       return REQUEST_SEND;
 
     case MATRIXSSL_REQUEST_RECV:
+      Dout(dc::finish, "MATRIXSSL_REQUEST_RECV");
       return REQUEST_RECV;
 
     case MATRIXSSL_HANDSHAKE_COMPLETE:
+      Dout(dc::finish, "MATRIXSSL_HANDSHAKE_COMPLETE");
       return HANDSHAKE_COMPLETE;
 
     case MATRIXSSL_RECEIVED_ALERT:
+      Dout(dc::finish, "MATRIXSSL_RECEIVED_ALERT");
       ASSERT(*buf_len_ptr == 2);
       return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
 
     case MATRIXSSL_APP_DATA:
+      Dout(dc::finish, "MATRIXSSL_APP_DATA");
       return APP_DATA;
   }
   ASSERT(ret == MATRIXSSL_APP_DATA_COMPRESSED);
+  Dout(dc::finish, "MATRIXSSL_APP_DATA_COMPRESSED");
   return APP_DATA_COMPRESSED;
 }
 
 TLS::data_result_type TLS::matrixSslProcessedData(char** buf_ptr, uint32_t* buf_len_ptr)
 {
+  Dout(dc::tls|continued_cf, "matrixSslProcessedData({");
   matrixssl_error_code ret = ::matrixSslProcessedData(session(), reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
-  Dout(dc::tls, "matrixSslReceivedData({" << *session() << "}, buf_ptr, buf_len_ptr) = " << ret);
 
   if (ret < 0)
+  {
+    Dout(dc::finish, "...}, {...}) = " << ret);
     THROW_FALERTC(ret, "matrixSslProcessedData");
+  }
+
+  Dout(dc::finish, buf2str(*buf_ptr, *buf_len_ptr) << "}, {" << *buf_len_ptr << "}) = " << ret);
 
   switch (ret)
   {

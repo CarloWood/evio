@@ -48,6 +48,7 @@ class TLS
 {
  private:
   static std::once_flag s_flag;
+  static std::string get_CA_files();                    // Returns a semi-colon separated list of all trusted CA certificate bundles that we could find.
   static void global_tls_initialization();
   static void global_tls_deinitialization();
   static int s_debug_level;
