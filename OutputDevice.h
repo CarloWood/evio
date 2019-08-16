@@ -61,9 +61,6 @@ class OutputDevice : public virtual FileDescriptor
  private:
   using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_is_flushing_t m_disable_is_flushing;
-#ifdef DEBUGDEVICESTATS
-  size_t m_sent_bytes;
-#endif
 
  protected:
   //---------------------------------------------------------------------------
@@ -72,6 +69,9 @@ class OutputDevice : public virtual FileDescriptor
 
   Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
+#ifdef DEBUGDEVICESTATS
+  size_t m_sent_bytes;
+#endif
 
  protected:
   // The default condition just checks if the output device is not already active.

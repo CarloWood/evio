@@ -46,15 +46,17 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
   RefCountReleaser() : m_device(nullptr), m_allow_deletion_count(0) { }
   RefCountReleaser(FileDescriptor* device, int allow_deletion_count) : m_device(device), m_allow_deletion_count(allow_deletion_count) { ASSERT(allow_deletion_count >= 0); }
   ~RefCountReleaser() { if (m_allow_deletion_count) execute(m_device, m_allow_deletion_count); }
+  RefCountReleaser(RefCountReleaser const&) = delete;
+  RefCountReleaser& operator=(RefCountReleaser const&) = delete;
 
   static void execute(FileDescriptor* device, int allow_deletion_count);
 
-#if 0
   RefCountReleaser(RefCountReleaser&& releaser) : m_device(releaser.m_device), m_allow_deletion_count(releaser.m_allow_deletion_count)
   {
     DoutEntering(dc::notice, "RefCountReleaser::RefCountReleaser({RefCountReleaser&&:" << releaser.m_device << ", " << releaser.m_allow_deletion_count << "})");
     releaser.m_allow_deletion_count = 0;
   }
+
   RefCountReleaser& operator=(RefCountReleaser&& releaser)
   {
     DoutEntering(dc::notice, "RefCountReleaser::operator=({RefCountReleaser&&:" << releaser.m_device << ", " << releaser.m_allow_deletion_count << "})");
@@ -64,6 +66,8 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     releaser.m_allow_deletion_count = 0;
     return *this;
   }
+
+#if 0
   RefCountReleaser& operator+=(RefCountReleaser&& releaser)
   {
     DoutEntering(dc::notice, "RefCountReleaser::operator+=({RefCountReleaser&&:" << releaser.m_device << ", " << releaser.m_allow_deletion_count <<

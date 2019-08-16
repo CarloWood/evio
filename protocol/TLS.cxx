@@ -1,6 +1,12 @@
 #include "sys.h"
 #include "TLS.h"
 #include "matrixssl/matrixsslApi.h"
+#ifdef CWDEBUG
+#include "matrixssl/matrixssllib.h"
+#include "testkeys/RSA/2048_RSA.h"
+#include "testkeys/RSA/2048_RSA_KEY.h"
+#include "testkeys/RSA/ALL_RSA_CAS.h"
+#endif
 #include "utils/debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
 #include <alloca.h>
@@ -24,6 +30,11 @@ struct matrixssl_error_code
 
 std::error_code make_error_code(matrixssl_error_code);
 
+std::ostream& operator<<(std::ostream& os, matrixssl_error_code code)
+{
+  return os << make_error_code(code).category().message(code);
+}
+
 } // namespace protocol
 } // namespace evio
 
@@ -44,6 +55,7 @@ namespace {
 sslKeys_t* s_keys;
 
 // Signature algorithms that we are willing to support.
+// See the sigalg* macros in matrixssl/crypto/cryptolib.h for a complete list.
 uint16_t const sigalgs[] = {
 #ifdef USE_ECC
     sigalg_ecdsa_secp256r1_sha256,
@@ -68,6 +80,7 @@ uint16_t const sigalgs[] = {
 constexpr int32_t sigalgs_len = sizeof(sigalgs) / sizeof(sigalgs[0]) - 1; // -1: remove the trailing 0.
 
 // Ciphersuites that we are willing to support.
+// See matrixssl/matrixssl/matrixsslApiCipher.h for a complete list.
 psCipher16_t const ciphersuites[] = {
 #ifdef USE_TLS_1_3
     TLS_AES_128_GCM_SHA256,
@@ -86,6 +99,7 @@ psCipher16_t const ciphersuites[] = {
 constexpr int32_t ciphersuites_len = sizeof(ciphersuites) / sizeof(ciphersuites[0]) - 1;
 
 // The protocol versions that we're willing to support.
+// See matrixssl/matrixssl/matrixsslApiVer.h for all possibilities.
 psProtocolVersion_t const versions[] =
 {
 # ifdef USE_TLS_1_3
@@ -100,6 +114,13 @@ constexpr int32_t versions_len = sizeof(versions) / sizeof(versions[0]) - 1;
 
 } // namespace
 
+#ifdef CWDEBUG
+std::ostream& operator<<(std::ostream& os, ssl_t& session)
+{
+  return os << static_cast<FileDescriptor*>(session.userPtr);
+}
+#endif
+
 //inline
 auto const TLS::session() const
 {
@@ -112,11 +133,19 @@ auto const TLS::session_opts() const
   return static_cast<sslSessOpts_t*>(m_session_opts);
 }
 
+//inline
+auto const TLS::session_id() const
+{
+  return static_cast<sslSessionId_t*>(m_session_id);
+}
+
 void TLS::global_tls_initialization()
 {
-  DoutEntering(dc::notice, "evio::protocol::TLS::global_tls_initialization()");
+  DoutEntering(dc::tls|dc::notice, "evio::protocol::TLS::global_tls_initialization()");
 
+  Dout(dc::tls|continued_cf, "matrixSslOpenWithConfig(\"" << MATRIXSSL_CONFIG << "\") = ");
   matrixssl_error_code ret = matrixSslOpen();
+  Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslOpen");
 
@@ -138,7 +167,7 @@ void TLS::global_tls_initialization()
 
 void TLS::global_tls_deinitialization()
 {
-  DoutEntering(dc::notice, "evio::protocol::TLS::global_tls_deinitialization()");
+  DoutEntering(dc::tls|dc::notice, "evio::protocol::TLS::global_tls_deinitialization()");
 
   if (s_keys)
   {
@@ -149,7 +178,7 @@ void TLS::global_tls_deinitialization()
   matrixSslClose();
 }
 
-TLS::TLS() : m_session(nullptr), m_session_opts(nullptr)
+TLS::TLS() : m_session(nullptr), m_session_opts(nullptr), m_session_id(nullptr)
 {
   DoutEntering(dc::tls, "TLS::TLS() [" << this << "]");
   std::call_once(s_flag, global_tls_initialization);
@@ -169,12 +198,13 @@ static int32_t certCb(ssl_t* UNUSED_ARG(ssl), psX509Cert_t* UNUSED_ARG(cert), in
   return alert;
 }
 
-void TLS::session_init(char const* http_server_name, size_t http_server_name_length)
+void TLS::session_init(char const* http_server_name)
 {
-  DoutEntering(dc::tls, "TLS::session_init(\"" << http_server_name << "\", " << http_server_name_length << ")");
+  DoutEntering(dc::tls, "TLS::session_init(\"" << http_server_name << "\")");
   // Only call session_init() once.
   ASSERT(!m_session_opts);
   m_session_opts = calloc(sizeof(sslSessOpts_t), 1);
+  session_opts()->userPtr = static_cast<FileDescriptor*>(m_output_device.get());
 
   // Set supported protocol versions.
   matrixssl_error_code ret = matrixSslSessOptsSetClientTlsVersions(session_opts(), versions, versions_len);
@@ -192,6 +222,10 @@ void TLS::session_init(char const* http_server_name, size_t http_server_name_len
 #endif
 #endif // USE_ECC
 
+  matrixssl_error_code ret = matrixSslNewSessionId(reinterpret_cast<sslSessionId_t**>(&m_session_id), NULL);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslNewSessionId");
+
   // Set supported signature algorithms.
   ret = matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len);
   if (ret < 0)
@@ -200,66 +234,113 @@ void TLS::session_init(char const* http_server_name, size_t http_server_name_len
   ret = matrixSslNewClientSession(
       reinterpret_cast<ssl_t**>(&m_session),
       s_keys,
-      NULL,
+      session_id(),
       ciphersuites,
       ciphersuites_len,
       certCb,
-      NULL,
+      http_server_name,
       NULL,
       NULL,
       session_opts());
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslNewClientSession");
+}
 
-#if 0
-  // Initialize TLS session.
-  gnutls_error_codes err = gnutls_init(&m_session, GNUTLS_CLIENT|GNUTLS_NONBLOCK);
-  if (err < 0)
-    THROW_FALERTC(err, "gnutls_init");
+int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
+{
+  matrixssl_error_code ret = ::matrixSslGetOutdata(session(), reinterpret_cast<unsigned char**>(buf_ptr));
+  if (AI_UNLIKELY(ret < 0))
+    THROW_FALERTC(ret, "matrixSslGetOutdata");
+  return ret;
+}
 
-  // Use default priorities.
-  err = gnutls_set_default_priority(m_session);
-  if (err < 0)
-    THROW_FALERTC(err, "gnutls_set_default_priority");
+TLS::data_result_type TLS::matrixSslSentData(ssize_t wlen)
+{
+  matrixssl_error_code ret = ::matrixSslSentData(session(), wlen);
+  Dout(dc::tls, "matrixSslSentData({" << *session() << "}, " << wlen << ") = " << ret);
 
-  // Put the x509 credentials to the current session.
-  err = gnutls_credentials_set(m_session, GNUTLS_CRD_CERTIFICATE, s_xcred);
-  if (err < 0)
-    THROW_FALERTC(err, "gnutls_credentials_set");
+  if (AI_UNLIKELY(ret < 0))
+    THROW_FALERTC(ret, "matrixSslSentData");
 
-  if (http_server_name)
+  if (ret == MATRIXSSL_SUCCESS)
+    return SUCCESS;	                // Success. No pending data remaining.
+
+  if (ret == MATRIXSSL_HANDSHAKE_COMPLETE)
+    return HANDSHAKE_COMPLETE;          // All done.
+
+  if (AI_UNLIKELY(ret == MATRIXSSL_REQUEST_CLOSE))
+    return REQUEST_CLOSE;               // All done.
+
+  ASSERT(ret == MATRIXSSL_REQUEST_SEND);
+  return REQUEST_SEND;                  // There is more to send.
+}
+
+int32_t TLS::matrixSslGetReadbuf(char** buf_ptr)
+{
+  matrixssl_error_code ret = ::matrixSslGetReadbuf(session(), reinterpret_cast<unsigned char**>(buf_ptr));
+  if (AI_UNLIKELY(ret < 0))
+    THROW_FALERTC(ret, "matrixSslGetReadbuf");
+  return ret;
+}
+
+TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char** buf_ptr, uint32_t* buf_len_ptr)
+{
+  matrixssl_error_code ret = ::matrixSslReceivedData(session(), rlen, reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
+  Dout(dc::tls, "matrixSslReceivedData({" << *session() << "}, " << rlen << ", buf_ptr, buf_len_ptr) = " << ret);
+
+  if (AI_UNLIKELY(ret < 0))
+    THROW_FALERTC(ret, "matrixSslReceivedData");
+
+  switch (ret)
   {
-    err = gnutls_server_name_set(m_session, GNUTLS_NAME_DNS, http_server_name, http_server_name_length);
-    if (err < 0)
-      THROW_FALERTC(err, "gnutls_server_name_set");
-    Dout(dc::gnutls, "Server name set to \"" << http_server_name << "\" [" << this << "]");
+    case PS_SUCCESS:
+      return SUCCESS;
 
-    gnutls_session_set_verify_cert(m_session, http_server_name, 0);
+    case MATRIXSSL_REQUEST_SEND:
+      return REQUEST_SEND;
+
+    case MATRIXSSL_REQUEST_RECV:
+      return REQUEST_RECV;
+
+    case MATRIXSSL_HANDSHAKE_COMPLETE:
+      return HANDSHAKE_COMPLETE;
+
+    case MATRIXSSL_RECEIVED_ALERT:
+      ASSERT(*buf_len_ptr == 2);
+      return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
+
+    case MATRIXSSL_APP_DATA:
+      return APP_DATA;
   }
+  ASSERT(ret == MATRIXSSL_APP_DATA_COMPRESSED);
+  return APP_DATA_COMPRESSED;
+}
 
-  gnutls_transport_set_ptr2(m_session, m_input_device.get(), m_output_device.get());
-  gnutls_transport_set_push_function(m_session, system_write);
-  gnutls_transport_set_pull_function(m_session, system_read);
-  gnutls_transport_set_pull_timeout_function(m_session, system_recv_timeout);
+TLS::data_result_type TLS::matrixSslProcessedData(char** buf_ptr, uint32_t* buf_len_ptr)
+{
+  matrixssl_error_code ret = ::matrixSslProcessedData(session(), reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
+  Dout(dc::tls, "matrixSslReceivedData({" << *session() << "}, buf_ptr, buf_len_ptr) = " << ret);
 
-  gnutls_session_set_data(m_session, m_rdata.data, m_rdata.size);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslProcessedData");
 
-  do
+  switch (ret)
   {
-    gnutls_handshake_set_timeout(m_session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT);
-    try
-    {
-      err = gnutls_handshake(m_session);
-      if (err < 0)
-        THROW_FALERTC(err, "gnutls_handshake");
-    }
-    catch (AIAlert::Error const& error)
-    {
-      Dout(dc::warning, error);
-    }
+    case PS_SUCCESS:
+      return SUCCESS;
+
+    case MATRIXSSL_APP_DATA:
+      return APP_DATA;
+
+    case MATRIXSSL_REQUEST_SEND:
+      return REQUEST_SEND;
+
+    case MATRIXSSL_REQUEST_RECV:
+      return REQUEST_RECV;
   }
-  while (err < 0 && gnutls_error_is_fatal(err) == 0);
-#endif
+  ASSERT(ret == MATRIXSSL_RECEIVED_ALERT);
+  ASSERT(*buf_len_ptr == 2);
+  return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
 }
 
 //============================================================================
@@ -320,14 +401,41 @@ std::string MatrixSSLErrorCategory::message(int32 ev) const
 {
   switch (ev)
   {
+    // core API errors.
     AI_CASE_RETURN(PS_SUCCESS);
     AI_CASE_RETURN(PS_FAILURE);
-    AI_CASE_RETURN(PS_MEM_FAIL);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL);
-    AI_CASE_RETURN(PS_PLATFORM_FAIL);
     AI_CASE_RETURN(PS_ARG_FAIL);
-    AI_CASE_RETURN(PS_PARSE_FAIL);
+    AI_CASE_RETURN(PS_PLATFORM_FAIL);
+    AI_CASE_RETURN(PS_MEM_FAIL);
+    AI_CASE_RETURN(PS_LIMIT_FAIL);
     AI_CASE_RETURN(PS_UNSUPPORTED_FAIL);
+    AI_CASE_RETURN(PS_DISABLED_FEATURE_FAIL);
+    AI_CASE_RETURN(PS_PROTOCOL_FAIL);
+    AI_CASE_RETURN(PS_TIMEOUT_FAIL);
+    AI_CASE_RETURN(PS_INTERRUPT_FAIL);
+    AI_CASE_RETURN(PS_PENDING);
+    AI_CASE_RETURN(PS_EAGAIN);
+    AI_CASE_RETURN(PS_OUTPUT_LENGTH);
+    AI_CASE_RETURN(PS_HOSTNAME_RESOLUTION);
+    AI_CASE_RETURN(PS_CONNECT);
+    AI_CASE_RETURN(PS_INSECURE_PROTOCOL);
+    AI_CASE_RETURN(PS_VERIFICATION_FAILED);
+
+    // crypto API errors.
+    AI_CASE_RETURN(PS_PARSE_FAIL);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_BC);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_DN);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_SIG);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_REVOKED);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_EXTENSION);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_PATH_LEN);
+    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_AUTHKEY);
+    AI_CASE_RETURN(PS_SIGNATURE_MISMATCH);
+    AI_CASE_RETURN(PS_AUTH_FAIL);
+    AI_CASE_RETURN(PS_MESSAGE_UNSUPPORTED);
+    AI_CASE_RETURN(PS_VERSION_UNSUPPORTED);
+    AI_CASE_RETURN(PS_SELFTEST_FAILED);
   }
   return "Unknown error " + std::to_string(ev);
 }

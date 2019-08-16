@@ -143,6 +143,7 @@ void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 // This function is thread-safe.
 void OutputDevice::stop_output_device(int& allow_deletion_count)
 {
+  DoutEntering(dc::evio, "OutputDevice::stop_output_device({" << allow_deletion_count << "}) [" << this << ']');
   bool need_close = false;
   {
     state_t::wat state_w(m_state);
@@ -157,6 +158,7 @@ void OutputDevice::stop_output_device(int& allow_deletion_count)
 // GetThread only.
 bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition)
 {
+  DoutEntering(dc::evio, "OutputDevice::stop_output_device({" << allow_deletion_count << "}, " << condition << ") [" << this << ']');
   bool success;
   bool need_close = false;
   {
@@ -177,6 +179,7 @@ bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCon
 
 void OutputDevice::disable_output_device()
 {
+  DoutEntering(dc::evio, "OutputDevice::disable_output_device()");
   bool is_flushing = false;
   {
     state_t::wat state_w(m_state);

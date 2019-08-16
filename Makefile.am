@@ -4,44 +4,27 @@ SUBDIRS = matrixssl protocol
 
 noinst_LTLIBRARIES = libevio.la
 
-SOURCES = FileDescriptor.cxx \
-	  FileDescriptor.h \
-	  InputDevice.cxx \
-	  InputDevice.h \
-	  OutputDevice.cxx \
-	  OutputDevice.h \
-	  StreamBuf.cxx \
-	  StreamBuf.h \
-	  RefCountReleaser.cxx \
-	  RefCountReleaser.h \
-	  EventLoop.h \
-	  EventLoop.cxx \
-	  EventLoopThread.h \
-	  EventLoopThread.cxx \
-	  Protocol.cxx \
-	  Protocol.h \
-	  Socket.cxx \
-	  Socket.h \
-	  ListenSocket.h \
-	  ListenSocket.cxx \
-	  inet_support.cxx \
-	  inet_support.h \
-	  SocketAddress.cxx \
-	  SocketAddress.h \
-	  SocketAddressList.cxx \
-	  SocketAddressList.h \
-	  Interface.cxx \
-	  Interface.h \
-	  SocketNetmask.h \
-	  File.cxx \
-	  File.h \
-	  PersistentInputFile.cxx \
-	  PersistentInputFile.h \
-	  INotify.cxx \
-	  INotify.h \
-	  Pipe.cxx \
-	  Pipe.h
+SOURCES = FileDescriptor.cxx FileDescriptor.h \
+	  InputDevice.cxx InputDevice.h \
+	  OutputDevice.cxx OutputDevice.h \
+	  StreamBuf.cxx StreamBuf.h \
+	  RefCountReleaser.cxx RefCountReleaser.h \
+	  EventLoop.cxx EventLoop.h \
+	  EventLoopThread.cxx EventLoopThread.h \
+	  Protocol.cxx Protocol.h \
+	  Socket.cxx Socket.h \
+	  TLSSocket.cxx TLSSocket.h \
+	  ListenSocket.cxx ListenSocket.h \
+	  inet_support.cxx inet_support.h \
+	  SocketAddress.cxx SocketAddress.h \
+	  SocketAddressList.cxx SocketAddressList.h \
+	  Interface.cxx Interface.h \
+	  File.cxx File.h \
+	  PersistentInputFile.cxx PersistentInputFile.h \
+	  INotify.cxx INotify.h \
+	  Pipe.cxx Pipe.h \
+	  SocketNetmask.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@
-libevio_la_LIBADD = protocol/libprotocol.la matrixssl/matrixssl/libssl_s.la matrixssl/core/libcore_s.la matrixssl/crypto/libcrypt_s.la ../threadpool/libthreadpool.la ../threadsafe/libthreadsafe.la ../utils/libutils_r.la @LIBCWD_R_LIBS@
+libevio_la_LIBADD = protocol/libprotocol.la ../threadpool/libthreadpool.la ../threadsafe/libthreadsafe.la ../utils/libutils_r.la @LIBCWD_R_LIBS@

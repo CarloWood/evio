@@ -5,18 +5,17 @@
 #include "evio/Source.h"
 #include "evio/Sink.h"
 #include "evio/SocketAddress.h"
-//#include <gnutls/gnutls.h>
-//#include "matrixsslApi.h"
 #include "debug.h"
 #include <libcwd/buf2str.h>
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct gnutls;
+extern channel_ct tls;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
 namespace evio {
+
 namespace protocol {
 
 struct TLSSource : public Source
@@ -51,7 +50,6 @@ class TLS
   static std::once_flag s_flag;
   static void global_tls_initialization();
   static void global_tls_deinitialization();
-//  static gnutls_certificate_credentials_t s_xcred;
   static int s_debug_level;
 
   boost::intrusive_ptr<InputDevice> m_input_device;     // The underlaying input device.
@@ -60,6 +58,7 @@ class TLS
   TLSSource m_tls_source;                               // The source that the underlaying output device should use.
   void* m_session;                                      // ssl_t* m_session; Session state.
   void* m_session_opts;                                 // sslSessOpts_t* m_session_opts; Session options.
+  void* m_session_id;                                   // sslSessionId_t* m_session_id; Session resume data.
 
   // Accessor for m_session.
   inline auto const session() const;                    // Returns a ssl_t* const.
@@ -67,19 +66,12 @@ class TLS
   // Accessor for m_session_opts.
   inline auto const session_opts() const;               // Returns a sslSessOpts_t* const.
 
+  // Accessor for m_session_id.
+  inline auto const session_id() const;                 // Returns a sslSessionId_t* const.
+
  public:
   TLS();
   ~TLS();
-
-#if 0
-  // The level is an integer between 0 and 9. Higher values mean more verbosity.
-  // The default value is 0.
-  //
-  // Larger values should only be used with care, since they may reveal sensitive information.
-  //
-  // See https://gnutls.org/manual/html_node/Core-TLS-API.html#gnutls_005fglobal_005fset_005flog_005flevel
-  static void set_debug_level(int debug_level);
-#endif
 
   void set_device(InputDevice* input_device, OutputDevice* output_device)
   {
@@ -90,14 +82,35 @@ class TLS
     output_device->set_source(m_tls_source);
   }
 
-  void session_init(char const* http_server_name, size_t http_server_name_length);
+  void session_init(char const* http_server_name);
   void session_init(SocketAddress const& remote_address)
   {
     // Use session_init(char const* http_server_name) instead.
     ASSERT(remote_address.is_ip());
     std::string http_server_name = remote_address.to_string(true);
-    session_init(http_server_name.c_str(), http_server_name.length());
+    session_init(http_server_name.c_str());
   }
+
+  enum data_result_type
+  {
+    SUCCESS,
+    REQUEST_SEND,
+    REQUEST_RECV,
+    REQUEST_CLOSE,
+    HANDSHAKE_COMPLETE,
+    RECEIVED_ALERT_WARNING,
+    RECEIVED_ALERT_FATAL,
+    APP_DATA,
+    APP_DATA_COMPRESSED
+  };
+
+  // Called from TLSSocket::write_to_fd.
+  int32_t matrixSslGetOutdata(char** buf_ptr);
+  data_result_type matrixSslSentData(ssize_t wlen);
+  // Called from TLSSocket::read_from_fd.
+  int32_t matrixSslGetReadbuf(char** buf_ptr);
+  data_result_type matrixSslReceivedData(ssize_t rlen, char** buf_ptr, uint32_t* buf_len_ptr);
+  data_result_type matrixSslProcessedData(char** buf_ptr, uint32_t* buf_len_ptr);
 };
 
 enum error_codes

@@ -61,11 +61,6 @@ class InputDevice : public virtual FileDescriptor
   // The default behavior is to do nothing.
   virtual void data_received     (int& allow_deletion_count, char const* new_data, size_t rlen);
 
- private:
-#ifdef DEBUGDEVICESTATS
-  size_t m_received_bytes;
-#endif
-
  protected:
   //---------------------------------------------------------------------------
   // The input buffer
@@ -73,6 +68,9 @@ class InputDevice : public virtual FileDescriptor
 
   Sink* m_sink;                                         // The sink object that this device writes to.
   InputBuffer* m_ibuffer;                               // A pointer to the input buffer.
+#ifdef DEBUGDEVICESTATS
+  size_t m_received_bytes;
+#endif
 
  protected:
   friend class Sink;
