@@ -295,28 +295,31 @@ void OutputDevice::write_to_fd(int& allow_deletion_count, int fd)
       //
       // Therefore, call stop_output_device with a condition that re-checks if the
       // buffer is really empty inside the critical area of m_state.
-      utils::FuzzyCondition condition_empty_buffer([obuffer]{
-          return obuffer->StreamBufConsumer::buffer_empty();
+      utils::FuzzyCondition condition_nothing_to_get([obuffer]{
+          return obuffer->StreamBufConsumer::nothing_to_get();
       });
       obuffer->restart_input_device_if_needed();
       // When buf2dev_contiguous_forced() returned zero then the buffer is empty.
       // So, it is unlikely that a microsecond later it isn't anymore but we're
       // not allowed to call stop_output_device with a false condition (simply
       // because it makes no sense).
-      if (AI_UNLIKELY(condition_empty_buffer.is_momentary_false()))
+      if (AI_UNLIKELY(condition_nothing_to_get.is_momentary_false()))
         continue;
       // If during the cannonical test the buffer isn't empty anymore, continue reading.
-      if (AI_UNLIKELY(!stop_output_device(allow_deletion_count, condition_empty_buffer)))
+      if (AI_UNLIKELY(!stop_output_device(allow_deletion_count, condition_nothing_to_get)))
         continue;
       return;
     }
 #if EWOULDBLOCK != EAGAIN
     int nr_eagain_errors = 1;
 #endif
-try_again_write1:
-    size_t wlen = ::write(fd, obuffer->buf2dev_ptr(), len);
-    if (AI_UNLIKELY(wlen == (size_t)-1))
+    ssize_t wlen;
+    for (;;)    // EINTR / EAGAIN loop.
     {
+      wlen = ::write(fd, obuffer->buf2dev_ptr(), len);
+      if (AI_LIKELY(wlen != -1))
+        break;
+
       int err = errno;
       int const is_debug_channel =
 #ifdef CWDEBUG
@@ -338,7 +341,7 @@ try_again_write1:
         std::cerr << "OutputDevice::write_to_fd(): WARNING: write error to debug channel: " << strerror(err) << std::endl;
 #endif
       if (err == EINTR)
-        goto try_again_write1;
+        continue;     // Try the same write again.
       if (err == EWOULDBLOCK)
       {
         // We can't just leave this function in this case because regular files aren't
@@ -354,7 +357,7 @@ try_again_write1:
       if (err == EAGAIN)
       {
         if (nr_eagain_errors--)
-          goto try_again_write1;
+          continue;   // Try the same write again.
         // See above.
         ASSERT(!FileDescriptor::state_t::wat(m_state)->m_flags.is_regular_file());
         return;
@@ -363,6 +366,7 @@ try_again_write1:
       write_error(allow_deletion_count, err);
       return;
     }
+
     Dout(dc::system, "write(" << fd << ", \"" << buf2str(obuffer->buf2dev_ptr(), wlen) << "\", " << len << ") = " << wlen);
     obuffer->buf2dev_bump(wlen);
 #ifdef DEBUGDEVICESTATS
@@ -370,11 +374,11 @@ try_again_write1:
 #endif
     Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd
 #ifdef DEBUGDEVICESTATS
-      << " [total sent now " << m_sent_bytes << " bytes]"
+        << " [total sent now " << m_sent_bytes << " bytes]"
 #endif
-      );
+    );
     obuffer->restart_input_device_if_needed();
-    if (wlen < len)
+    if ((size_t)wlen < len)
     {
       // This means we can't write more at the moment. In the case of regular
       // files that should really be true. For other cases it would be ok when
@@ -395,11 +399,15 @@ int OutputDevice::sync()
     Dout(dc::warning, "The device is not writable!");
     return -1;
   }
-  // Advance m_next_egptr, if necessary; making any data written so far available to the Get Thread.
+  // Advance m_last_pptr, if necessary; making any data written so far available to the consumer thread.
   m_obuffer->sync_egptr();
   utils::FuzzyCondition condition_not_empty([this]{
-        return !m_obuffer->StreamBufProducer::buffer_empty();
+        return !m_obuffer->StreamBufProducer::nothing_to_get();
       });
+  if (!condition_not_empty.is_momentary_true())
+    Dout(dc::warning, "condition_not_empty is not momentary_true");
+  else if (!(!is_active(type)).is_momentary_true())
+    Dout(dc::warning, "!is_active(type) is not momentary_true");
   if ((condition_not_empty && !is_active(type)).is_momentary_true())
     start_output_device(state_t::wat(m_state), condition_not_empty);
   return 0;

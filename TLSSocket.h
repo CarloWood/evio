@@ -8,28 +8,49 @@ namespace evio {
 class TLSSocket : public Socket
 {
  private:
-  protocol::TLS m_tls;
+  static constexpr int outdata_ready = 1;
+  static constexpr int stopped = 2;
+  static constexpr int post_handshake = 4;
 
  public:
-  void set_source(Source const&)
-  {
-  }
+  enum output_state_type {
+    preconnect_out =            0,                                              // We're not connected yet.
+    handshake_OutData_ready =                              outdata_ready,       // We must call matrixSslGetOutdata to retrieve encrypted data part of the handshake that must be sent to the peer.
+    handshake_idle_out =                         stopped | outdata_ready,       // All encrypted data was written, stream was stopped.
+    encode_app_data =           post_handshake,                                 // Handshake finished, call ... to encrypt application data.
+    OutData_ready =             post_handshake |           outdata_ready,       // We must call matrixSslGetOutdata the encrypted application data that must be sent to the peer.
+    write_error_out =           post_handshake | stopped,                       // A write error occurred.
+    idle_out =                  post_handshake | stopped | outdata_ready        // All encrypted data was written, stream was stopped (post handshake).
+  };
 
-  void set_sink(Sink const&)
-  {
-  }
+  static char const* output_state_to_str(output_state_type output_state);
 
+ private:
+  protocol::TLS m_tls;
+  std::mutex m_output_state_mutex;
+  std::atomic<output_state_type> m_output_state;
+  uint32_t m_max_frag;
+  static constexpr uint32_t s_max_frag_magic = 0x5000;  // Must be larger than 0x4000.
+
+ public:
   bool connect(SocketAddress const& remote_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
   {
     m_tls.set_device(this, this);
+    m_output_state = preconnect_out;
+    m_max_frag = s_max_frag_magic;
     int ret = evio::Socket::connect(remote_address, rcvbuf_size, sndbuf_size, if_addr);
     return ret;
   }
 
-//        connected(allow_deletion_count, true); // Signal successful connect.
-
   void write_to_fd(int& allow_deletion_count, int fd) override;
   void read_from_fd(int& allow_deletion_count, int fd) override;
+  void data_received(int& allow_deletion_count, char const* new_data, size_t rlen) override;
+
+ private:
+  bool handshake_completed() const { return m_max_frag != s_max_frag_magic; }
+
+ protected:
+  int sync() override;
 };
 
 } // namespace evio

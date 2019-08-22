@@ -69,7 +69,9 @@ class Sink : public Protocol
   virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t)
       { /*This should never be used*/ ASSERT(false); return nullptr; }
 
+ public:
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
+  // Should only be called by InputDevice::data_received() or classes that override that.
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 

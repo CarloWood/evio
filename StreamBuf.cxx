@@ -408,7 +408,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 // Get thread.
 int StreamBufConsumer::underflow_a()
 {
-  DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << this << ']');
+  DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << static_cast<StreamBuf*>(this) << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -578,7 +578,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
 
 std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const n)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << this << "] ");
+  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << static_cast<StreamBuf*>(this) << "] ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -623,11 +623,12 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
       //===========================================================
     }
   }
-  Dout(dc::finish, "= " << (n - remaining));
+  // remaining is now 0.
+  Dout(dc::finish, "= " << n);
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
-  return n - remaining;
+  return n;
 }
 
 //============================================================================

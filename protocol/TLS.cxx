@@ -318,6 +318,9 @@ void TLS::session_init(char const* http_server_name)
   Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslNewClientSession");
+  // As per documentation of matrixSslNewClientSession:
+  // Success. The ssl_t context is initialized and the CLIENT_HELLO message has been encoded and is ready to be sent to the server to being the SSL handshake.
+  ASSERT(ret == MATRIXSSL_REQUEST_SEND);
 }
 
 int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
@@ -367,10 +370,10 @@ int32_t TLS::matrixSslGetReadbuf(char** buf_ptr)
   return ret;
 }
 
-TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char** buf_ptr, uint32_t* buf_len_ptr)
+TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char const** buf_ptr, uint32_t* buf_len_ptr)
 {
   Dout(dc::tls|continued_cf, "matrixSslReceivedData({" << *session() << "}, " << rlen << ", {");
-  matrixssl_error_code ret = ::matrixSslReceivedData(session(), rlen, reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
+  matrixssl_error_code ret = ::matrixSslReceivedData(session(), rlen, const_cast<unsigned char**>(reinterpret_cast<unsigned char const**>(buf_ptr)), buf_len_ptr);
 
   if (AI_UNLIKELY(ret < 0))
   {
@@ -412,10 +415,10 @@ TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char** buf_ptr, u
   return APP_DATA_COMPRESSED;
 }
 
-TLS::data_result_type TLS::matrixSslProcessedData(char** buf_ptr, uint32_t* buf_len_ptr)
+TLS::data_result_type TLS::matrixSslProcessedData(char const** buf_ptr, uint32_t* buf_len_ptr)
 {
   Dout(dc::tls|continued_cf, "matrixSslProcessedData({");
-  matrixssl_error_code ret = ::matrixSslProcessedData(session(), reinterpret_cast<unsigned char**>(buf_ptr), buf_len_ptr);
+  matrixssl_error_code ret = ::matrixSslProcessedData(session(), const_cast<unsigned char**>(reinterpret_cast<unsigned char const**>(buf_ptr)), buf_len_ptr);
 
   if (ret < 0)
   {
@@ -442,6 +445,40 @@ TLS::data_result_type TLS::matrixSslProcessedData(char** buf_ptr, uint32_t* buf_
   ASSERT(ret == MATRIXSSL_RECEIVED_ALERT);
   ASSERT(*buf_len_ptr == 2);
   return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
+}
+
+int32_t TLS::matrixSslEncodeToOutdata(char* buf, uint32_t len)
+{
+  matrixssl_error_code ret = ::matrixSslEncodeToOutdata(session(), reinterpret_cast<unsigned char*>(buf), len);
+  Dout(dc::tls, "TLS::matrixSslEncodeToOutdata(\"" << buf2str(buf, len) << "\", " << len << ") = " << ret);
+
+  if (AI_UNLIKELY(ret < 0))
+    THROW_FALERTC(ret, "matrixSslEncodeToOutdata");
+
+  if (AI_LIKELY(ret > 0))
+    return ret;
+
+  // Just translate the matrixssl error to some similar system error.
+  switch (ret)
+  {
+    case PS_LIMIT_FAIL:           // The plaintext length must be smaller than the SSL specified value of 16KB.
+      return -EMSGSIZE;
+    case PS_MEM_FAIL:             // The internal allocation of the destination buffer failed.
+      return -ENOMEM;
+    case PS_ARG_FAIL:             // Bad input parameters.
+      return -EINVAL;
+    case PS_PROTOCOL_FAIL:        // This session is flagged for closure.
+      return -EPROTO;
+  }
+  ASSERT(ret == PS_FAILURE);    // Internal error managing buffers.
+  return -ENOBUFS;
+}
+
+uint32_t TLS::get_max_frag() const
+{
+  int32 max_frag = session()->maxPtFrag;
+  ASSERT(0 < max_frag && max_frag <= 0x4000);
+  return max_frag;
 }
 
 //============================================================================

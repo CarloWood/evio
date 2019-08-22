@@ -44,7 +44,7 @@ class InputDecoder : public Sink
     return input_buffer;
   }
 
- protected:
+ public: // Should only be called by InputDevice::data_received or classes that override that.
   // Given the char array new_data of size rlen, returns the length of the string (starting at new_data) up to and
   // including the first newline char, if any. Otherwise returns 0.
   size_t end_of_msg_finder(char const* new_data, size_t rlen) override

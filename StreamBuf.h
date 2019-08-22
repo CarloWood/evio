@@ -103,7 +103,6 @@ class MemoryBlock
   friend class StreamBufProducer;       // Needs access to create.
   friend class StreamBufConsumer;       // Needs access to m_next.
   friend class MsgBlock;                // Needs access to create/add_reference/release.
-  friend class InputDevice;             // Needs access to create/release.
 
  private:
   mutable std::atomic<int> m_count;     // Reference counter.
@@ -114,6 +113,13 @@ class MemoryBlock
   MemoryBlock(MemoryBlock const&) = delete;
   MemoryBlock& operator=(MemoryBlock const&) = delete;
 
+  // Increment reference count by one. Called for every MsgBlock object that is created.
+  void add_reference() const
+  {
+    m_count.fetch_add(1, std::memory_order_relaxed);
+  }
+
+ public: // Used by data_received() to make a message contiguous.
   // Create a new memory block with a reference count of 1 and a block size of block_size.
   // This initial pointer is stored in the StreamBuf::m_get_area_block_node list that this
   // MemoryBlock belongs to. The returned MemoryBlock can be viewed as a list containing a
@@ -132,12 +138,6 @@ class MemoryBlock
 #endif
     new (memory_block) MemoryBlock(block_size);
     return memory_block;
-  }
-
-  // Increment reference count by one. Called for every MsgBlock object that is created.
-  void add_reference() const
-  {
-    m_count.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Decrement reference count by one. Called when a MsgBlock is destructed and/or when
@@ -185,29 +185,51 @@ class MsgBlock
   MemoryBlock const* m_memory_block;
 
  public:
+  MsgBlock(char const* start, size_t size) : m_start(start), m_size(size), m_memory_block(nullptr)
+  {
+  }
+
   MsgBlock(char const* start, size_t size, MemoryBlock const* memory_block) : m_start(start), m_size(size), m_memory_block(memory_block)
   {
     ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
     m_memory_block->add_reference();
   }
 
-  ~MsgBlock() { m_memory_block->release(); }
+  ~MsgBlock() { if (m_memory_block) m_memory_block->release(); }
 
   MsgBlock(MsgBlock const& msg_block) : m_start(msg_block.m_start), m_size(msg_block.m_size), m_memory_block(msg_block.m_memory_block)
   {
+    // Do not copy a MsgBlock that was constructed with the first constructor (or the result of a move of such an object).
+    ASSERT(m_memory_block);
     m_memory_block->add_reference();
+  }
+
+  MsgBlock(MsgBlock&& msg_block) : m_start(msg_block.m_start), m_size(msg_block.m_size), m_memory_block(msg_block.m_memory_block)
+  {
+    msg_block.m_memory_block = nullptr;
   }
 
   MsgBlock& operator=(MsgBlock const& msg_block)
   {
     if (this == &msg_block)
       return *this;
+    // Do not assign to/from a MsgBlock that was constructed with the first constructor (or the result of a move of such an object).
+    ASSERT(m_memory_block && msg_block.m_memory_block);
     m_memory_block->release();
     m_start = msg_block.m_start;
     m_size = msg_block.m_size;
     m_memory_block = msg_block.m_memory_block;
     ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
     m_memory_block->add_reference();
+    return *this;
+  }
+
+  MsgBlock& operator=(MsgBlock&& msg_block)
+  {
+    m_start = msg_block.m_start;
+    m_size = msg_block.m_size;
+    m_memory_block = msg_block.m_memory_block;
+    msg_block.m_memory_block = nullptr;
     return *this;
   }
 
@@ -393,6 +415,10 @@ class StreamBufCommon : public std::streambuf
   std::vector<RecordingData*> recording_buffer;
   std::mutex recording_mutex;
 #endif
+
+ public: // Please do not use this (for internal use only).
+  [[gnu::always_inline]] char* last_pptr_consumer_read_access() const { return m_last_pptr.load(std::memory_order_acquire); }
+  [[gnu::always_inline]] bool resetting_consumer_read_access() const { return m_resetting.load(std::memory_order_acquire); }
 };
 
 //=============================================================================
@@ -478,9 +504,6 @@ class StreamBufProducer : public StreamBufCommon
 
   MemoryBlock* create_memory_block(size_t block_size);
 
- public: // Really ugly hack. Please do not use this (for internal use only).
-  [[gnu::always_inline]] char* pptr_consumer_read_access() const { return std::streambuf::pptr(); }
-
  protected:
   int_type overflow_a(int_type c);
   std::streamsize xsputn_a(char const* s, std::streamsize const n);
@@ -544,7 +567,7 @@ class StreamBufProducer : public StreamBufCommon
   std::streambuf* rdbuf() { return this; }
 
  public:
-  [[gnu::always_inline]] inline utils::FuzzyBool buffer_empty() const;
+  [[gnu::always_inline]] inline utils::FuzzyBool nothing_to_get() const;
 
   // Return the number of unused bytes in the put area of the output buffer.
   size_t unused_in_last_block() const { return epptr() - pptr(); }
@@ -697,7 +720,7 @@ class StreamBufConsumer
   [[gnu::always_inline]] inline char* gptr_producer_read_access() const;
 
  public:
-  [[gnu::always_inline]] inline utils::FuzzyBool buffer_empty() const;
+  [[gnu::always_inline]] inline utils::FuzzyBool nothing_to_get() const;
 
   // Return the number of unused bytes in the get area of the input buffer
   size_t unused_in_first_block() const { return gptr() - eback(); }
@@ -950,7 +973,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
 #endif
 };
 
-utils::FuzzyBool StreamBufProducer::buffer_empty() const
+utils::FuzzyBool StreamBufProducer::nothing_to_get() const
 {
   // This is the producer thread. Therefore, if the buffer is empty it will stay empty,
   // but if it is not empty then the consumer thread might make it empty immediately
@@ -968,18 +991,44 @@ utils::FuzzyBool StreamBufProducer::buffer_empty() const
   // cache line, but that is pretty much guaranteed too considering its normal
   // alignment). This unsafe access is reflected in the fact that we need to
   // cast 'this' to get access.
-  return (static_cast<StreamBuf const*>(this)->gptr_producer_read_access() == pptr()) ? fuzzy::True : fuzzy::WasFalse;
+  //
+  // There is nothing to get when either m_resetting is false and m_last_pptr == gptr,
+  // or when m_resetting is true and m_last_pptr == pbase. Since we are the producer
+  // thread, m_last_pptr and pbase are non-changing; but gptr can be changed by
+  // the consumer thread (going from something to get to nothing to get, at most)
+  // as well as m_resetting - when set - can go from true to false.
+  //
+  // Hence, if m_resetting is false it will stay false - and if in that case
+  // m_last_pptr == gptr so that the buffer is empty, then it will stay empty.
+  // While, when m_resetting is true then we can at our leasure determine if
+  // m_last_pptr == pbase.
+  return ((m_resetting.load(std::memory_order_acquire) ? pbase()
+                                                       : static_cast<StreamBuf const*>(this)->gptr_producer_read_access())
+      == m_last_pptr.load(std::memory_order_relaxed)) ? fuzzy::True : fuzzy::WasFalse;
 }
 
-utils::FuzzyBool StreamBufConsumer::buffer_empty() const
+utils::FuzzyBool StreamBufConsumer::nothing_to_get() const
 {
   // This is the get thread. Therefore, if the buffer is not empty it will stay not empty,
-  // but if it is empty then the put thread might write data to it immediately
-  // after leaving this function. So, if the expression is true we return WasTrue,
+  // but if it is empty then the put thread might (write data to it and) call sync_egptr()
+  // immediately after leaving this function. So, if the expression is true we return WasTrue,
   // because it could become false after returning and before using the result.
   //
-  // Another problem here is that reading pptr is ... well, see above.
-  return (gptr() == static_cast<StreamBuf const*>(this)->pptr_consumer_read_access()) ? fuzzy::WasTrue : fuzzy::False;
+  // As above, there is nothing to get when either m_resetting is false and m_last_pptr == gptr,
+  // or when m_resetting is true and m_last_pptr == eback(), where now we picked eback() because
+  // m_resetting will only be true when eback() == pbase(), but is at least constant for use,
+  // since we are now the consumer thread.
+  //
+  // This case is more complex however. If m_resetting is true it will stay true and we only
+  // read one unstable atomic (last_pptr), but if m_resetting is false, which is unstable (fuzzy)
+  // we still have to read last_pptr and compare that with gptr(). In the latter case we
+  // have to do TWO unstable reads. We have to make sure that if that results in returning
+  // fuzzy::False that it really is and will stay false.
+  //
+  // So, this happens when m_resetting is false (when we load it) and last_ptr != gptr at
+  // the moment we read it.
+  return ((static_cast<StreamBuf const*>(this)->resetting_consumer_read_access() ? eback() : gptr())
+      == static_cast<StreamBuf const*>(this)->last_pptr_consumer_read_access()) ? fuzzy::WasTrue : fuzzy::False;
 }
 
 StreamBufConsumer::StreamBufConsumer() : m_input_streambuf(static_cast<StreamBuf*>(this))
@@ -1058,6 +1107,12 @@ class Dev2Buf : public StreamBuf
   void dev2buf_bump(int n)                                      // Bump pointer `n' bytes.
   {
     pbump(n);
+  }
+
+  // Copy n bytes from s to the buffer. Maybe ONLY be called by the producer thread!
+  std::streamsize sputn(char const* s, std::streamsize const n)
+  {
+    return xsputn_a(s, n);
   }
 };
 

@@ -51,12 +51,9 @@ class TLS
   static std::string get_CA_files();                    // Returns a semi-colon separated list of all trusted CA certificate bundles that we could find.
   static void global_tls_initialization();
   static void global_tls_deinitialization();
-  static int s_debug_level;
 
   boost::intrusive_ptr<InputDevice> m_input_device;     // The underlaying input device.
   boost::intrusive_ptr<OutputDevice> m_output_device;   // The underlaying output device.
-  TLSSink m_tls_sink;                                   // The sink that the underlaying input device should use.
-  TLSSource m_tls_source;                               // The source that the underlaying output device should use.
   void* m_session;                                      // ssl_t* m_session; Session state.
   void* m_session_opts;                                 // sslSessOpts_t* m_session_opts; Session options.
   void* m_session_id;                                   // sslSessionId_t* m_session_id; Session resume data.
@@ -79,8 +76,6 @@ class TLS
     DoutEntering(dc::evio, "TLS::set_device(" << input_device << ", " << output_device << ")");
     m_input_device = input_device;
     m_output_device = output_device;
-    input_device->set_sink(m_tls_sink);
-    output_device->set_source(m_tls_source);
   }
 
   void session_init(char const* http_server_name);
@@ -110,8 +105,10 @@ class TLS
   data_result_type matrixSslSentData(ssize_t wlen);
   // Called from TLSSocket::read_from_fd.
   int32_t matrixSslGetReadbuf(char** buf_ptr);
-  data_result_type matrixSslReceivedData(ssize_t rlen, char** buf_ptr, uint32_t* buf_len_ptr);
-  data_result_type matrixSslProcessedData(char** buf_ptr, uint32_t* buf_len_ptr);
+  data_result_type matrixSslReceivedData(ssize_t rlen, char const** buf_ptr, uint32_t* buf_len_ptr);
+  data_result_type matrixSslProcessedData(char const** buf_ptr, uint32_t* buf_len_ptr);
+  int32_t matrixSslEncodeToOutdata(char* buf, uint32_t len);
+  uint32_t get_max_frag() const;
 };
 
 enum error_codes

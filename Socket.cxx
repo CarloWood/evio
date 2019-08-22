@@ -129,7 +129,7 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
     start_output_device(state_w);
   else if (m_obuffer)
   {
-    if (!m_obuffer->buffer_empty())   // Must be the same thread as the thread that created the buffer.
+    if (m_obuffer->StreamBufConsumer::nothing_to_get().is_false())      // We are both consumer and producer.
       start_output_device(state_w);
   }
 }
@@ -160,11 +160,11 @@ void Socket::write_to_fd(int& allow_deletion_count, int fd)
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
       if (m_obuffer)
       {
-        utils::FuzzyCondition condition_empty_buffer([m_obuffer = m_obuffer]{
-            return m_obuffer->StreamBufConsumer::buffer_empty();
+        utils::FuzzyCondition condition_nothing_to_get([m_obuffer = m_obuffer]{
+            return m_obuffer->StreamBufConsumer::nothing_to_get();
         });
-        if (condition_empty_buffer.is_momentary_true() &&
-            stop_output_device(allow_deletion_count, condition_empty_buffer))
+        if (condition_nothing_to_get.is_momentary_true() &&
+            stop_output_device(allow_deletion_count, condition_nothing_to_get))
           return;
       }
       else

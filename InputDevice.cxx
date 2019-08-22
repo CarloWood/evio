@@ -209,18 +209,15 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
     for (;;)                                            // Loop for EINTR.
     {
       rlen = ::read(fd, new_data, space);
-      if (AI_UNLIKELY(rlen == -1))                      // A read error occured ?
-      {
-        int err = errno;
-        Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
-        if (err != EINTR)
-        {
-          if (err != EAGAIN && err != EWOULDBLOCK)
-            read_error(allow_deletion_count, err);
-          return;
-        }
-      }
-      break;
+      if (AI_LIKELY(rlen != -1))                        // A read error occured ?
+        break;
+      int err = errno;
+      Dout(dc::system|dc::evio|dc::warning|error_cf, "read(" << fd << ", " << (void*)new_data << ", " << space << ") = -1");
+      if (err == EINTR)
+        continue;
+      if (err != EAGAIN && err != EWOULDBLOCK)
+        read_error(allow_deletion_count, err);
+      return;
     }
 
     if (rlen == 0)                      // EOF reached ?
@@ -328,9 +325,8 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
       new_data += len;
-      if ((len = input_decoder->end_of_msg_finder(new_data, rlen)) == 0)
-        break; // The rest is not a complete message.
       // See if what is left in the buffer is a message too:
+      continue;
     }
     // At this point we have only one block left.
     // The next loop eats up all complete messages in this last block.

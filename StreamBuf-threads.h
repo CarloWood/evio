@@ -58,9 +58,9 @@ namespace evio {
 // in the buffer, and to be stopped when there is no data in the buffer.
 //
 // As above, we assume that there is only one thread at a time that writes
-// to the buffer (called the "PutThread"), and only one thread that reads
-// from the buffer (called the "GetThread"), but reading and writing might
-// happen concurrently.
+// to the buffer, the producer thread (here called the "PutThread"), and only
+// one thread that reads from the buffer, the consumer thread (here called
+// the "GetThread"), but reading and writing might happen concurrently.
 //
 // Of course, the library needs to be entered at all in order for the device
 // to be started or stopped; when reading from the buffer this is easy: even
@@ -71,14 +71,21 @@ namespace evio {
 // flush the ostream (which causes a call to the virtual function Buf2Dev::sync()
 // which in turn calls OutputDevice::sync()).
 //
-// The buffer is considered empty when gptr == pptr and testing that from
-// either PutThread or GetThread is actually Undefined Behavior because
-// we cannot put a mutex around the strictly std::streambuf initiated bumps
-// of gptr and pptr. Nevertheless, we (have to) assume that reading these
-// values are atomic, as should be the case on at least x86_64 architectures.
+// For the purpose of starting an output device (by the PutThread), the buffer is
+// considered empty when the GetThread when executing write_to_fd will see
+// there is nothing in the buffer that can be written, aka when buf2dev_contiguous_forced()
+// returns 0. That means that force_next_contiguous_number_of_bytes() returns 0,
+// which means that update_get_area returns 0 in available, which boils down
+// to that gptr == m_last_pptr or m_resetting is set and m_last_pptr is still
+// at the beginning of the current block.
+//
+// Testing whether gptr == m_last_pptr from the PutThread actually Undefined
+// Behavior because we cannot put a mutex around the strictly std::streambuf
+// initiated bumps of gptr. Nevertheless, we (have to) assume that reading gptr
+// is atomic, as should be the case on at least x86_64 architectures.
 // Nevertheless, as soon as we read either value, they might already change
 // again; fortunately with a structure: only the GetThread will bump gptr
-// and only the PutThread will bump pptr.
+// and only the PutThread will bump m_last_pptr.
 //
 // Under normal circumstances (ignoring putbacks for the moment) the "buffer empty"
 // state transition is as follows:
@@ -91,14 +98,13 @@ namespace evio {
 // see the values True and WasFalse for 'buffer empty', while the GetThread
 // will see the values WasTrue and False.
 //
-// The actual act of starting or stopping a device is protected by a mutex
-// (there is only one thread at a time (allowed) in libev). In order to
-// assure that we will never end up in a prolongued state where the buffer
-// is not empty but the device is stopped (and to a lesser degree where the
-// buffer is empty but the device is started, as that will correct itself)
-// we need to test if the buffer is actually (still) empty inside the critical
-// area of libev (prior to stopping the device) in the case the original
-// test resulted in WasTrue.
+// The actual act of starting or stopping a device is protected by a mutex (the
+// mutex of FileDescriptor::m_state). In order to assure that we will never end
+// up in a prolongued state where the buffer is not empty but the device is
+// stopped (and to a lesser degree where the buffer is empty but the device is
+// started, as that will correct itself) we need to test if the buffer is actually
+// (still) empty inside the critical area of m_state (prior to stopping the device)
+// in the case the original test resulted in WasTrue.
 //
 // Consider reading from a buffer till it is empty and stopping the device,
 // followed by writing to the buffer and starting the device (not race):
@@ -111,20 +117,20 @@ namespace evio {
 //  V   GetThread is running)
 //
 //     (read from buffer)
-//     buffer_empty() == WasTrue
+//     nothing_to_get() == WasTrue
 //
-//     -->--(libev critical area)
-//     if (buffer_empty().
+//     -->--(critical area)
+//     if (nothing_to_get().
 //         is_momentary_true())
 //       stop()
 //     --<--
 //
 //                                      False (so empty_buffer returned True).
 //                                      (write to buffer and sync)
-//                                      !buffer_empty() == WasTrue
+//                                      !nothing_to_get() == WasTrue
 //
 //                                      -->--
-//                                      if ((!buffer_empty()).
+//                                      if ((!nothing_to_get()).
 //                                          is_momentary_true())
 //                                        start()
 //                                      --<--
@@ -136,10 +142,10 @@ namespace evio {
 // That means that the critical area part on the right has to be
 // moved before the critical area part on the left, or else the
 // critical area part on the right is the last code executed and
-// it is impossible to end with !buffer_empty() true without
+// it is impossible to end with !nothing_to_get() true without
 // calling start(). However then also the '(write to buffer and sync)'
 // must go before the critial area part on the left, which will
-// cause the 'buffer_empty().is_momentary_true()' in that part
+// cause the 'nothing_to_get().is_momentary_true()' in that part
 // to fail and stop() not being called unless we push the
 // 'write to buffer' (bump pptr) to above '(read from buffer)',
 // but in that case the buffer is thus actually empty.
@@ -147,12 +153,12 @@ namespace evio {
 //
 // We can do another attempt by using the image above, but have
 // the GetThread empty the buffer before the PutThread can execute
-// the !buffer_empty() test in the critical area so that start()
+// the !nothing_to_get() test in the critical area so that start()
 // isn't called, but well, in that case the buffer is thus also
 // actually empty at the end.
 //
 // Finally, you can try to halt the GetThread right before calling
-// stop() (so it already tested buffer_empty().is_momentary_true())
+// stop() (so it already tested nothing_to_get().is_momentary_true())
 // and then do something that makes the buffer non-empty, after
 // which the GetThread will still call stop(). But that 'doing
 // something' is a '((write to buffer and sync)' in the PutThread,
