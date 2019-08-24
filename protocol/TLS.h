@@ -78,14 +78,7 @@ class TLS
     m_output_device = output_device;
   }
 
-  void session_init(char const* http_server_name);
-  void session_init(SocketAddress const& remote_address)
-  {
-    // Use session_init(char const* http_server_name) instead.
-    ASSERT(remote_address.is_ip());
-    std::string http_server_name = remote_address.to_string(true);
-    session_init(http_server_name.c_str());
-  }
+  void session_init(std::string const& ServerNameIndication);
 
   enum data_result_type
   {

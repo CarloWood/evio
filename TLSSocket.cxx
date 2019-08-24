@@ -168,7 +168,7 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
     {
       // As soon as we can write to a file descriptor, we are connected.
       m_connected_flags |= is_connected;
-      m_tls.session_init(m_remote_address);               // Generate the CLIENT HELLO message.
+      m_tls.session_init(m_ServerNameIndication.c_str());       // Generate the CLIENT HELLO message.
       output_state = handshake_OutData_ready;
       Dout(dc::evio, "output_state = " << output_state);
     }
@@ -509,16 +509,16 @@ void TLSSocket::data_received(int& allow_deletion_count, char const* new_data, s
     }
     else
     {
-      // There is still unprocessed data in m_ibuffer. Append more data to it to make it a complete message.
+      // There is still unprocessed data in m_ibuffer. Append more data to it to make it one complete message.
       if (m_ibuffer->sputn(new_data, len) == EOF)
         goto buffer_full1;
 
+      // The new message must start at the beginning of the buffer,
+      // so the total length of the new message is total size of the buffer.
+      size_t msg_len = m_ibuffer->get_data_size();
+
       if (m_ibuffer->has_multiple_blocks())
       {
-        // The new message must start at the beginning of the buffer,
-        // so the total length of the new message is total size of the buffer.
-        size_t msg_len = m_ibuffer->get_data_size();
-
         // There is only one message in the buffer and that starts at the beginning,
         // so if it has multiple blocks the message spans more than one block.
         ASSERT(!m_ibuffer->is_contiguous(msg_len));
@@ -531,9 +531,7 @@ void TLSSocket::data_received(int& allow_deletion_count, char const* new_data, s
       }
       else
       {
-        char* start = m_ibuffer->raw_gptr();
-        size_t msg_len = (size_t)(new_data - start) + len;
-        input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
+        input_decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
         m_ibuffer->raw_gbump(msg_len);
       }
 

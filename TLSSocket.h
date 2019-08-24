@@ -31,10 +31,19 @@ class TLSSocket : public Socket
   std::atomic<output_state_type> m_output_state;
   uint32_t m_max_frag;
   static constexpr uint32_t s_max_frag_magic = 0x5000;  // Must be larger than 0x4000.
+  std::string m_ServerNameIndication;
 
  public:
-  bool connect(SocketAddress const& remote_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
+  bool connect(SocketAddress const& remote_address, std::string const& ServerNameIndication = {}, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
   {
+    if (!ServerNameIndication.empty())
+      m_ServerNameIndication = ServerNameIndication;
+    else
+    {
+      // Just pass an SIN.
+      ASSERT(remote_address.is_ip());
+      m_ServerNameIndication = remote_address.to_string(true);
+    }
     m_tls.set_device(this, this);
     m_output_state = preconnect_out;
     m_max_frag = s_max_frag_magic;

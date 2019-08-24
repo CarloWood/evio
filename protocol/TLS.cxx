@@ -263,9 +263,28 @@ static int32_t certCb(ssl_t* UNUSED_ARG(ssl), psX509Cert_t* UNUSED_ARG(cert), in
   return alert;
 }
 
-void TLS::session_init(char const* http_server_name)
+static int32_t extensionCb(ssl_t* UNUSED_ARG(ssl), uint16_t extType, uint8_t UNUSED_ARG(extLen), void* e)
 {
-  DoutEntering(dc::tls, "TLS::session_init(\"" << http_server_name << "\")");
+  if (extType == EXT_ALPN)
+  {
+    unsigned char* c = (unsigned char*)e;
+    char proto[128];
+    std::memset(proto, 0, sizeof(proto));
+    // Two byte proto list len, one byte proto len, then proto.
+    c += 2;     // Skip proto list len.
+    unsigned short len = *c++;
+    if (len >= sizeof(proto))
+      return PS_FAILURE;
+    std::memcpy(proto, c, len);
+    proto[sizeof(proto) - 1] = 0;
+    Dout(dc::tls, "Server agreed to use " << buf2str(proto, len));
+  }
+  return PS_SUCCESS;
+}
+
+void TLS::session_init(std::string const& ServerNameIndication)    // SNI
+{
+  DoutEntering(dc::tls, "TLS::session_init(\"" << ServerNameIndication << "\")");
   // Only call session_init() once.
   ASSERT(!m_session_opts);
   m_session_opts = calloc(sizeof(sslSessOpts_t), 1);
@@ -302,8 +321,47 @@ void TLS::session_init(char const* http_server_name)
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslSessOptsSetSigAlgs");
 
+  tlsExtension_t* extension;
+  Dout(dc::tls|continued_cf, "matrixSslNewHelloExtension(&extension, NULL) = ");
+  ret = matrixSslNewHelloExtension(&extension, NULL);
+  Dout(dc::finish, ret);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslNewHelloExtension");
+
+  unsigned char* ext;
+  int32 extLen;
+  Dout(dc::tls|continued_cf, "matrixSslCreateSNIext(NULL, \"" << ServerNameIndication << "\", " << ServerNameIndication.length() << ", &ext, &extLen) = ");
+  ret = matrixSslCreateSNIext(NULL, ServerNameIndication.c_str(), ServerNameIndication.length(), &ext, &extLen);
+  Dout(dc::finish, ret);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslCreateSNIext");
+
+  Dout(dc::tls|continued_cf, "matrixSslLoadHelloExtension(...) = ");
+  ret = matrixSslLoadHelloExtension(extension, ext, extLen, EXT_SNI);
+  Dout(dc::finish, ret);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslLoadHelloExtension");
+
+  psFree(ext, NULL);
+
+#ifdef USE_ALPN
+  // Application Layer Protocol Negotiation.
+  alpn[0] = (unsigned char *)psMalloc(NULL, Strlen("http/1.0"));
+  Memcpy(alpn[0], "http/1.0", Strlen("http/1.0"));
+  alpnLen[0] = Strlen("http/1.0");
+
+  alpn[1] = (unsigned char *)psMalloc(NULL, Strlen("http/1.1"));
+  Memcpy(alpn[1], "http/1.1", Strlen("http/1.1"));
+  alpnLen[1] = Strlen("http/1.1");
+
+  matrixSslCreateALPNext(NULL, 2, alpn, alpnLen, &ext, &extLen);
+  matrixSslLoadHelloExtension(extension, ext, extLen, EXT_ALPN);
+  psFree(alpn[0], NULL);
+  psFree(alpn[1], NULL);
+#endif
+
   Dout(dc::tls|continued_cf, "matrixSslNewClientSession(&m_session, s_keys, session_id(), ciphersuites, " <<
-      ciphersuites_len << ", certCb, \"" << http_server_name << "\", NULL, NULL, session_opts()) = ");
+      ciphersuites_len << ", certCb, \"" << ServerNameIndication << "\", NULL, NULL, session_opts()) = ");
   ret = matrixSslNewClientSession(
       reinterpret_cast<ssl_t**>(&m_session),
       s_keys,
@@ -311,9 +369,9 @@ void TLS::session_init(char const* http_server_name)
       ciphersuites,
       ciphersuites_len,
       certCb,
-      http_server_name,
-      NULL,
-      NULL,
+      ServerNameIndication.c_str(),
+      extension,
+      extensionCb,
       session_opts());
   Dout(dc::finish, ret);
   if (ret < 0)
@@ -321,6 +379,11 @@ void TLS::session_init(char const* http_server_name)
   // As per documentation of matrixSslNewClientSession:
   // Success. The ssl_t context is initialized and the CLIENT_HELLO message has been encoded and is ready to be sent to the server to being the SSL handshake.
   ASSERT(ret == MATRIXSSL_REQUEST_SEND);
+
+  Dout(dc::tls|continued_cf, "matrixSslDeleteHelloExtension(extension) = ");
+  matrixSslDeleteHelloExtension(extension);
+  if (ret < 0)
+    THROW_FALERTC(ret, "matrixSslDeleteHelloExtension");
 }
 
 int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
