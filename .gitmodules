@@ -1,4 +1,4 @@
 [submodule "matrixssl"]
 	path = matrixssl
-	url = https://github.com/matrixssl/matrixssl.git
+	url = https://github.com/CarloWood/matrixssl.git
 	branch = master
