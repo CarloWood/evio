@@ -815,6 +815,7 @@ void StreamBuf::set_output_device(OutputDevice* device)
 
 void StreamBuf::do_restart_input_device_if_needed()
 {
+  DoutEntering(dc::notice, "StreamBuf::do_restart_input_device_if_needed [" << static_cast<StreamBufProducer*>(this) << "]");
   if (buffer_not_full_anymore())
   {
     Dout(dc::notice, "The buffer is not full anymore [" << this << "]");

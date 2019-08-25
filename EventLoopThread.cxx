@@ -236,7 +236,8 @@ void EventLoopThread::main()
         continue;
       }
 
-      if (input_events && output_events)
+      bool two_types_of_events = input_events && output_events;
+      if (two_types_of_events)
         device->inhibit_deletion();
 
       // Queue the events for processing by the thread pool.
@@ -266,6 +267,7 @@ void EventLoopThread::main()
               // so that we capture 16 bytes in the lambe. DO NOT CAPTURE MORE, as that would start to allocate
               // memory with malloc.
               queue_access.move_in([device, input_events, epoll_fd = m_epoll_fd](){
+                Dout(dc::evio, "Beginning of handling event " << epoll_events_str(input_events) << " for " << device << ".");
                 int allow_deletion_count = 1;                     // Balance with the call to inhibit_deletion(false) above.
                 device->read_event(allow_deletion_count);
                 device->clear_pending_input_event(epoll_fd);
@@ -274,13 +276,17 @@ void EventLoopThread::main()
               });
 
               if (AI_UNLIKELY((queue_full = queue_length - 1 == queue.capacity())) && output_events)
+              {
+                input_events = 0;       // Already queued.
                 continue;
+              }
             }
 
             if (output_events)
             {
               Dout(dc::evio, "Queuing I/O event " << epoll_events_str(output_events) << " for " << device << " in thread pool queue " << m_handler);
               queue_access.move_in([device, output_events, epoll_fd = m_epoll_fd](){
+                Dout(dc::evio, "Beginning of handling event " << epoll_events_str(output_events) << " for " << device << ".");
                 int allow_deletion_count = 1;                     // Balance with the call to inhibit_deletion(false) above.
                 uint32_t pending_events = output_events;
                 if (AI_LIKELY(output_events == EPOLLOUT))
@@ -307,6 +313,8 @@ void EventLoopThread::main()
         while (queue_full);
       }
       queue.notify_one();
+      if (two_types_of_events)
+        queue.notify_one();
     }
     garbage_collection();
   }
@@ -489,6 +497,7 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
         device->inhibit_deletion();
         if (active_flag == FileDescriptorFlags::FDS_R_ACTIVE)
           queue_access.move_in([device](){
+              Dout(dc::evio, "Beginning of handling read event for " << device << ".");
               int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
               device->read_event(allow_deletion_count);
               device->allow_deletion(allow_deletion_count);
@@ -496,6 +505,7 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
           });
         else // active_flag == FileDescriptorFlags::FDS_W_ACTIVE
           queue_access.move_in([device](){
+              Dout(dc::evio, "Beginning of handling write event for " << device << ".");
               int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
               device->write_event(allow_deletion_count);
               device->allow_deletion(allow_deletion_count);

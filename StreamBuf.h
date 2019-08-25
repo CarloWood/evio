@@ -529,7 +529,10 @@ class StreamBufProducer : public StreamBufCommon
     if (contiguous_size == 0)
     {
       if (overflow_a(0) == EOF)                         // Write a dummy byte '\0'
+      {
         m_buffer_was_full = true;
+        Dout(dc::io, "Set m_buffer_was_full = true [this = " << this << "]");
+      }
       else
       {
         pbump(-1);                                      // Erase dummy byte
