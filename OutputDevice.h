@@ -172,6 +172,12 @@ class OutputDevice : public virtual FileDescriptor
     close_output_device(allow_deletion_count);
     return {this, allow_deletion_count};
   }
+  RefCountReleaser stop_output_device()
+  {
+    int allow_deletion_count = 0;
+    stop_output_device(allow_deletion_count);
+    return {this, allow_deletion_count};
+  }
 
  protected:
   // Called from the streambuf associated with this device when pubsync() is called on it.
