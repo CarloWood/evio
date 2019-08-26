@@ -156,8 +156,11 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         if (AI_UNLIKELY(encoded_len < 0))
         {
           write_error(allow_deletion_count, -encoded_len);
-          if (output_state < encode_app_data)     // Handshake not completed means connected() wasn't called yet.
-            connected(allow_deletion_count, false);
+          if (output_state < encode_app_data)                   // Handshake not completed means m_connected() wasn't called yet.
+          {
+            if (m_connected)
+              m_connected(allow_deletion_count, false);
+          }
           m_output_state = write_error_out;
           Dout(dc::evio, "m_output_state = write_error_out");
           return;
@@ -235,8 +238,11 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 #endif
         output_state_lock.unlock();
         write_error(allow_deletion_count, err);
-        if (output_state < encode_app_data)     // Handshake not completed means connected() wasn't called yet.
-          connected(allow_deletion_count, false);
+        if (output_state < encode_app_data)                     // Handshake not completed means m_connected() wasn't called yet.
+        {
+          if (m_connected)
+            m_connected(allow_deletion_count, false);
+        }
         m_output_state = write_error_out;
         Dout(dc::evio, "m_output_state = write_error_out");
         return;
@@ -264,8 +270,11 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         output_state_lock.unlock();
         Dout(dc::evio, "Closing device because matrixSslSentData() returned MATRIXSSL_REQUEST_CLOSE.");
         close(allow_deletion_count);
-        if (output_state < encode_app_data)     // Handshake not completed means connected() wasn't called yet.
-          connected(allow_deletion_count, false);
+        if (output_state < encode_app_data)                     // Handshake not completed means m_connected() wasn't called yet.
+        {
+          if (m_connected)
+            m_connected(allow_deletion_count, false);
+        }
         m_output_state = preconnect_out;
         Dout(dc::evio, "m_output_state = preconnect_out");
         return;                   // All done.
@@ -303,7 +312,9 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         // Release to sync m_max_frag.
         m_output_state.store(encode_app_data, std::memory_order_release);
         Dout(dc::evio, "m_output_state = encode_app_data; m_max_frag = " << m_max_frag);
-        connected(allow_deletion_count, true);
+        m_connected_flags |= is_connected;
+        if (m_connected)
+          m_connected(allow_deletion_count, true);
         break;
       }
 
@@ -414,7 +425,7 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
         // Get negotiated max. fragment size.
         m_max_frag = m_tls.get_max_frag();
         // Since we just made a connection with a server, we probably have something in the output buffer
-        // ready to be written, so just start the output device. Also, the call to connected() might
+        // ready to be written, so just start the output device. Also, the call to m_connected() might
         // start the output device, so the state should be set correctly here.
         {
           std::unique_lock<std::mutex> lk(m_output_state_mutex);
@@ -423,9 +434,11 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
           m_output_state.store(encode_app_data, std::memory_order_release);
         }
         Dout(dc::evio, "m_output_state = encode_app_data; m_max_frag = " << m_max_frag);
-        // Do the connected() callback at this point  (as opposed to when the TCP connection was established),
+        // Do the m_connected() callback at this point  (as opposed to when the TCP connection was established),
         // as in most cases it will be used as a "you can now send/receive data" signal...
-        connected(allow_deletion_count, true);
+        m_connected_flags |= is_connected;
+        if (m_connected)
+          m_connected(allow_deletion_count, true);
         start_output_device();
         // It is possible to receive APP_DATA without receiving HANDSHAKE_COMPLETE.
         // This implies that the handshake completed.

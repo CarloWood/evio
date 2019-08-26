@@ -55,10 +55,6 @@ class Socket : public InputDevice, public OutputDevice
   void read_error(int& allow_deletion_count, int err) override;
   // Overridden to detect connects.
   void write_to_fd(int& allow_deletion_count, int fd) override;
-  // Called, if signal_connected == true was passed to init(), as soon as the socket becomes writable for the first time.
-  virtual void connected(int& allow_deletion_count, bool success);
-  // Called when a connection is terminated. Success means it was a clean termination. Not called when the connect failed.
-  virtual void disconnected(int& allow_deletion_count, bool success);
 
  protected:
   //---------------------------------------------------------------------------
@@ -68,10 +64,15 @@ class Socket : public InputDevice, public OutputDevice
   // The address of the remote socket; either what we connected to or the peer address of an accepted connection.
   SocketAddress m_remote_address;
 
-  int m_connected_flags;
-  static constexpr int signal_connected = 1;    // When set, call connected() as soon as fd is writable.
-  static constexpr int is_connected = 2;
-  static constexpr int is_disconnected = 4;
+  // Called, if onConnected() was called, as soon as the socket becomes writable for the first time
+  // (in the case of TLSSocket when the TLS handshake completed) or when such permanently failed.
+  std::function<void(int&, bool)> m_connected;
+  // Called when a connection is terminated and onDisconnected() was called.
+  std::function<void(int&, bool)> m_disconnected;
+
+  uint8_t m_connected_flags;
+  static constexpr uint8_t is_connected = 1;
+  static constexpr uint8_t is_disconnected = 2;
 
  public:
   //---------------------------------------------------------------------------
@@ -104,8 +105,27 @@ class Socket : public InputDevice, public OutputDevice
   // Set the socket buffer sizes.
   static void set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
 
+  // Call this to set a call back for the connected event.
+  // The first argument is `allow_deletion_count` (should be passed to functions that need it, if any are called).
+  // The second argument is `success` and signals whether or not the connect was successful or failed.
+  void onConnected(std::function<void(int&, bool)>&& connected_cb)
+  {
+    // Call onConnected before calling init / connect.
+    ASSERT(!get_flags().is_open());
+    m_connected = std::move(connected_cb);
+  }
+
+  // Call this to set a call back for the disconnected event.
+  // Success means it was a clean termination. Not called when the connect failed.
+  void onDisconnected(std::function<void(int&, bool)>&& disconnected_cb)
+  {
+    // Call onDisconnected before calling init / connect.
+    ASSERT(!get_flags().is_open());
+    m_disconnected = std::move(disconnected_cb);
+  }
+
   // Associate this object with an existing and open socket `fd'.
-  void init(int fd, SocketAddress const& socket_address, bool signal_connected = false);
+  void init(int fd, SocketAddress const& socket_address);
 
   // Create a socket(2), bind it to if_addr, and call init().
   bool connect(SocketAddress const& socket_address, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {});

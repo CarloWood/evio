@@ -99,12 +99,12 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   }
   Dout(dc::finish|cond_error_cf(ret < 0), ret);
 
-  init(fd, remote_address, true);
+  init(fd, remote_address);
 
   return true;
 }
 
-void Socket::init(int fd, SocketAddress const& remote_address, bool signal_connected)
+void Socket::init(int fd, SocketAddress const& remote_address)
 {
 #ifdef CWDEBUG
   if (get_flags().is_open())
@@ -119,13 +119,13 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
   ASSERT(m_ibuffer || m_obuffer);
 
   m_remote_address = remote_address;
-  m_connected_flags = signal_connected;
+  m_connected_flags = 0;
 
   FileDescriptor::init(fd);     // link in
   state_t::wat state_w(m_state);
   if (m_ibuffer)
     start_input_device(state_w);
-  if (signal_connected)
+  if (m_connected)
     start_output_device(state_w);
   else if (m_obuffer)
   {
@@ -136,13 +136,11 @@ void Socket::init(int fd, SocketAddress const& remote_address, bool signal_conne
 
 void Socket::read_from_fd(int& allow_deletion_count, int fd)
 {
-  // This is false when signal_connected is set, because in that case we monitor
+  // This is false when m_connected is set, because in that case we monitor
   // this socket for writablity and use that to detect when it is connected.
   // Otherwise it is only true at most once.
-  if (AI_UNLIKELY(!(m_connected_flags & (signal_connected|is_connected))))
-  {
+  if (AI_UNLIKELY(!(m_connected_flags & is_connected)) && !m_connected)
     m_connected_flags |= is_connected;
-  }
   // Call base class implementation.
   InputDevice::read_from_fd(allow_deletion_count, fd);
 }
@@ -154,9 +152,9 @@ void Socket::write_to_fd(int& allow_deletion_count, int fd)
   {
     // As soon as we can write to a file descriptor, we are connected.
     m_connected_flags |= is_connected;
-    if ((m_connected_flags & signal_connected))
+    if (m_connected)
     {
-      connected(allow_deletion_count, true); // Signal successful connect.
+      m_connected(allow_deletion_count, true); // Signal successful connect.
       // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
       if (m_obuffer)
       {
@@ -179,37 +177,32 @@ void Socket::write_to_fd(int& allow_deletion_count, int fd)
   OutputDevice::write_to_fd(allow_deletion_count, fd);
 }
 
-void Socket::connected(int& CWDEBUG_ONLY(allow_deletion_count), bool CWDEBUG_ONLY(success))
-{
-  DoutEntering(dc::evio, "Socket::connected({" << allow_deletion_count << "}, " << success << ") [" << this << "]");
-  // Override to implement this.
-}
-
 void Socket::read_returned_zero(int& allow_deletion_count)
 {
   DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << this << "]");
-  m_connected_flags |= is_disconnected;
   close(allow_deletion_count);
-  disconnected(allow_deletion_count, true); // Clean termination.
+  if ((m_connected_flags & (is_connected|is_disconnected)) == is_connected)
+  {
+    m_connected_flags |= is_disconnected;
+    if (m_disconnected)
+      m_disconnected(allow_deletion_count, true); // Clean termination.
+  }
+  else if (m_connected)
+    m_connected(allow_deletion_count, false); // Signal connect failure.
 }
 
 void Socket::read_error(int& allow_deletion_count, int CWDEBUG_ONLY(err))
 {
   DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << this << "]");
   close(allow_deletion_count);
-  if ((m_connected_flags & (signal_connected|is_connected)) == signal_connected)
-    connected(allow_deletion_count, false); // Signal connect failure.
-  if ((m_connected_flags & is_connected))
+  if ((m_connected_flags & (is_connected|is_disconnected)) == is_connected)
   {
     m_connected_flags |= is_disconnected;
-    disconnected(allow_deletion_count, false); // Unclean termination.
+    if (m_disconnected)
+      m_disconnected(allow_deletion_count, false); // Unclean termination.
   }
-}
-
-void Socket::disconnected(int& CWDEBUG_ONLY(allow_deletion_count), bool CWDEBUG_ONLY(success))
-{
-  DoutEntering(dc::evio, "Socket::disconnected({" << allow_deletion_count << "}, " << success << ") [" << this << "]");
-  // Override to implement this.
+  else if (m_connected)
+    m_connected(allow_deletion_count, false); // Signal connect failure.
 }
 
 SocketAddress Socket::local_address() const
