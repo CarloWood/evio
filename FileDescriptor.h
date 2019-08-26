@@ -451,7 +451,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   void do_epoll_ctl(FileDescriptor::state_t::wat const& state_w, int epoll_fd, int op)
   {
     Dout(dc::system|continued_cf, "epoll_ctl(" << epoll_fd << ", " << epoll_op_str(op) << ", " << m_fd << ", {" << state_w->m_epoll_event << "}) = ");
-    DEBUG_ONLY(int ret =) epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
+    int ret = epoll_ctl(epoll_fd, op, m_fd, &state_w->m_epoll_event);
     Dout(dc::finish|cond_error_cf(ret == -1), ret);
     // If epoll_fd == -1 and errno EBADF: did you create an EventLoop object at the start of main?
     // Assuming errno is EPERM, then this device doesn't support epoll. Call set_regular_file() on it.

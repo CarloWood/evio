@@ -220,7 +220,7 @@ void EventLoopThread::main()
 
       // Because the threads of the thread pool run asynchronously, make sure the
       // device object won't be deleted while we're processing it.
-      if (AI_UNLIKELY(device->inhibit_deletion(false) == 0))
+      if (AI_UNLIKELY(device->inhibit_deletion(DEBUG_ONLY(false)) == 0))
       {
         // If inhibit_deletion returned zero then this device was marked for deletion in between
         // returning from epoll_pwait and the call to test_and_set_pending_events.

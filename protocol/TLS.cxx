@@ -1,16 +1,15 @@
 #include "sys.h"
 #include "TLS.h"
 #include "matrixssl/matrixsslApi.h"
-#ifdef CWDEBUG
 #include "matrixssl/matrixssllib.h"
+#ifdef CWDEBUG
 #include "testkeys/RSA/2048_RSA.h"
 #include "testkeys/RSA/2048_RSA_KEY.h"
 #include "testkeys/RSA/ALL_RSA_CAS.h"
 #include "testkeys/PSK/tls13_psk.h"
-#endif
 #include "utils/debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
-#include <alloca.h>
+#endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START

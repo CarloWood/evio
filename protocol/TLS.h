@@ -6,7 +6,9 @@
 #include "evio/Sink.h"
 #include "evio/SocketAddress.h"
 #include "debug.h"
+#ifdef CWDEBUG
 #include <libcwd/buf2str.h>
+#endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
@@ -38,7 +40,7 @@ struct TLSSink : public InputDecoder
     return 0;
   }
 
-  void decode(int& allow_deletion_count, MsgBlock&& msg) override
+  void decode(int& CWDEBUG_ONLY(allow_deletion_count), MsgBlock&& CWDEBUG_ONLY(msg)) override
   {
     DoutEntering(dc::evio, "TLSSink::decode({" << allow_deletion_count << ", {MsgBlock:" << libcwd::buf2str(msg.get_start(), msg.get_size()) << "})");
   }

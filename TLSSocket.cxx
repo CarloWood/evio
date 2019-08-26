@@ -3,9 +3,11 @@
 #include "EventLoopThread.h"
 #include "utils/AIAlert.h"
 #include "debug.h"
-#include <libcwd/buf2str.h>
 #include <iostream>
 #include <iomanip>
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 
 namespace evio {
 
@@ -45,6 +47,7 @@ int TLSSocket::sync()
   return 0;
 }
 
+#ifdef CWDEBUG
 static std::string buf2hex(char* buf, size_t len)
 {
   std::ostringstream out;
@@ -69,6 +72,7 @@ static std::string buf2hex(char* buf, size_t len)
   }
   return out.str();
 }
+#endif
 
 void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 {
@@ -241,7 +245,7 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 #ifdef DEBUGDEVICESTATS
       m_sent_bytes += wlen;
 #endif
-#if CWDEBUG
+#ifdef CWDEBUG
       Dout(dc::evio|continued_cf, "Wrote " << wlen << " bytes to fd " << fd
 #ifdef DEBUGDEVICESTATS
           << " [total sent now " << m_sent_bytes << " bytes]"
@@ -436,7 +440,9 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
         // first byte will be the alert level and the second byte will be the alert
         // description. After examining the alert, the user must call matrixSslProcessedData
         // to indicate the alert was processed and the data may be internally discarded
+#ifdef CWDEBUG
         int alert_description = decoded_data[1];
+#endif
         if (res == TLS::RECEIVED_ALERT_FATAL)
         {
           Dout(dc::warning, "Received fatal SSL alert message with description: " << alert_description);
