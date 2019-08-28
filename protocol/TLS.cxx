@@ -375,6 +375,8 @@ void TLS::session_init(std::string const& ServerNameIndication)    // SNI
   Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslNewClientSession");
+  // Pass a non-empty ServerNameIndication to connect() or init(fd, ...) or call Socket::set_sni() when you only have a pointer to the Socket base class.
+  ASSERT(!ServerNameIndication.empty());
   // As per documentation of matrixSslNewClientSession:
   // Success. The ssl_t context is initialized and the CLIENT_HELLO message has been encoded and is ready to be sent to the server to being the SSL handshake.
   ASSERT(ret == MATRIXSSL_REQUEST_SEND);

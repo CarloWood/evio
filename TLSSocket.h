@@ -34,21 +34,16 @@ class TLSSocket : public Socket
   std::string m_ServerNameIndication;
 
  public:
-  bool connect(SocketAddress const& remote_address, std::string const& ServerNameIndication = {}, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
+  bool connect(SocketAddress const& socket_address, std::string const& ServerNameIndication = {}, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
   {
-    if (!ServerNameIndication.empty())
-      m_ServerNameIndication = ServerNameIndication;
-    else
-    {
-      // Just pass an SIN.
-      ASSERT(remote_address.is_ip());
-      m_ServerNameIndication = remote_address.to_string(true);
-    }
-    m_tls.set_device(this, this);
-    m_output_state = preconnect_out;
-    m_max_frag = s_max_frag_magic;
-    int ret = evio::Socket::connect(remote_address, rcvbuf_size, sndbuf_size, if_addr);
-    return ret;
+    tls_init(socket_address, ServerNameIndication);
+    return evio::Socket::connect(socket_address, rcvbuf_size, sndbuf_size, if_addr);
+  }
+
+  void init(int fd, SocketAddress const& socket_address, std::string const& ServerNameIndication = {})
+  {
+    tls_init(socket_address, ServerNameIndication);
+    evio::Socket::init(fd, socket_address);
   }
 
   void write_to_fd(int& allow_deletion_count, int fd) override;
@@ -56,6 +51,8 @@ class TLSSocket : public Socket
   void data_received(int& allow_deletion_count, char const* new_data, size_t rlen) override;
 
  private:
+  void set_sni(std::string const& ServerNameIndication) override;
+  void tls_init(SocketAddress const& socket_address, std::string const& ServerNameIndication);
   bool handshake_completed() const { return m_max_frag != s_max_frag_magic; }
 
  protected:

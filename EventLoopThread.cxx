@@ -328,17 +328,20 @@ void EventLoopThread::main()
   CWDEBUG_ONLY(int res =) ::close(m_epoll_fd);
   Dout(dc::finish|cond_error_cf(res == -1), res);
   m_epoll_fd = -1;
-  m_terminate = not_yet;
   // Keep the value of m_epoll_signum!
 
 #ifdef CWDEBUG
-  // Sanity check.
-  utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){
-    if (!p->get_flags().is_dead())
-      DoutFatal(dc::core, p << ": " << p->get_fd() << ", " << p->get_flags());
-  });
+  if (m_terminate == cleanly)
+  {
+    // Sanity check.
+    utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){
+      if (!p->get_flags().is_dead())
+        DoutFatal(dc::core, p << ": " << p->get_fd() << ", " << p->get_flags());
+    });
+  }
 #endif
 
+  m_terminate = not_yet;
   Dout(dc::evio, "Leaving EventLoopThread::main()");
 }
 

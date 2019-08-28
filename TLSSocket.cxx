@@ -581,4 +581,30 @@ buffer_full1:
   close(allow_deletion_count);
 }
 
+void TLSSocket::set_sni(std::string const& ServerNameIndication)
+{
+  // Do not call set_sni (before or) after you already called tls_init (or do not call set_sni twice).
+//  ASSERT(m_ServerNameIndication.empty());
+  // Do not pass an empty SNI to set_sni.
+  ASSERT(!ServerNameIndication.empty());
+  // Call set_sni before calling init.
+  ASSERT(!get_flags().is_open());
+  m_ServerNameIndication = ServerNameIndication;
+}
+
+void TLSSocket::tls_init(SocketAddress const& socket_address, std::string const& ServerNameIndication)
+{
+  if (!ServerNameIndication.empty())
+    m_ServerNameIndication = ServerNameIndication;
+  else
+  {
+    // Just pass a SIN.
+    ASSERT(socket_address.is_ip());
+    m_ServerNameIndication = socket_address.to_string(true);
+  }
+  m_tls.set_device(this, this);
+  m_output_state = preconnect_out;
+  m_max_frag = s_max_frag_magic;
+}
+
 } // namespace evio

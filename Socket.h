@@ -124,6 +124,9 @@ class Socket : public InputDevice, public OutputDevice
     m_disconnected = std::move(disconnected_cb);
   }
 
+  // Only useful for derived classes (ie, TLSSocket).
+  virtual void set_sni(std::string const& UNUSED_ARG(ServerNameIndication)) { }
+
   // Associate this object with an existing and open socket `fd'.
   void init(int fd, SocketAddress const& socket_address);
 
