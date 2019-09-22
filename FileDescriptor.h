@@ -29,7 +29,7 @@
 #include "utils/log2.h"
 #include "utils/InstanceTracker.h"
 #include "utils/AIAlert.h"
-#ifdef CWDEBUG
+#if CW_DEBUG
 #include "utils/is_power_of_two.h"
 #endif
 #include <cstdint>
@@ -397,7 +397,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
 
-#ifdef CWDEBUG
+#if CW_DEBUG
  public:
   // For inspection only.
   int get_fd() const { return m_fd; }
