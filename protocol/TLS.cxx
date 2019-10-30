@@ -128,19 +128,19 @@ std::ostream& operator<<(std::ostream& os, ssl_t& session)
 #endif
 
 //inline
-auto const TLS::session() const
+auto TLS::session() const
 {
   return static_cast<ssl_t*>(m_session);
 }
 
 //inline
-auto const TLS::session_opts() const
+auto TLS::session_opts() const
 {
   return static_cast<sslSessOpts_t*>(m_session_opts);
 }
 
 //inline
-auto const TLS::session_id() const
+auto TLS::session_id() const
 {
   return static_cast<sslSessionId_t*>(m_session_id);
 }

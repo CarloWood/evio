@@ -61,13 +61,13 @@ class TLS
   void* m_session_id;                                   // sslSessionId_t* m_session_id; Session resume data.
 
   // Accessor for m_session.
-  inline auto const session() const;                    // Returns a ssl_t* const.
+  inline auto session() const;                          // Returns a ssl_t* const.
 
   // Accessor for m_session_opts.
-  inline auto const session_opts() const;               // Returns a sslSessOpts_t* const.
+  inline auto session_opts() const;                     // Returns a sslSessOpts_t* const.
 
   // Accessor for m_session_id.
-  inline auto const session_id() const;                 // Returns a sslSessionId_t* const.
+  inline auto session_id() const;                       // Returns a sslSessionId_t* const.
 
  public:
   TLS();
