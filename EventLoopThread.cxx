@@ -266,7 +266,7 @@ void EventLoopThread::main()
               // Note that device is a pointer (8 bytes) and events and m_epoll_fd are both [u]int32_t (4 bytes each),
               // so that we capture 16 bytes in the lambe. DO NOT CAPTURE MORE, as that would start to allocate
               // memory with malloc.
-              queue_access.move_in([device, input_events, epoll_fd = m_epoll_fd](){
+              queue_access.move_in([device, epoll_fd = m_epoll_fd COMMA_CWDEBUG_ONLY(input_events)](){
                 Dout(dc::evio, "Beginning of handling event " << epoll_events_str(input_events) << " for " << device << ".");
                 int allow_deletion_count = 1;                     // Balance with the call to inhibit_deletion(false) above.
                 device->read_event(allow_deletion_count);
