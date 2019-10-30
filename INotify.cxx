@@ -229,7 +229,7 @@ namespace {
   // there is no need for a lock guard for this read access. However, we DO need a
   // mutex to assure that only a single thread will do the initialization.
   std::mutex inotify_device_ptr_initialization_mutex;
-  std::atomic<INotifyDevice*> inotify_device_ptr;
+  std::atomic<INotifyDevice*> inotify_device_ptr = ATOMIC_VAR_INIT(nullptr);
 } // namespace
 
 //static

@@ -396,7 +396,10 @@ class StreamBufCommon : public std::streambuf
 
   // Constructor.
   StreamBufCommon() :
+    m_last_pptr(nullptr),
     m_last_gptr(nullptr),               // See update_put_area.
+    m_total_freed(0),
+    m_total_read(0),
     m_resetting(false),
     m_buffer_was_full(false)
 #ifdef DEBUGEVENTRECORDING

@@ -603,7 +603,7 @@ void TLSSocket::tls_init(SocketAddress const& socket_address, std::string const&
     m_ServerNameIndication = socket_address.to_string(true);
   }
   m_tls.set_device(this, this);
-  m_output_state = preconnect_out;
+  std::atomic_init(&m_output_state, preconnect_out);
   m_max_frag = s_max_frag_magic;
 }
 
