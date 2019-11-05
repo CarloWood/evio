@@ -45,7 +45,7 @@ void EventLoopThread::init(AIQueueHandle handler)
   m_handler = handler;
 
   // Create the thread running the loop around epoll_pwait.
-  m_event_thread = std::thread(&EventLoopThread::main, &EventLoopThread::instance());
+  m_event_thread = std::thread(&EventLoopThread::emain, &EventLoopThread::instance());
 
   // Wait till we're actually running.
   while (!m_running)
@@ -82,10 +82,10 @@ void EventLoopThread::s_wakeup_handler(int)
 }
 
 // EventLoopThread main function.
-void EventLoopThread::main()
+void EventLoopThread::emain()
 {
   Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
-  DoutEntering(dc::evio, "EventLoopThread::main()");
+  DoutEntering(dc::evio, "EventLoopThread::emain()");
 
   Dout(dc::system|continued_cf, "epoll_create1(EPOLL_CLOEXEC) = ");
   m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);

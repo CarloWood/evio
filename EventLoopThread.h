@@ -95,7 +95,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   static void invoke_pending_cb();
 #endif
 
-  void main();
+  void emain();
 //  void handle_invoke_pending();
   friend class EventLoop;
   void init(AIQueueHandle handler);     // Called from the constructor of EventLoop.
