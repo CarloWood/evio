@@ -523,6 +523,9 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
 
 void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
+  // Create an evio::EventLoop object at the start of main.
+  ASSERT(m_epoll_fd != -1);
+
   // Don't start a device that is disabled.
   if (AI_UNLIKELY(state_w->m_flags.test_disabled(active_flag)))
   {
