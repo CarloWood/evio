@@ -71,7 +71,7 @@ std::string SocketAddress::to_string(bool no_port) const
   {
     case AF_INET:
       add_brackets = false;
-      /*FALL-THROUGH*/
+      [[fallthrough]];
     case AF_INET6:
     {
       char hostname[42];
