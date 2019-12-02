@@ -23,7 +23,8 @@ SOURCES = FileDescriptor.cxx FileDescriptor.h \
 	  PersistentInputFile.cxx PersistentInputFile.h \
 	  INotify.cxx INotify.h \
 	  Pipe.cxx Pipe.h \
-	  SocketNetmask.h
+	  SocketNetmask.h \
+	  InputDecoder.cxx InputDecoder.h
 
 libevio_la_SOURCES = ${SOURCES}
 libevio_la_CXXFLAGS = @LIBCWD_R_FLAGS@
