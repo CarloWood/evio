@@ -408,10 +408,12 @@ int OutputDevice::sync()
   utils::FuzzyCondition condition_not_empty([this]{
         return !m_obuffer->StreamBufProducer::nothing_to_get();
       });
+  // Print a warning when start_output_device is (probably - this is fuzzy) not going to be called.
   if (!condition_not_empty.is_momentary_true())
     Dout(dc::warning, "condition_not_empty is not momentary_true");
   else if (!(!is_active(type)).is_momentary_true())
     Dout(dc::warning, "!is_active(type) is not momentary_true");
+  // Start the output device if (at the moment) the buffer is not empty and we are not already active.
   if ((condition_not_empty && !is_active(type)).is_momentary_true())
     start_output_device(state_t::wat(m_state), condition_not_empty);
   return 0;
