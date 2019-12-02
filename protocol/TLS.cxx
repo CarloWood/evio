@@ -2,7 +2,7 @@
  * evio -- A cwm4 git submodule for adding support for buffered, iostream oriented, epoll based I/O.
  *
  * @file
- * @brief FIXME
+ * @brief TLS (related) definition.
  *
  * @Copyright (C) 2019  Carlo Wood.
  *
