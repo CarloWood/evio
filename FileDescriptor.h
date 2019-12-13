@@ -390,13 +390,13 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   void allow_deletion(int count) const;
 
  protected:
-  alignas(cacheline_size_c) state_t m_state;    // Mutex protected state of this FileDescriptor.
-  int m_fd;                                     // The file descriptor. In the case of a device that is derived from both,
-                                                // InputDevice and OutputDevice using multiple inheritance -- this fd is
-                                                // used for both input and output.
-  mutable FileDescriptor const* m_next;         // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
-                                                // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
-  alignas(cacheline_size_c) std::atomic<uint32_t> m_pending_events;     // Mask of events being handled by the thread pool.
+  alignas(config::cacheline_size_c) state_t m_state;    // Mutex protected state of this FileDescriptor.
+  int m_fd;                                             // The file descriptor. In the case of a device that is derived from both,
+                                                        // InputDevice and OutputDevice using multiple inheritance -- this fd is
+                                                        // used for both input and output.
+  mutable FileDescriptor const* m_next;                 // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
+                                                        // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
+  alignas(config::cacheline_size_c) std::atomic<uint32_t> m_pending_events;     // Mask of events being handled by the thread pool.
 
   // (Re)Initialize the Device using filedescriptor fd.
   void init(int fd);
