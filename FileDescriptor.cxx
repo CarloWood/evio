@@ -29,14 +29,8 @@
 #include "debug.h"
 #include "FileDescriptor.h"
 #include "EventLoopThread.h"
-#ifdef CW_CONFIG_NONBLOCK_SYSV
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#else
 #include <unistd.h>     // Needed for fcntl.
 #include <fcntl.h>
-#endif
 
 char const* epoll_op_str(int op)
 {
@@ -98,26 +92,18 @@ void set_nonblocking(int fd)
         "which in turn will cause erratic write failures to the standard output streams causing them to go bad and stop "
         "displaying output.");
   }
-#ifdef CW_CONFIG_NONBLOCK_POSIX
-  int nonb = O_NONBLOCK;
-#elif defined(CW_CONFIG_NONBLOCK_BSD)
-  int nonb = O_NDELAY;
-#endif
-#ifdef CW_CONFIG_NONBLOCK_SYSV
-  // This portion of code might also apply to NeXT.
-  // According to IBMs manual page, this might only work for sockets :/
-  #warning "This is not really supported, as I've never been able to test it."
-  int res = 1;
-  if (ioctl(fd, FIONBIO, &res) < 0)
-    perror("ioctl(fd, FIONBIO)");
-#else
   int res;
   if ((res = fcntl(fd, F_GETFL)) == -1)
     perror("fcntl(fd, F_GETFL)");
   else
   {
-    if (!(res & nonb) && fcntl(fd, F_SETFL, res | nonb) == -1)
-      perror("fcntl(fd, F_SETL, nonb)");
+    if (!(res & O_NONBLOCK))
+    {
+      // On linux you can create stuff non-blocking from the start. So this should never be needed.
+      Dout(dc::warning, "O_NONBLOCK is not set on fd " << fd);
+      if (fcntl(fd, F_SETFL, res | O_NONBLOCK) == -1)
+        perror("fcntl(fd, F_SETL, O_NONBLOCK)");
+    }
 #ifdef O_CLOEXEC
     if ((res = fcntl(fd, F_GETFD)) == -1)
       perror("fcntl(fd, F_GETFD)");
@@ -125,7 +111,6 @@ void set_nonblocking(int fd)
       Dout(dc::warning, "FD_CLOEXEC is not set on fd " << fd);
 #endif
   }
-#endif
   return;
 }
 

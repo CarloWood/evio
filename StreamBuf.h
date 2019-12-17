@@ -66,7 +66,7 @@ class StreamBuf;
 //
 // Determined during configuration. When N bytes are allocated with malloc(N) then in
 // reality N + malloc_overhead_c bytes are used.
-static constexpr size_t malloc_overhead_c = CW_MALLOC_OVERHEAD;
+static constexpr size_t malloc_overhead_c = config::malloc_overhead_c;
 
 //=============================================================================
 //

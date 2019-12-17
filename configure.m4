@@ -1,9 +1,6 @@
 # Determine the malloc overhead.
 CW_SYS_MALLOC_OVERHEAD
 
-# Determine the kind of nonblocking sockets that we have.
-CW_SYS_NONBLOCK
-
 # evio depends on utils, threadsafe and threadpool.
 m4_if(cwm4_submodule_dirname, [], [m4_append_uniq_w([CW_SUBMODULE_SUBDIRS], [utils threadsafe threadpool], [ ])])
 
