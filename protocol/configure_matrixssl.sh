@@ -9,9 +9,12 @@ if [ -e CMakeLists.txt -o -e configure.ac ]; then
 fi
 
 MATRIXSSL_SRCDIR="$(dirname $0)/matrixssl"
+export CFLAGS="-Wno-unused-function -Wno-\\#warnings"
 
-echo "Running '\"$MATRIXSSL_SRCDIR\"/configure --enable-maintainer-mode' ..."
-"$MATRIXSSL_SRCDIR"/configure --enable-maintainer-mode || exit 1
+CONFIGURE_OPTIONS="$1"
+shift
+echo "Running '\"$MATRIXSSL_SRCDIR\"/configure $CONFIGURE_OPTIONS --enable-maintainer-mode' ..."
+"$MATRIXSSL_SRCDIR"/configure $CONFIGURE_OPTIONS --enable-maintainer-mode || exit 1
 echo "Running $@ list-configure-files ..."
 "$@" list-configure-files 2>/dev/null | /bin/grep -v ' ' > "$MATRIXSSL_SRCDIR/../matrixssl-configure-files.new" && \
   mv "$MATRIXSSL_SRCDIR/../matrixssl-configure-files.new" "$MATRIXSSL_SRCDIR/../matrixssl-configure-files"

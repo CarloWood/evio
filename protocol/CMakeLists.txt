@@ -62,13 +62,16 @@ else ()
   set( MatrixSSL_build_files "${MatrixSSL_static_libraries}" )
 endif ()
 
+set( CONFIGURE_OPTIONS "--enable-silent-rules" )
+set( BUILD_OPTIONS "CCARCH=${CMAKE_CXX_LIBRARY_ARCHITECTURE}" )
+
 ExternalProject_Add( MatrixSSL
   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/matrixssl"
   BINARY_DIR "${MatrixSSL_builddir}"
   PREFIX "${CMAKE_CURRENT_BINARY_DIR}/matrixssl"
-  CONFIGURE_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh" "${CMAKE_MAKE_PROGRAM}" ${MAKE_OPTIONS}
-  BUILD_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/build_matrixssl.sh" "${CMAKE_MAKE_PROGRAM}" ${MAKE_OPTIONS}
-  BUILD_ALWAYS ON
+  CONFIGURE_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh" "${CONFIGURE_OPTIONS}" "${CMAKE_MAKE_PROGRAM}" ${MAKE_OPTIONS}
+  BUILD_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/build_matrixssl.sh" "${CMAKE_MAKE_PROGRAM}" ${BUILD_OPTIONS} -s ${MAKE_OPTIONS}
+  BUILD_ALWAYS OFF # Turn ON when while working on matrixssl files.
   BUILD_BYPRODUCTS "${MatrixSSL_build_files}"
   STEP_TARGETS build
   INSTALL_COMMAND ""
