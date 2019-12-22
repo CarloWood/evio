@@ -27,8 +27,4 @@ if test "$cw_config_debug_buffers" = yes; then
   CW_CONFIG_DEBUGBUFFERS=define
 fi
 
-m4_append_uniq([CW_SUBMODULE_CONFIG_FILES], cwm4_quote(cwm4_submodule_path[/config.h]), [ ])
-
-AH_BOTTOM([#include "evio/config.h"])
-
 dnl vim: filetype=config

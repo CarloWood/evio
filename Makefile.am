@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-SUBDIRS = matrixssl protocol
+SUBDIRS = protocol
 
 noinst_LTLIBRARIES = libevio.la
 

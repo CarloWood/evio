@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-SUBDIRS =
+SUBDIRS = matrixssl
 
 noinst_LTLIBRARIES = libprotocol.la
 
