@@ -107,20 +107,10 @@ target_compile_features( evio_ObjLib
 
 # Set link dependencies.
 target_link_libraries( evio_ObjLib
-    PRIVATE
-        AICxx::utils
     PUBLIC
         AICxx::evio_protocol
-        Boost::boost
-        Threads::Threads
+        AICxx::threadpool
 )
-
-if ( OptionEnableLibcwd )
-  target_link_libraries( evio_ObjLib
-      PUBLIC
-          PkgConfig::Libcwd_r
-)
-endif ()
 
 # Create an ALIAS target.
 add_library( AICxx::evio ALIAS evio_ObjLib )

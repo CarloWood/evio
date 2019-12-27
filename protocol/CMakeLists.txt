@@ -164,15 +164,7 @@ target_link_libraries( evio_protocol_ObjLib
     PUBLIC
         evio_matrixssl_IfLib
         AICxx::utils
-        Threads::Threads
 )
-
-if ( OptionEnableLibcwd )
-  target_link_libraries( evio_protocol_ObjLib
-      PUBLIC
-          PkgConfig::Libcwd_r
-)
-endif ()
 
 # Create an ALIAS target.
 add_library( AICxx::evio_protocol ALIAS evio_protocol_ObjLib )
