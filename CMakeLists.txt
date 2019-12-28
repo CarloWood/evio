@@ -9,13 +9,6 @@ include( AICxxProject )
 add_subdirectory( protocol )
 
 #==============================================================================
-# DEPENDENCIES
-#
-
-# This project uses boost::intrusive_ptr.
-find_package( Boost REQUIRED )
-
-#==============================================================================
 # OPTIONS
 
 # Option 'EnableDebugBuffers' is available when OptionEnableLibcwd is ON (otherwise OFF).
