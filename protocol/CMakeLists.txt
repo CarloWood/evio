@@ -4,6 +4,10 @@ add_library( evio_protocol_ObjLib OBJECT )
 # Building external project matrixssl.
 #
 
+find_package( matrixssl CONFIG REQUIRED )
+
+#[[
+
 include( ExternalProject )
 include( ProcessorCount )
 
@@ -136,6 +140,8 @@ target_compile_definitions( evio_matrixssl_IfLib
         "MATRIX_CONFIGURATION_INCDIR_FIRST"
 )
 
+#]]
+
 #==============================================================================
 # BUILD PROJECT
 #
@@ -162,7 +168,7 @@ target_compile_features( evio_protocol_ObjLib
 
 target_link_libraries( evio_protocol_ObjLib
     PUBLIC
-        evio_matrixssl_IfLib
+        matrixssl:matrixssl
         AICxx::utils
 )
 
