@@ -162,7 +162,7 @@ target_compile_features( evio_protocol_ObjLib
 
 target_link_libraries( evio_protocol_ObjLib
     PUBLIC
-        matrixssl:matrixssl
+        evio_matrixssl_IfLib
         AICxx::utils
 )
 
