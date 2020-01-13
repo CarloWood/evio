@@ -14,15 +14,15 @@ LIBTOOLIZE=${LIBTOOLIZE:-`echo $LIBTOOL | sed -e 's/libtool/libtoolize/'`}
 # Environment variables need to be exported. For example, aclocal uses AUTOM4TE to run the correct autom4te.
 export AUTOMAKE ACLOCAL AUTOCONF AUTOHEADER AUTOM4TE LIBTOOL LIBTOOLIZE GETTEXT GTKDOCIZE
 
-# Needed for aclocal.
-mkdir -p m4/aclocal
-
 # Nevertheless, lets do a sanity check...
 MATRIXSSL_SRCDIR="$(dirname $0)/matrixssl"
 if [ "$MATRIXSSL_SRCDIR" != "$PWD" ]; then
   echo "Run this script while inside the source directory (of matrixssl)."
   exit 1
 fi
+
+# Needed for aclocal.
+mkdir -p m4/aclocal
 
 echo "Running '$LIBTOOLIZE --force --automake' ..."
 "$LIBTOOLIZE" --force --automake || exit 1
