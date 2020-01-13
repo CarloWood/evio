@@ -85,13 +85,13 @@ ExternalProject_Add_Step( MatrixSSL bootstrap
   DEPENDEES download
   DEPENDERS configure
   WORKING_DIRECTORY "${SOURCE_DIR}"
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/bootstrap_matrixssl.sh"
+  COMMAND cd "${CMAKE_CURRENT_SOURCE_DIR}/matrixssl" && ./bootstrap.sh
 )
 
 ExternalProject_Add_StepDependencies( MatrixSSL configure
     "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh"
     "${SOURCE_DIR}/configure.ac"
-    "${SOURCE_DIR}/makefile.am"
+    "${SOURCE_DIR}/Makefile.am"
     "${SOURCE_DIR}/apps/common/makefile.am"
     "${SOURCE_DIR}/apps/dtls/makefile.am"
     "${SOURCE_DIR}/apps/ssl/makefile.am"
