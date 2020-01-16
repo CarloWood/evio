@@ -71,6 +71,12 @@ class OutputDevice : public virtual FileDescriptor
   // The output buffer
   //
 
+#if defined(__clang__) && __clang_major__ <= 6
+  // clang++ 6.x and lower erroneously assumes that this class is always aligned like FileDescriptor (64),
+  // but that is not true when this class is used in multiple inheritance. So, force the alignment that
+  // clang++ assumes.
+  alignas(16)
+#endif
   Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
 #ifdef DEBUGDEVICESTATS
