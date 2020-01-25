@@ -88,8 +88,7 @@ ExternalProject_Add_Step( MatrixSSL bootstrap
   COMMAND cd "${CMAKE_CURRENT_SOURCE_DIR}/matrixssl" && ./bootstrap.sh
 )
 
-ExternalProject_Add_StepDependencies( MatrixSSL configure
-    "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh"
+ExternalProject_Add_StepDependencies( MatrixSSL bootstrap
     "${SOURCE_DIR}/configure.ac"
     "${SOURCE_DIR}/Makefile.am"
     "${SOURCE_DIR}/apps/common/makefile.am"
@@ -99,6 +98,12 @@ ExternalProject_Add_StepDependencies( MatrixSSL configure
     "${SOURCE_DIR}/core/makefile.am"
     "${SOURCE_DIR}/crypto/makefile.am"
     "${SOURCE_DIR}/matrixssl/makefile.am"
+)
+
+message(STATUS "MatrixSSL_bootstrap_files = \"${MatrixSSL_bootstrap_files}\".")
+ExternalProject_Add_StepDependencies( MatrixSSL configure
+    "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh"
+    ${MatrixSSL_bootstrap_files}
 )
 
 # Maintainer-clean rule for the above.

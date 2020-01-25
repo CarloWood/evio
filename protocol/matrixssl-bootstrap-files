@@ -10,7 +10,7 @@ config.sub
 install-sh
 missing
 depcomp
-makefile.in
+Makefile.in
 core/makefile.in
 crypto/makefile.in
 matrixssl/makefile.in
