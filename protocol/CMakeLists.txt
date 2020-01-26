@@ -100,7 +100,6 @@ ExternalProject_Add_StepDependencies( MatrixSSL bootstrap
     "${SOURCE_DIR}/matrixssl/makefile.am"
 )
 
-message(STATUS "MatrixSSL_bootstrap_files = \"${MatrixSSL_bootstrap_files}\".")
 ExternalProject_Add_StepDependencies( MatrixSSL configure
     "${CMAKE_CURRENT_SOURCE_DIR}/configure_matrixssl.sh"
     ${MatrixSSL_bootstrap_files}
