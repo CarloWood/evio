@@ -7,8 +7,6 @@ project(evio
 
 include(AICxxProject)
 
-add_subdirectory(protocol)
-
 #==============================================================================
 # OPTIONS
 
@@ -22,6 +20,11 @@ cw_option(EnableDebugBuffers
 if (OptionEnableDebugBuffers)
   set(DEBUGDBSTREAMBUF 1)
 endif ()
+
+#==============================================================================
+# SUBDIRECTORIES
+
+add_subdirectory(protocol)
 
 #==============================================================================
 # BUILD PROJECT
