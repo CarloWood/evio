@@ -115,6 +115,16 @@ ExternalProject_Add_StepDependencies(MatrixSSL configure
     ${MatrixSSL_bootstrap_files}
 )
 
+ExternalProject_Get_property(MatrixSSL TMP_DIR)
+list(APPEND MatrixSSL_configure_files
+  #"${TMP_DIR}/MatrixSSL-cfgcmd.txt"            # Can't remove these with a custom command: they get re-generated :/.
+  #"${TMP_DIR}/MatrixSSL-cfgcmd.txt.in"
+  "${BINARY_DIR}/core/makefiles/get_CCARCH.mk"
+  "${BINARY_DIR}/core/makefiles/detect-and-rules.mk"
+  "${BINARY_DIR}/core/Makefile.inc"
+  "${BINARY_DIR}/common.mk"
+)
+
 # Maintainer-clean rule for the above.
 add_custom_target(maintainer-clean-evio
   COMMAND /bin/rm -f "${MatrixSSL_bootstrap_files}"
