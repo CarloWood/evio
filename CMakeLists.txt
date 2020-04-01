@@ -105,6 +105,16 @@ target_compile_features(evio_ObjLib
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8)
+    unset(CMAKE_C_COMPILER CACHE)
+    unset(CMAKE_C_COMPILER_AR CACHE)
+    unset(CMAKE_C_COMPILER_RANLIB CACHE)
+    unset(CMAKE_CXX_COMPILER CACHE)
+    unset(CMAKE_CXX_COMPILER_AR CACHE)
+    unset(CMAKE_CXX_COMPILER_ARG1 CACHE)
+    unset(CMAKE_CXX_COMPILER_RANLIB CACHE)
+    unset(CMAKE_PLATFORM_INFO_INITIALIZED CACHE)
+    # The above might not be sufficient.
+    message(WARNING "Manually remove \"${CMAKE_BINARY_DIR}/CMakeCache.txt\"!")
     # Although cmake thinks that g++ 7.x is sufficient for C++17, it doesn't have std::from_chars.
     message(FATAL_ERROR "At least g++ 8.x is required (9.0+ recommended), or clang++ 6.0+.")
   endif ()
