@@ -103,6 +103,13 @@ target_compile_features(evio_ObjLib
   PUBLIC cxx_std_17
 )
 
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8)
+    # Although cmake thinks that g++ 7.x is sufficient for C++17, it doesn't have std::from_chars.
+    message(FATAL_ERROR "At least g++ 8.x is required (9.0+ recommended), or clang++ 6.0+.")
+  endif ()
+endif ()
+
 # Set link dependencies.
 target_link_libraries(evio_ObjLib
   PUBLIC
