@@ -11,7 +11,7 @@ fi
 MATRIXSSL_SRCDIR="$(dirname $0)/matrixssl"
 
 # Try to find the architecture (this is needed when the compiler is set to clang).
-CCARCH="$(gcc -print-multiarch)"
+CCARCH="$(gcc -dumpmachine)"
 export CCARCH
 
 # Because cmake doesn't support the GNU make jobserver when running

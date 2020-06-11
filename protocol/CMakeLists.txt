@@ -66,7 +66,8 @@ else ()
 endif ()
 
 set(CONFIGURE_OPTIONS "--enable-silent-rules")
-set(BUILD_OPTIONS "CCARCH=${CMAKE_CXX_LIBRARY_ARCHITECTURE}")
+execute_process(COMMAND gcc -dumpmachine OUTPUT_VARIABLE CCARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(BUILD_OPTIONS "CCARCH=${CCARCH}")
 
 ExternalProject_Add(MatrixSSL
   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/matrixssl"
