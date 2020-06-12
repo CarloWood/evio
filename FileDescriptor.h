@@ -104,12 +104,12 @@ class FileDescriptorFlags
   static mask_t constexpr FDS_R_ACTIVE            = EPOLLIN << epoll_width;     // Set when epoll is using a pointer to this object (is watching this fd for input activity).
   static mask_t constexpr FDS_W_ACTIVE            = EPOLLOUT << epoll_width;    // Set when epoll is using a pointer to this object (is watching this fd for output activity).
 
-  static mask_t constexpr FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;
-  static mask_t constexpr FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;
+  static mask_t constexpr FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;        // See is_input_device() below.
+  static mask_t constexpr FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;        // See is_output_device() below.
   static mask_t constexpr FDS_RW                  = FDS_R | FDS_W;
 
-  static mask_t constexpr FDS_R_ADDED             = FDS_R >> added_shft;
-  static mask_t constexpr FDS_W_ADDED             = FDS_W >> added_shft;
+  static mask_t constexpr FDS_R_ADDED             = FDS_R >> added_shft;        // See is_r_added() below.
+  static mask_t constexpr FDS_W_ADDED             = FDS_W >> added_shft;        // See is_w_added() below.
   static mask_t constexpr FDS_ADDED               = FDS_R_ADDED | FDS_W_ADDED;
   static int constexpr active_to_added_shft = active_to_type_shft - added_shft;
 
@@ -121,15 +121,15 @@ class FileDescriptorFlags
   static mask_t constexpr FDS_W_DISABLED          = FDS_W >> disabled_shft;
   static int constexpr active_to_disabled_shft = active_to_type_shft - disabled_shft;
 
-  static mask_t constexpr FDS_R_INFERIOR          = FDS_R >> inferior_shft;
-  static mask_t constexpr FDS_W_INFERIOR          = FDS_W >> inferior_shft;
+  static mask_t constexpr FDS_R_INFERIOR          = FDS_R >> inferior_shft;     // See is_r_inferior() below.
+  static mask_t constexpr FDS_W_INFERIOR          = FDS_W >> inferior_shft;     // See is_w_inferior() below.
   static int constexpr active_to_inferior_shft = active_to_type_shft - inferior_shft;
 
-  static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;
-  static mask_t constexpr FDS_REGULAR_FILE        = 0x1000000000000000UL;
-  static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;
-  static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;
-  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;
+  static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;       // See is_same() below.
+  static mask_t constexpr FDS_REGULAR_FILE        = 0x1000000000000000UL;       // See is_regular_file() below.
+  static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;       // See set_w_flushing() below.
+  static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;       // See is_dead() below.
+  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;       // See dont_close() and close() below.
   static mask_t constexpr FDS_DEBUG               = 0x0100000000000000UL;
   static_assert(FDS_W < FDS_DEBUG, "epoll_width is too large!");
 

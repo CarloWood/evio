@@ -338,9 +338,27 @@ void EventLoopThread::emain()
   if (m_terminate == cleanly)
   {
     // Sanity check.
+    //
+    // It is a bad thing when not all FileDescriptor objects are dead, because that
+    // can lead to events that access memory that might no longer be allocated once
+    // we return from the EventLoopThread main loop.
+    //
+    // If you core dump here then you have a bug in your program: before
+    // leaving the main loop (destructing evio::EventLoop) do one of the following:
+    //
+    // In the case of an OutputDevice (FDS_W_OPEN is set), either call close_output_device()
+    // (or close()) to forcefully close the device (ie, if it is in an error state),
+    // or call flush_output_device() once you're done writing to it.
+    //
+    // In the case of an InputDevice (FDS_R_OPEN is set), call close_input_device()
+    // (or close()) once you have read everything you need to read.
+    // Calling stop_input_device() is not sufficient.
     utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){
       if (!p->get_flags().is_dead())
-        DoutFatal(dc::core, p << ": " << p->get_fd() << ", " << p->get_flags());
+      {
+        Dout(dc::warning, "Leaving EventLoopThread main loop while a device is still alive! See comments in EventLoopThread.cxx for more information.");
+        DoutFatal(dc::core, "A device is still alive: " << p << ": " << p->get_fd() << ", " << p->get_flags());
+      }
     });
   }
 #endif
