@@ -35,6 +35,7 @@
 namespace evio {
 
 class INotifyDecoder;
+class EventLoopThread;
 struct GetThread;
 
 //=============================================================================
@@ -60,6 +61,8 @@ class INotify
  private:
   static int add_watch(char const* pathname, uint32_t mask, INotify* inotify);
   static void rm_watch(int wd);
+  friend class EventLoopThread;
+  static void tear_down();      // Called by EventLoopThread::emain().
 
  public:
   //---------------------------------------------------------------------------

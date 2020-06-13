@@ -52,7 +52,16 @@ OutputDevice::~OutputDevice()
   bool is_w_open;
   {
     state_t::rat state_r(m_state);
-    // Don't delete a device? At most close() it and delete all boost::intrusive_ptr's to it.
+    // A FileDescriptor whose fd is added to the kernel epoll structure should never be destructed:
+    // as long as the fd is registered with the kernel, sooner or later an event will happen
+    // and that fd will be returned by epoll_pwait(2) in the form of a struct epoll_event whose
+    // `data` member is a pointer to this object!
+    // (FileDescriptor* device = static_cast<FileDescriptor*>(event.data.ptr); in EventLoopThread.cxx).
+    //
+    // One way this can happen is when you simply call `delete device_ptr`. Don't do that.
+    // At most close() it and delete all boost::intrusive_ptr's to it.
+    //
+    // Follow the stack trace up till you find the call to `delete`.
     ASSERT(!state_r->m_flags.is_added());
     is_w_open = state_r->m_flags.is_w_open();
   }
@@ -157,6 +166,7 @@ void OutputDevice::stop_output_device(int& allow_deletion_count)
   }
   if (need_close)
     close_output_device(allow_deletion_count);
+  Dout(dc::evio, "flags are now: " << get_flags());
 }
 
 // GetThread only.
@@ -178,6 +188,7 @@ bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCon
   }
   if (need_close)
     close_output_device(allow_deletion_count);
+  Dout(dc::evio, "flags are now: " << get_flags());
   return success;
 }
 

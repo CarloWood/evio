@@ -29,6 +29,7 @@
 #include "EventLoopThread.h"
 #include "InputDevice.h"
 #include "OutputDevice.h"
+#include "INotify.h"
 #include "threadpool/AIThreadPool.h"
 #include "utils/cpu_relax.h"
 #include "debug.h"
@@ -89,7 +90,7 @@ void EventLoopThread::s_wakeup_handler(int)
 void EventLoopThread::emain()
 {
   Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
-  DoutEntering(dc::evio, "EventLoopThread::emain()");
+  Dout(dc::evio, "Entering EventLoopThread::emain() [no indentation]");
 
   Dout(dc::system|continued_cf, "epoll_create1(EPOLL_CLOEXEC) = ");
   m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
@@ -327,6 +328,7 @@ void EventLoopThread::emain()
 
   // Deinit.
   ASSERT(m_terminate == forced || m_active == 0);
+  INotify::tear_down();
   utils::Signals::block_and_unregister(m_epoll_signum);
   Dout(dc::system|continued_cf, "close(" << m_epoll_fd << ") = ");
   CWDEBUG_ONLY(int res =) ::close(m_epoll_fd);
@@ -353,18 +355,24 @@ void EventLoopThread::emain()
     // In the case of an InputDevice (FDS_R_OPEN is set), call close_input_device()
     // (or close()) once you have read everything you need to read.
     // Calling stop_input_device() is not sufficient.
-    utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){
+    bool open_files = false;
+    utils::InstanceTracker<FileDescriptor>::for_each([&open_files](FileDescriptor const* p){
       if (!p->get_flags().is_dead())
       {
-        Dout(dc::warning, "Leaving EventLoopThread main loop while a device is still alive! See comments in EventLoopThread.cxx for more information.");
-        DoutFatal(dc::core, "A device is still alive: " << p << ": " << p->get_fd() << ", " << p->get_flags());
+        if (!open_files)
+        {
+          Dout(dc::warning, "Leaving EventLoopThread main loop while not all devices were closed! See comments in EventLoopThread.cxx for more information.");
+          open_files = true;
+        }
+        Dout(dc::warning, p << ": " << p->get_fd() << ", " << p->get_flags());
       }
     });
+    ASSERT(!open_files);
   }
 #endif
 
   m_terminate = not_yet;
-  Dout(dc::evio, "Leaving EventLoopThread::main()");
+  Dout(dc::evio, "Leaving EventLoopThread::emain() [no indentation]");
 }
 
 void EventLoopThread::terminate(bool normal_exit)
@@ -561,8 +569,6 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
   if (!state_w->m_flags.test_and_set_active(active_flag))
     return;
 
-  bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
-
   if (!state_w->m_flags.test_inferior(active_flag))
   {
     CWDEBUG_ONLY(int active =) ++m_active;
@@ -573,6 +579,7 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
 
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
   {
+    bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
     if (needs_adding)
     {
       // Increment ref count to stop device from being deleted while being active.
@@ -645,8 +652,6 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
     Dout(dc::warning, "Calling EventLoopThread::start_if(" << condition << ", " << active_flag <<", " << device << ") -- just call start() without condition?!");
 #endif
 
-  bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
-
   if (!state_w->m_flags.test_inferior(active_flag))
   {
     CWDEBUG_ONLY(int active =) ++m_active;
@@ -657,6 +662,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
 
   if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
   {
+    bool needs_adding = state_w->m_flags.test_and_set_added(active_flag);
     if (needs_adding)
     {
       // Increment ref count to stop device from being deleted while being active.
@@ -679,12 +685,11 @@ void EventLoopThread::remove(int& allow_deletion_count, FileDescriptor::state_t:
   bool cleared_active = state_w->m_flags.test_and_clear_active(active_flag);
   if (cleared_active || needs_removal)
   {
-    if (AI_LIKELY(!state_w->m_flags.is_regular_file()))
-    {
-      device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_removal);
-      if (needs_removal)
-        ++allow_deletion_count;
-    }
+    // Regular files don't need removal because they were never added.
+    ASSERT(!state_w->m_flags.is_regular_file());
+    device->stop_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_removal);
+    if (needs_removal)
+      ++allow_deletion_count;
   }
   if (cleared_active && !state_w->m_flags.test_inferior(active_flag))
   {
@@ -776,6 +781,15 @@ void EventLoopThread::stop_running()
 void EventLoopThread::add_needs_deletion(FileDescriptor const* node)
 {
   Dout(dc::evio, "EventLoopThread::add_needs_deletion(" << node << ")");
+#ifdef CWDEBUG
+  if (node->get_flags().is_added())
+  {
+    Dout(dc::warning, "Adding a device for deletion while that device is still added to epoll! See comments in EventLoopThread.cxx for more information.");
+    DoutFatal(dc::core, "A device is still added: " << node << ": " << node->get_fd() << ", " << node->get_flags());
+    // Without this core dump it would core in `delete orphan` for the same reason,
+    // but the comments there are too general, so I'm catching it here.
+  }
+#endif
   // Even though node is const -- this is like an initialization of m_next and therefore we're allowed to change m_next.
   node->m_next = m_needs_deletion_list.load(std::memory_order_relaxed);
   while (!m_needs_deletion_list.compare_exchange_weak(node->m_next, node, std::memory_order_release, std::memory_order_relaxed))

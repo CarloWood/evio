@@ -263,4 +263,20 @@ void INotify::rm_watch(int wd)
   ptr->rm_watch(wd);
 }
 
+//static
+void INotify::tear_down()
+{
+  DoutEntering(dc::evio, "INotify::tear_down()");
+  // This is called after leaving the main event loop:
+  // We're not allowed to leave the main loop while there is still anything added to epoll.
+  std::lock_guard<std::mutex> lock(inotify_device_ptr_initialization_mutex);
+  INotifyDevice* ptr = inotify_device_ptr.load();
+  if (ptr)
+  {
+    ptr->close();
+    intrusive_ptr_release(ptr);
+  }
+  inotify_device_ptr = nullptr;
+}
+
 } // namespace evio

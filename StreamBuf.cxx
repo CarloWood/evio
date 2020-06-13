@@ -738,7 +738,7 @@ bool StreamBuf::release(FileDescriptor const* device)
     //          `--------->Bounce Device<-------'
     //
     // And we need to simply reset the appropriate m_idevice / m_odevice without
-    // calling allow_deletion(). We can't know if this we're being called from
+    // calling allow_deletion(). We can't know if we're being called from
     // the destructor of InputDevice or OutputDevice but that shouldn't matter.
     // Both will be called immediately after another. So lets just set both
     // pointers to nullptr (I don't think they will be used anymore).
@@ -776,7 +776,7 @@ bool StreamBuf::release(FileDescriptor const* device)
     m_idevice = nullptr;
     Dout(dc::io|continued_cf, "this = " << this << "; StreamBuf::release(" << (void*)device << "), ");
     m_odevice->allow_deletion(1);
-    Dout(dc::finish, m_device_counter << "output device left: " << m_odevice);
+    Dout(dc::finish, m_device_counter << " (output) device left: " << m_odevice);
   }
   return false;
 }

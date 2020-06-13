@@ -167,7 +167,7 @@ class FileDescriptorFlags
   // Return true if this object is marked as having an open fd for reading.
   bool is_r_open() const { return m_mask & FDS_R_OPEN; }
 
-  // Return true if the main event loop must return even when this input device is still active.
+  // Return true if the main event loop must return even when this output device is still active.
   bool is_w_inferior() const { return m_mask & FDS_W_INFERIOR; }
 
   // Return true if the main event loop must return even when this input device is still active.
@@ -353,6 +353,8 @@ class FileDescriptorFlags
   bool test_and_set_added(mask_t active_flag)
   {
     ASSERT(active_flag == FDS_R_ACTIVE || active_flag == FDS_W_ACTIVE);
+    // Regular files should never be added to the kernel epoll structure.
+    ASSERT(!(m_mask & FDS_REGULAR_FILE));
     mask_t added_flag = active_flag << active_to_added_shft;
     bool already_added = m_mask & FDS_ADDED;
     m_mask |= added_flag;
