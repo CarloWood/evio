@@ -62,15 +62,18 @@ class FileDescriptorFlags
   using mask_t = uint64_t;
 
   // .-FDS_SAME
-  // |    .-FDS_DEAD
-  // |    |.-INTERNAL_FDS_DONT_CLOSE
-  // |    ||.-FDS_DEBUG                       inferior_shft
-  // |    |||                                /    disabled_shft
-  // |    |||                             <---->   /
-  // |    |||                             <---------->                      _ epoll_width
-  // |    |||                             <----open_shft--->               /
-  // v    vvv                             <------added_shft------>      <---->
-  // 10000111 0000000000000000000000 00101 00101 00101 00101 00101 00101 11101
+  // | .-FDS_REGULAR_FILE
+  // | |.-FDS_W_CLOSE
+  // | ||.-FDS_FLUSHING
+  // | |||.-FDS_DEAD
+  // | ||||.-INTERNAL_FDS_DONT_CLOSE
+  // | |||||.-FDS_DEBUG                       inferior_shft
+  // | ||||||                                /    disabled_shft
+  // | ||||||                             <---->   /
+  // | ||||||                             <---------->                      _ epoll_width
+  // | ||||||                             <----open_shft--->               /
+  // v vvvvvv                             <------added_shft------>      <---->
+  // 10111111 0000000000000000000000 00101 00101 00101 00101 00101 00101 11101
   //                                   ^ ^   ^ ^   ^ ^   ^ ^   ^ ^   ^ ^ ^^^ ^
   //                                   | |   | |   | |   | |   | |   | | |||  \_ FDS_EPOLLIN_BUSY = EPOLLIN
   //                                   | |   | |   | |   | |   | |   | | || \___ FDS_EPOLLOUT_BUSY = EPOLLOUT
@@ -126,7 +129,8 @@ class FileDescriptorFlags
   static int constexpr active_to_inferior_shft = active_to_type_shft - inferior_shft;
 
   static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;       // See is_same() below.
-  static mask_t constexpr FDS_REGULAR_FILE        = 0x1000000000000000UL;       // See is_regular_file() below.
+  static mask_t constexpr FDS_REGULAR_FILE        = 0x2000000000000000UL;       // See is_regular_file() below.
+  static mask_t constexpr FDS_W_CLOSE             = 0x1000000000000000UL;       // See is_w_close() below.
   static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;       // See set_w_flushing() below.
   static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;       // See is_dead() below.
   static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;       // See dont_close() and close() below.
@@ -175,6 +179,9 @@ class FileDescriptorFlags
 
   // Return true if this output device is 'flushing'.
   bool is_w_flushing() const { return m_mask & FDS_W_FLUSHING; }
+
+  // Return true if this output device should be automatically, forcefully closed upon leaving the main event loop.
+  bool is_w_close() const { return m_mask & FDS_W_CLOSE; }
 
   // Return true if this object is inferior for the action passed in active_flag.
   bool test_inferior(mask_t active_flag) const
@@ -297,6 +304,13 @@ class FileDescriptorFlags
   // Remove the flushing flag.
   void unset_w_flushing() { m_mask &= ~FDS_W_FLUSHING; }
 
+  // Call close_output_device() when leaving the main event loop.
+  // Do not call this function directly! Call OutputDevice::close_on_exit() instead.
+  void set_w_close() { m_mask |= FDS_W_CLOSE; }
+
+  // Do not call this function directly! Call OutputDevice::close_on_exit(false) instead.
+  void unset_w_close() { m_mask &= ~FDS_W_CLOSE; }
+
   // Mark this object as dead.
   void set_dead() { m_mask |= FDS_DEAD; }
 
@@ -396,12 +410,15 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   int m_fd;                                             // The file descriptor. In the case of a device that is derived from both,
                                                         // InputDevice and OutputDevice using multiple inheritance -- this fd is
                                                         // used for both input and output.
-  mutable FileDescriptor const* m_next;                 // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
+  mutable FileDescriptor const* m_next_needs_deletion;  // A singly linked list of FileDescriptor (derived) objects that need to be deleted by the EventLoopThead.
                                                         // Only valid when this object is added to the list itself (EventLoopThread::m_needs_deletion_list).
   alignas(config::cacheline_size_c) std::atomic<uint32_t> m_pending_events;     // Mask of events being handled by the thread pool.
 
   // (Re)Initialize the Device using filedescriptor fd.
-  void init(int fd);
+  // make_fd_non_blocking should be true except when the fd is a standard stream (i.e. fd <= 2) or fd is a regular file
+  // (or when you are sure that the fd is already non-blocking).
+  // The best way to represent a standard stream is therefore with an evio::File.
+  void init(int fd, bool make_fd_non_blocking = true);
 
 #if CW_DEBUG
  public:
@@ -620,6 +637,9 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   virtual void err(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd)) { close(); }
 
   // Called by close(). These will be overridden by InputDevice and/or OutputDevice.
+  // The default does nothing so that close() can simply call both and then get InputDevice::close_input_device(),
+  // OutputDevice::close_output_device() or both, depending on this is a base class of InputDevice, OutputDevice
+  // or both.
   virtual void close_input_device(int& UNUSED_ARG(allow_deletion_count)) { }
   virtual void close_output_device(int& UNUSED_ARG(allow_deletion_count)) { }
 

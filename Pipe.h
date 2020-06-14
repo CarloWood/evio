@@ -38,14 +38,14 @@ class PipeReadEnd : public InputDevice
 {
   friend class Pipe;
   PipeReadEnd() = default;
-  void init(int fd0);
+  void init(int fd0, bool make_fd_non_blocking);
 };
 
 class PipeWriteEnd : public OutputDevice
 {
   friend class Pipe;
   PipeWriteEnd() = default;
-  void init(int fd1);
+  void init(int fd1, bool make_fd_non_blocking);
 };
 
 class Pipe

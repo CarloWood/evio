@@ -33,15 +33,15 @@
 
 namespace evio {
 
-void PipeReadEnd::init(int fd0)
+void PipeReadEnd::init(int fd0, bool make_fd_non_blocking)
 {
-  FileDescriptor::init(fd0);
+  FileDescriptor::init(fd0, make_fd_non_blocking);
   start_input_device();
 }
 
-void PipeWriteEnd::init(int fd1)
+void PipeWriteEnd::init(int fd1, bool make_fd_non_blocking)
 {
-  FileDescriptor::init(fd1);
+  FileDescriptor::init(fd1, make_fd_non_blocking);
 }
 
 Pipe::Pipe() : m_pipe_read_end(new PipeReadEnd), m_pipe_write_end(new PipeWriteEnd)
@@ -52,8 +52,8 @@ Pipe::Pipe() : m_pipe_read_end(new PipeReadEnd), m_pipe_write_end(new PipeWriteE
   if (pipe2(pipefd, O_CLOEXEC|O_NONBLOCK) == -1)
     THROW_ALERTE("pipe");
 
-  m_pipe_read_end->init(pipefd[0]);
-  m_pipe_write_end->init(pipefd[1]);
+  m_pipe_read_end->init(pipefd[0], false);      // Pass false because we are already non-blocking.
+  m_pipe_write_end->init(pipefd[1], false);
 }
 
 } // namespace evio

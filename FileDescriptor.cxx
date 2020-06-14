@@ -125,7 +125,7 @@ bool is_valid(int fd)
 #endif
 }
 
-void FileDescriptor::init(int fd)
+void FileDescriptor::init(int fd, bool make_fd_non_blocking)
 {
   DoutEntering(dc::evio, "FileDescriptor::init(" << fd << ") [" << this << ']');
   // Close the device before opening it again.
@@ -133,8 +133,8 @@ void FileDescriptor::init(int fd)
   // Only call init() with a valid, open filedescriptor.
   ASSERT(is_valid(fd));
 
-  // Make file descriptor non-blocking by default.
-  set_nonblocking(fd);
+  if (make_fd_non_blocking)
+    set_nonblocking(fd);
 
   // Reset all flags except FDS_RW and FDS_REGULAR_FILE.
   state_t::wat state_w(m_state);
@@ -150,6 +150,9 @@ std::ostream& operator<<(std::ostream& os, FileDescriptorFlags const& flags)
     os << (flags.is_input_device() ? "FDS_RW" : "FDS_W");
   else if (flags.is_input_device())
     os << "FDS_R";
+
+  if (flags.is_w_close())
+    os << "|FDS_W_CLOSE";
 
   if (flags.dont_close())
     os << "|INTERNAL_FDS_DONT_CLOSE";

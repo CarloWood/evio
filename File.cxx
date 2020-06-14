@@ -40,7 +40,7 @@ void File::init(int fd, std::string const& filename)
 {
   m_filename = filename;
   state_t::wat(m_state)->m_flags.set_regular_file();
-  FileDescriptor::init(fd);
+  FileDescriptor::init(fd, false);      // There is no need to be non-blocking for a regular file.
 }
 
 void File::open(std::string const& filename, std::ios_base::openmode mode, int prot, int additional_posix_modes)

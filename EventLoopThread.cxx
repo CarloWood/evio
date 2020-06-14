@@ -321,6 +321,8 @@ void EventLoopThread::emain()
       if (two_types_of_events)
         queue.notify_one();
     }
+    if (AI_UNLIKELY(all_threads_finished < 0))
+      OutputDevice::flush_close_on_exit();
     garbage_collection();
   }
 
@@ -351,6 +353,10 @@ void EventLoopThread::emain()
     // In the case of an OutputDevice (FDS_W_OPEN is set), either call close_output_device()
     // (or close()) to forcefully close the device (ie, if it is in an error state),
     // or call flush_output_device() once you're done writing to it.
+    // Alternatively call close_on_exit() after initialization; this will automatically
+    // (forcefully) close the input device when the main loop is terminated. This can
+    // be used when it is not possible to call flush_output_device() because it is
+    // not known when the last data was written to the device.
     //
     // In the case of an InputDevice (FDS_R_OPEN is set), call close_input_device()
     // (or close()) once you have read everything you need to read.
@@ -790,9 +796,9 @@ void EventLoopThread::add_needs_deletion(FileDescriptor const* node)
     // but the comments there are too general, so I'm catching it here.
   }
 #endif
-  // Even though node is const -- this is like an initialization of m_next and therefore we're allowed to change m_next.
-  node->m_next = m_needs_deletion_list.load(std::memory_order_relaxed);
-  while (!m_needs_deletion_list.compare_exchange_weak(node->m_next, node, std::memory_order_release, std::memory_order_relaxed))
+  // Even though node is const -- this is like an initialization of m_next_needs_deletion and therefore we're allowed to change m_next_needs_deletion.
+  node->m_next_needs_deletion = m_needs_deletion_list.load(std::memory_order_relaxed);
+  while (!m_needs_deletion_list.compare_exchange_weak(node->m_next_needs_deletion, node, std::memory_order_release, std::memory_order_relaxed))
     ;
 }
 
@@ -804,7 +810,7 @@ void EventLoopThread::flush_need_deletion()
   {
     FileDescriptor const* orphan = head;
     Dout(dc::evio, "Deleting orphan = " << orphan);
-    head = orphan->m_next;
+    head = orphan->m_next_needs_deletion;
     DEBUG_ONLY(orphan->mark_deleted());
     delete orphan;
 #ifdef CWDEBUG

@@ -66,6 +66,11 @@ class OutputDevice : public virtual FileDescriptor
   using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_is_flushing_t m_disable_is_flushing;
 
+  // List of InputDevice objects that have FDS_R_CLOSE set.
+  // For this to work, ONLY set/unset FDS_R_CLOSE through calls to InputDevice::close_on_exit(bool)!
+  using w_close_list_t = aithreadsafe::Wrapper<std::vector<boost::intrusive_ptr<OutputDevice>>, aithreadsafe::policy::Primitive<std::mutex>>;
+  static w_close_list_t s_w_close_list;
+
  protected:
   //---------------------------------------------------------------------------
   // The output buffer
@@ -187,6 +192,39 @@ class OutputDevice : public virtual FileDescriptor
     int allow_deletion_count = 0;
     stop_output_device(allow_deletion_count);
     return {this, allow_deletion_count};
+  }
+
+  void close_on_exit(bool auto_close = true)
+  {
+    Dout(dc::evio, "close_on_exit(" << std::boolalpha << auto_close << ") [" << this << "]");
+    w_close_list_t::wat w_close_list_w(s_w_close_list);
+    state_t::wat state_w(m_state);
+    // Only call this method with alternating values of `auto_close`, starting with `true`.
+    ASSERT(state_w->m_flags.is_w_close() != auto_close);
+    if (auto_close)
+    {
+      w_close_list_w->emplace_back(this);
+      state_w->m_flags.set_w_close();
+    }
+    else
+    {
+      for (auto iter = w_close_list_w->begin(); iter != w_close_list_w->end(); ++iter)
+        if (iter->get() == this)
+        {
+          w_close_list_w->erase(iter);
+          break;
+        }
+      state_w->m_flags.unset_w_close();
+    }
+  }
+
+  static void flush_close_on_exit()
+  {
+    DoutEntering(dc::evio, "flush_close_on_exit()");
+    w_close_list_t::wat w_close_list_w(s_w_close_list);
+    for (auto&& ptr : *w_close_list_w)
+      ptr->close_output_device();
+    w_close_list_w->clear();
   }
 
  protected:

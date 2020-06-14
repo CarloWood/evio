@@ -430,4 +430,7 @@ int OutputDevice::sync()
   return 0;
 }
 
+//static
+OutputDevice::w_close_list_t OutputDevice::s_w_close_list;
+
 } // namespace evio
