@@ -354,7 +354,7 @@ void EventLoopThread::emain()
     // (or close()) to forcefully close the device (ie, if it is in an error state),
     // or call flush_output_device() once you're done writing to it.
     // Alternatively call close_on_exit() after initialization; this will automatically
-    // (forcefully) close the input device when the main loop is terminated. This can
+    // (forcefully) close the output device when the main loop is terminated. This can
     // be used when it is not possible to call flush_output_device() because it is
     // not known when the last data was written to the device.
     //
