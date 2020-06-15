@@ -49,8 +49,8 @@ namespace evio {
 //
 // This class is used as the base class of InputDecoder or LinkBufferPlus. Any class that is not (an)
 // InputDecoder that derives from this class must define a end_of_msg_finder that returns 0.
-// Only InputDecoder::end_of_msg_finder is allowed to return a non-zero value, in that case the
-// Sink is static_cast-ed to InputDecoder and decode() is called on the new message.
+// Only (classes derived from) InputDecoder::end_of_msg_finder is allowed to return a non-zero value,
+// in that case the Sink is static_cast-ed to InputDecoder and decode() is called on the new message.
 
 class Sink : public Protocol
 {
