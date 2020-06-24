@@ -41,32 +41,31 @@ namespace evio {
 using protocol::TLS;
 
 //static
-char const* TLSSocket::output_state_to_str(TLSSocket::output_state_type output_state)
+char const* TLSSocket::session_state_to_str(TLSSocket::session_state_type session_state)
 {
-  switch (output_state)
+  switch (session_state)
   {
-    AI_CASE_RETURN(preconnect_out);
-    AI_CASE_RETURN(handshake_OutData_ready);
-    AI_CASE_RETURN(handshake_idle_out);
-    AI_CASE_RETURN(encode_app_data);
-    AI_CASE_RETURN(OutData_ready);
-    AI_CASE_RETURN(write_error_out);
-    AI_CASE_RETURN(idle_out);
+    AI_CASE_RETURN(preconnect);
+    AI_CASE_RETURN(handshake_want_write);
+    AI_CASE_RETURN(handshake_want_read);
+    AI_CASE_RETURN(app_want_write);
+    AI_CASE_RETURN(app_idle_out);
+    AI_CASE_RETURN(app_write_error);
   }
-  return "UNKNOWN output_state_type";
+  return "UNKNOWN session_state_type";
 }
 
-std::ostream& operator<<(std::ostream& os, TLSSocket::output_state_type output_state)
+std::ostream& operator<<(std::ostream& os, TLSSocket::session_state_type session_state)
 {
-  return os << TLSSocket::output_state_to_str(output_state);
+  return os << TLSSocket::session_state_to_str(session_state);
 }
 
 int TLSSocket::sync()
 {
-  DoutEntering(dc::tls, "TLSSocket::sync()");
-  output_state_type output_state = m_output_state.load(std::memory_order_relaxed);
-  Dout(dc::evio, "m_output_state == " << output_state);
-  if (output_state >= encode_app_data)
+  DoutEntering(dc::evio, "TLSSocket::sync()");
+  session_state_type session_state = m_session_state.load(std::memory_order_relaxed);
+  Dout(dc::tls, "m_session_state == " << session_state);
+  if (session_state >= app_want_write)
   {
     // Call base class implementation.
     return OutputDevice::sync();
@@ -105,17 +104,18 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 {
   DoutEntering(dc::evio, "TLSSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   // Sync with the written value of m_max_frag.
-  output_state_type output_state = m_output_state.load(std::memory_order_acquire);
-  Dout(dc::evio, "m_output_state == " << output_state);
+  session_state_type session_state = m_session_state.load(std::memory_order_acquire);
+  Dout(dc::evio, "m_session_state == " << session_state);
 
-  // We keep this lock from writing to the peer till we were able to update m_output_state
+  // We keep this lock from writing to the peer till we were able to update m_session_state
   // for the unlikely case that the peer would reply faster than that ;).
-  std::unique_lock<std::mutex> output_state_lock(m_output_state_mutex, std::defer_lock);
+  std::unique_lock<std::mutex> session_state_lock(m_session_state_mutex, std::defer_lock);
 
   do
   {
-    if (output_state == encode_app_data)
+    if (session_state == app_want_write)
     {
+#if 0
       // The encrypted data must be written to an internal MatrixSSL out data buffer.
       // The matrixssl API steps for this method are as follows:
       //
@@ -169,8 +169,8 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
             Dout(dc::tls, "Trying buffer again because stop_output_device(allow_deletion_count, nothing_to_get) returned false.");
             continue;
           }
-          m_output_state.store(output_state, std::memory_order_relaxed);
-          Dout(dc::tls, "Set m_output_state to output_state (" << output_state << ").");
+          m_session_state.store(session_state, std::memory_order_relaxed);
+          Dout(dc::tls, "Set m_session_state to session_state (" << session_state << ").");
           return;
         }
 
@@ -178,46 +178,89 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         if (len > m_max_frag)
           len = m_max_frag;
 
-        // output_state == encode_app_data.
+        // session_state == app_want_write.
         int32_t encoded_len = m_tls.matrixSslEncodeToOutdata(obuffer->buf2dev_ptr(), len);
         if (AI_UNLIKELY(encoded_len < 0))
         {
           write_error(allow_deletion_count, -encoded_len);
-          if (output_state < encode_app_data)                   // Handshake not completed means m_connected() wasn't called yet.
+          if (session_state < app_want_write)                   // Handshake not completed means m_connected() wasn't called yet.
           {
             if (m_connected)
               m_connected(allow_deletion_count, false);
           }
-          m_output_state = write_error_out;
-          Dout(dc::evio, "m_output_state = write_error_out");
+          m_session_state = write_error_out;
+          Dout(dc::evio, "m_session_state = write_error_out");
           return;
         }
-        output_state = OutData_ready;
-        Dout(dc::evio, "output_state = " << output_state);
+        session_state = OutData_ready;
+        Dout(dc::evio, "session_state = " << session_state);
         obuffer->buf2dev_bump(len);
         break;
       }
+#endif
     }
     else if (AI_UNLIKELY(!(m_connected_flags & is_connected)))
     {
       // As soon as we can write to a file descriptor, we are connected.
       m_connected_flags |= is_connected;
-      m_tls.session_init(m_ServerNameIndication.c_str());       // Generate the CLIENT HELLO message.
-      output_state = handshake_OutData_ready;
-      Dout(dc::evio, "output_state = " << output_state);
+      m_tls.session_init(m_ServerNameIndication.c_str());
+      m_tls.set_fd(m_fd);
+      session_state = handshake_want_write;
+      Dout(dc::evio, "session_state = " << session_state);
     }
 
     for (;;)
     {
-      char* buf;
-      ASSERT(output_state == handshake_OutData_ready || output_state == OutData_ready);
-      int32_t len = m_tls.matrixSslGetOutdata(&buf);      // This function can be called safely multiple times, therefore output_state is not changed after calling it.
+      //char* buf;
+      ASSERT(session_state == handshake_want_write || session_state == app_want_write);
+
+      if (session_state == handshake_want_write)
+      {
+        auto res = m_tls.do_handshake();
+        if (res == TLS::HANDSHAKE_COMPLETE)
+        {
+          // Handshake finished.
+          utils::FuzzyCondition condition_empty([this]{
+                return m_obuffer->StreamBufProducer::nothing_to_get();
+              });
+          // Stop the output device if the buffer is empty.
+          if (condition_empty.is_momentary_true())
+          {
+            stop_output_device(allow_deletion_count, condition_empty);
+            session_state = app_idle_out;
+            break;
+          }
+          else
+            session_state = app_want_write;
+          Dout(dc::evio, "session_state == " << session_state);
+        }
+        else if (res == TLS::HANDSHAKE_WANT_WRITE)
+        {
+          // Couldn't write everything that we wanted to write.
+          break;
+        }
+        else if (res == TLS::HANDSHAKE_WANT_READ)
+        {
+          // Nothing to write anymore.
+          stop_output_device(allow_deletion_count);
+          session_state = handshake_want_read;
+          Dout(dc::evio, "session_state == " << session_state);
+          break;
+        }
+        else
+        {
+          assert(false); // To be implemented.
+        }
+      }
+
+#if 0
+      int32_t len = m_tls.matrixSslGetOutdata(&buf);      // This function can be called safely multiple times, therefore session_state is not changed after calling it.
 
       if (len == 0)     // Success. No pending data remaining.
       {
-        output_state = output_state == handshake_OutData_ready ? handshake_idle_out : idle_out;
-        m_output_state.store(output_state, std::memory_order_relaxed);
-        Dout(dc::evio, "All data was written --> m_output_state = " << output_state);
+        session_state = session_state == handshake_want_write ? handshake_want_read : app_idle_out;
+        m_session_state.store(session_state, std::memory_order_relaxed);
+        Dout(dc::evio, "All data was written --> m_session_state = " << session_state);
         stop_output_device(allow_deletion_count);
         return;
       }
@@ -227,7 +270,7 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 #endif
       ssize_t wlen;
       // Take the lock just before writing.
-      output_state_lock.lock();
+      session_state_lock.lock();
       for (;;)    // EINTR / EAGAIN loop.
       {
         Dout(dc::system|continued_cf, "write(" << fd << ", {" << buf2hex(buf, len) << "}, " << len << ") = ");
@@ -241,16 +284,16 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         if (err == EBADF && FileDescriptor::state_t::wat(m_state)->m_flags.is_dead())
         {
           Dout(dc::evio, "Leaving TLSSocket::write_to_fd() because fd was already closed.");
-          m_output_state = preconnect_out;
-          Dout(dc::evio, "m_output_state = preconnect_out");
+          m_session_state = preconnect_out;
+          Dout(dc::evio, "m_session_state = preconnect_out");
           return;
         }
         if (err == EINTR)
           continue;             // Try to write the same data again.
         if (err == EWOULDBLOCK)
         {
-          m_output_state.store(output_state, std::memory_order_relaxed);
-          Dout(dc::tls, "Set m_output_state to output_state (" << output_state << ").");
+          m_session_state.store(session_state, std::memory_order_relaxed);
+          Dout(dc::tls, "Set m_session_state to session_state (" << session_state << ").");
           return;
         }
 #if EWOULDBLOCK != EAGAIN
@@ -258,20 +301,20 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         {
           if (nr_eagain_errors--)
             continue;           // Try to write the same data again.
-          m_output_state.store(output_state, std::memory_order_relaxed);
-          Dout(dc::tls, "Set m_output_state to output_state (" << output_state << ").");
+          m_session_state.store(session_state, std::memory_order_relaxed);
+          Dout(dc::tls, "Set m_session_state to session_state (" << session_state << ").");
           return;
         }
 #endif
-        output_state_lock.unlock();
+        session_state_lock.unlock();
         write_error(allow_deletion_count, err);
-        if (output_state < encode_app_data)                     // Handshake not completed means m_connected() wasn't called yet.
+        if (session_state < app_want_write)                     // Handshake not completed means m_connected() wasn't called yet.
         {
           if (m_connected)
             m_connected(allow_deletion_count, false);
         }
-        m_output_state = write_error_out;
-        Dout(dc::evio, "m_output_state = write_error_out");
+        m_session_state = write_error_out;
+        Dout(dc::evio, "m_session_state = write_error_out");
         return;
       }
 
@@ -289,44 +332,44 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
       Dout(dc::finish, " [" << this << ']');
 #endif
 
-      // output_state == handshake_OutData_ready || output_state == OutData_ready (after calling matrixSslGetOutdata and writing successfully some data to the peer).
+      // session_state == handshake_want_write || session_state == OutData_ready (after calling matrixSslGetOutdata and writing successfully some data to the peer).
       TLS::data_result_type res = m_tls.matrixSslSentData(wlen);
 
       if (AI_UNLIKELY(res == TLS::REQUEST_CLOSE))
       {
-        output_state_lock.unlock();
+        session_state_lock.unlock();
         Dout(dc::evio, "Closing device because matrixSslSentData() returned MATRIXSSL_REQUEST_CLOSE.");
         close(allow_deletion_count);
-        if (output_state < encode_app_data)                     // Handshake not completed means m_connected() wasn't called yet.
+        if (session_state < app_want_write)                     // Handshake not completed means m_connected() wasn't called yet.
         {
           if (m_connected)
             m_connected(allow_deletion_count, false);
         }
-        m_output_state = preconnect_out;
-        Dout(dc::evio, "m_output_state = preconnect_out");
+        m_session_state = preconnect_out;
+        Dout(dc::evio, "m_session_state = preconnect_out");
         return;                   // All done.
       }
 
       if (res == TLS::SUCCESS)
       {
-        output_state = output_state == handshake_OutData_ready ? handshake_idle_out : encode_app_data;
-        if (output_state == handshake_idle_out)
+        session_state = session_state == handshake_want_write ? handshake_want_read : app_want_write;
+        if (session_state == handshake_want_read)
         {
-          m_output_state.store(output_state, std::memory_order_relaxed);
-          Dout(dc::tls, "No pending data remaining --> m_output_state = " << output_state);
+          m_session_state.store(session_state, std::memory_order_relaxed);
+          Dout(dc::tls, "No pending data remaining --> m_session_state = " << session_state);
           stop_output_device(allow_deletion_count);
-          // Note that during a handshake output_state_lock has been locked from before
+          // Note that during a handshake session_state_lock has been locked from before
           // writing the last (successful) message to the peer until after that we updated
-          // m_output_state and stopped the output device.
-          return;	                // Success. No pending data remaining. This unlocks output_state_lock.
+          // m_session_state and stopped the output device.
+          return;	                // Success. No pending data remaining. This unlocks session_state_lock.
         }
-        Dout(dc::tls, "No pending data remaining --> output_state = " << output_state);
-        output_state_lock.unlock();
+        Dout(dc::tls, "No pending data remaining --> session_state = " << session_state);
+        session_state_lock.unlock();
         // Go to beginning of function to test if there is more to write.
         break;
       }
 
-      output_state_lock.unlock();
+      session_state_lock.unlock();
 
       if (res == TLS::HANDSHAKE_COMPLETE)
       {
@@ -335,10 +378,10 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         // We could already check if there is output data available here, and if so, encode it,
         // but checking if the buffer is empty is rather involved and the fd is very likely
         // writable anyway at this moment-- so just call write_to_fd and use the check at the top.
-        output_state = encode_app_data;
+        session_state = app_want_write;
         // Release to sync m_max_frag.
-        m_output_state.store(encode_app_data, std::memory_order_release);
-        Dout(dc::evio, "m_output_state = encode_app_data; m_max_frag = " << m_max_frag);
+        m_session_state.store(app_want_write, std::memory_order_release);
+        Dout(dc::evio, "m_session_state = app_want_write; m_max_frag = " << m_max_frag);
         m_connected_flags |= is_connected;
         if (m_connected)
           m_connected(allow_deletion_count, true);
@@ -347,15 +390,58 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
 
       ASSERT(res == TLS::REQUEST_SEND);
       // There is more to send.
+#endif
     }
   }
-  while (output_state == encode_app_data);
+  while (session_state == app_want_write);
+  m_session_state.store(session_state, std::memory_order_relaxed);
+  Dout(dc::tls, "Set m_session_state to session_state (" << session_state << ").");
 }
 
 void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
 {
   DoutEntering(dc::evio, "TLSSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
+  session_state_type session_state = m_session_state.load(std::memory_order_acquire);
+  Dout(dc::tls, "m_session_state == " << session_state);
 
+  if (session_state == handshake_want_read)
+  {
+    auto res = m_tls.do_handshake();
+    if (res == TLS::HANDSHAKE_COMPLETE)
+    {
+      // Handshake finished.
+      utils::FuzzyCondition condition_not_empty([this]{
+            return !m_obuffer->StreamBufConsumer::nothing_to_get();
+          });
+      // Start the output device if the buffer is non-empty.
+      if (condition_not_empty.is_momentary_true())
+      {
+        start_output_device(state_t::wat(m_state), condition_not_empty);
+        session_state = app_want_write;
+      }
+      else
+        session_state = app_idle_out;
+      Dout(dc::evio, "session_state == " << session_state);
+    }
+    else if (res == TLS::HANDSHAKE_WANT_WRITE)
+    {
+      // Read everything we wanted to read. Now we want to write again.
+      start_output_device();
+      session_state = handshake_want_write;
+      Dout(dc::evio, "session_state == " << session_state);
+    }
+    else if (res != TLS::HANDSHAKE_WANT_READ)
+    {
+      assert(false); // To be implemented.
+    }
+  }
+  else
+  {
+    Dout(dc::warning, "Unhandled state");
+    stop_input_device();
+  }
+
+#if 0
   for (;;)
   {
     char* encoded_data;
@@ -412,15 +498,15 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
         // message that needs to be sent to the peer. If this return code is hit we
         // should call matrixSslGetOutdata to retrieve the encoded outgoing data.
         {
-          std::unique_lock<std::mutex> lk(m_output_state_mutex);
+          std::unique_lock<std::mutex> lk(m_session_state_mutex);
           // This reply means that the last thing we sent to the server was a completed message,
           // this response is a reply to, which must have resulted in the thread that called
           // write_to_fd to process a TLS::SUCCESS from matrixSslSentData and thus stopped the
-          // output device. Aka, no other thread will be reading or writing m_output_state at
+          // output device. Aka, no other thread will be reading or writing m_session_state at
           // this point and it is safe for us to change it.
-          m_output_state.store(handshake_OutData_ready, std::memory_order_relaxed);
+          m_session_state.store(handshake_want_write, std::memory_order_relaxed);
         }
-        Dout(dc::evio, "m_output_state = handshake_OutData_ready");
+        Dout(dc::evio, "m_session_state = handshake_want_write");
         start_output_device();    // TLSSocket::write_to_fd calls TLS::matrixSslGetOutdata.
         // There is currently nothing more to read from the server, but no reason to stop monitoring the fd for input.
         return;
@@ -455,12 +541,12 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
         // ready to be written, so just start the output device. Also, the call to m_connected() might
         // start the output device, so the state should be set correctly here.
         {
-          std::unique_lock<std::mutex> lk(m_output_state_mutex);
+          std::unique_lock<std::mutex> lk(m_session_state_mutex);
           // This reply means that the last thing we sent to the server was a completed FINISHED message,
           // see the comment above for TLS::REQUEST_SEND.
-          m_output_state.store(encode_app_data, std::memory_order_release);
+          m_session_state.store(app_want_write, std::memory_order_release);
         }
-        Dout(dc::evio, "m_output_state = encode_app_data; m_max_frag = " << m_max_frag);
+        Dout(dc::evio, "m_session_state = app_want_write; m_max_frag = " << m_max_frag);
         // Do the m_connected() callback at this point  (as opposed to when the TCP connection was established),
         // as in most cases it will be used as a "you can now send/receive data" signal...
         m_connected_flags |= is_connected;
@@ -533,12 +619,14 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
     if (rlen < space)
       break;
   }
+#endif
 }
 
 void TLSSocket::data_received(int& allow_deletion_count, char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "TLSSocket::data_received({" << allow_deletion_count << "}, \"" << buf2str(new_data, rlen) << "\", " << rlen << ") [" << this << ']');
 
+#if 0
   // This function is both the Get Thread and the Put Thread; meaning that no other
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
@@ -606,6 +694,7 @@ buffer_full1:
   // someone has been feeding us undecodable data - just close the connection.
   Dout(dc::warning, "TLSSocket input buffer full?! Closing connection...");
   close(allow_deletion_count);
+#endif
 }
 
 void TLSSocket::set_sni(std::string const& ServerNameIndication)
@@ -630,7 +719,7 @@ void TLSSocket::tls_init(SocketAddress const& socket_address, std::string const&
     m_ServerNameIndication = socket_address.to_string(true);
   }
   m_tls.set_device(this, this);
-  std::atomic_init(&m_output_state, preconnect_out);
+  std::atomic_init(&m_session_state, preconnect);
   m_max_frag = s_max_frag_magic;
 }
 

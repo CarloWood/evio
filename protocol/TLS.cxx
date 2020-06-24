@@ -27,15 +27,16 @@
 
 #include "sys.h"
 #include "TLS.h"
-#include "matrixssl/matrixsslApi.h"
-#include "matrixssl/matrixssllib.h"
+#include <wolfssl/options.h>
+#include <wolfssl/ssl.h>
 #ifdef CWDEBUG
-#include "testkeys/RSA/2048_RSA.h"
-#include "testkeys/RSA/2048_RSA_KEY.h"
-#include "testkeys/RSA/ALL_RSA_CAS.h"
-#include "testkeys/PSK/tls13_psk.h"
+//#include "testkeys/RSA/2048_RSA.h"
+//#include "testkeys/RSA/2048_RSA_KEY.h"
+//#include "testkeys/RSA/ALL_RSA_CAS.h"
+//#include "testkeys/PSK/tls13_psk.h"
 #include "utils/debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
+#include <filesystem>
 #endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -47,23 +48,25 @@ NAMESPACE_DEBUG_CHANNELS_END
 namespace evio {
 namespace protocol {
 
-struct matrixssl_error_code
+struct wolfssl_error_code
 {
-  int32 mCode;
+  int mCode;
 
-  matrixssl_error_code(int32 code) : mCode(code) { }
-  operator int32() const { return mCode; }
+  wolfssl_error_code(int code) : mCode(code) { }
+  operator int() const { return mCode; }
 };
 
-std::error_code make_error_code(matrixssl_error_code);
+std::error_code make_error_code(wolfssl_error_code);
 
-std::ostream& operator<<(std::ostream& os, matrixssl_error_code code)
+std::ostream& operator<<(std::ostream& os, wolfssl_error_code code)
 {
   // Also support printing positive values as just integers...
-  int32 val = code;
+  int val = code;
+#if 0
   if (val > 0)
     os << val;
   else
+#endif
     os << make_error_code(code).category().message(code);
   return os;
 }
@@ -71,10 +74,10 @@ std::ostream& operator<<(std::ostream& os, matrixssl_error_code code)
 } // namespace protocol
 } // namespace evio
 
-// Register evio::matrixssl_error_code as valid error code.
+// Register evio::wolfssl_error_code as valid error code.
 namespace std {
 
-template<> struct is_error_code_enum<evio::protocol::matrixssl_error_code> : true_type { };
+template<> struct is_error_code_enum<evio::protocol::wolfssl_error_code> : true_type { };
 
 } // namespace std
 
@@ -85,8 +88,9 @@ std::once_flag TLS::s_flag;
 
 namespace {
 
-sslKeys_t* s_keys;
+WOLFSSL_CTX* s_ctx;
 
+#if 0
 // Signature algorithms that we are willing to support.
 // See the sigalg* macros in matrixssl/crypto/cryptolib.h for a complete list.
 uint16_t const sigalgs[] = {
@@ -144,22 +148,32 @@ psProtocolVersion_t const versions[] =
     0
 };
 constexpr int32_t versions_len = sizeof(versions) / sizeof(versions[0]) - 1;
+#endif
 
 } // namespace
 
+#if 0   // IOReadCtx / IOWriteCtx not set.
 #ifdef CWDEBUG
-std::ostream& operator<<(std::ostream& os, ssl_t& session)
+std::ostream& operator<<(std::ostream& os, WOLFSSL const& session)
 {
-  return os << static_cast<FileDescriptor*>(session.userPtr);
+  FileDescriptor const* input_device = static_cast<InputDevice*>(wolfSSL_GetIOReadCtx(const_cast<WOLFSSL*>(&session)));
+  FileDescriptor const* output_device = static_cast<OutputDevice*>(wolfSSL_GetIOWriteCtx(const_cast<WOLFSSL*>(&session)));
+  if (input_device == output_device)
+    os << input_device;
+  else
+    os << "{input:" << input_device << ",output:" << output_device << '}';
+  return os;
 }
+#endif
 #endif
 
 //inline
 auto TLS::session() const
 {
-  return static_cast<ssl_t*>(m_session);
+  return static_cast<WOLFSSL*>(m_session);
 }
 
+#if 0
 //inline
 auto TLS::session_opts() const
 {
@@ -171,32 +185,139 @@ auto TLS::session_id() const
 {
   return static_cast<sslSessionId_t*>(m_session_id);
 }
+#endif
 
-std::string TLS::get_CA_files()
+std::vector<std::string> TLS::get_CA_files()
 {
+  std::vector<std::string> CA_files;
+
   // TODO: Add other standard file paths and directories and support for environment variables
   // like REQUESTS_CA_BUNDLE, SSL_CERT_FILE and SSL_CERT_DIR.
   // See also https://serverfault.com/a/722646.
 
+  // Arch linux:
+  CA_files.push_back("/etc/ssl/cert.pem");
   // Debian/Ubuntu/Gentoo etc (debian based distributions):
-  return "/etc/ssl/certs/ca-certificates.crt";
+  //return "/etc/ssl/certs/ca-certificates.crt";
   // RHEL 6:
   // "/etc/pki/tls/certs/ca-bundle.crt"
   // RHEL 7 / CentOS:
   // "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
   // See also https://techjourney.net/update-add-ca-certificates-bundle-in-redhat-centos/
+
+#ifdef CWDEBUG
+  std::filesystem::path const wolfssl_CA_cert_file = "/usr/src/AUR/wolfssl/wolfssl-examples-git/certs/ca-cert.pem";
+  if (std::filesystem::exists(wolfssl_CA_cert_file))
+    CA_files.push_back(wolfssl_CA_cert_file);
+#endif
+
+  return CA_files;
 }
 
+class TLS::WolfSSL_Cleanup
+{
+ private:
+  bool m_need_deinitialization;
+
+ public:
+  WolfSSL_Cleanup() : m_need_deinitialization(false) { }
+  ~WolfSSL_Cleanup() { if (m_need_deinitialization) TLS::global_tls_deinitialization(); }
+  void initialized() { m_need_deinitialization = true; }
+};
+
+namespace {
+
+class WolfSSL_CTX
+{
+ private:
+  WOLFSSL_CTX* m_context;
+
+ public:
+  WolfSSL_CTX() : m_context(nullptr) { }
+  ~WolfSSL_CTX() { destroy(); }
+  void create()
+  {
+    // Create and initialize a WOLFSSL_CTX that will try to negotiate the highest possible version of TLS that is supported...
+    Dout(dc::tls|continued_cf, "wolfSSL_CTX_new(wolfTLS_client_method()) = ");
+    m_context = wolfSSL_CTX_new(wolfTLS_client_method());
+    Dout(dc::finish, m_context);
+    if (!m_context)
+    {
+      // This can be out of memory or a failure of InitSSL_Ctx() (BAD_MUTEX_E) or failure of wolfSSL_CertManagerNew_ex() (BAD_CERT_MANAGER_ERROR).
+      // However, the latter only fails when wc_InitMutex return 0, which exactly what BAD_MUTEX_E is.
+      // Moreover, InitSSL_Ctx() only fails when osMutexNew() return NULL. It seems very likely that this will never happen on linux,
+      // or - if it happens - is also caused by an out of memory (although I wasn't able to verify this).
+      THROW_FALERTC(ENOMEM, "wolfSSL_CTX_new returned NULL");
+    }
+#if defined(WOLFSSL_NO_TLS12) && !defined(WOLFSSL_TLS13)
+    // Seems wolfSSL was configured wrong.
+    #error "wolfSSL supports neither TLS v1.2 nor v1.3"
+#else
+    // ... but no less than TLS v1.2.
+    Dout(dc::tls|continued_cf, "wolfSSL_CTX_SetMinVersion(" << m_context << ", WOLFSSL_TLSV1_2) = ");
+    wolfssl_error_code ret = wolfSSL_CTX_SetMinVersion(m_context, WOLFSSL_TLSV1_2);
+    Dout(dc::finish, ret);
+    if (ret != WOLFSSL_SUCCESS)
+      THROW_ALERT("libwolfssl does not support TLS v1.2");
+#endif
+  }
+  void destroy() noexcept
+  {
+    if (m_context)
+    {
+      Dout(dc::tls, "wolfSSL_CTX_free(" << m_context << ")");
+      wolfSSL_CTX_free(m_context);
+    }
+    m_context = nullptr;
+  }
+
+  operator WOLFSSL_CTX*() const
+  {
+    return m_context;
+  }
+};
+
+// Global SSL context.
+WolfSSL_CTX s_context;
+
+// Cause TLS::global_tls_deinitialization() to be called when destructing global objects.
+TLS::WolfSSL_Cleanup s_cleanup_hook;
+
+} // namespace
+
+//static
 void TLS::global_tls_initialization()
 {
   DoutEntering(dc::tls|dc::notice, "evio::protocol::TLS::global_tls_initialization()");
 
-  Dout(dc::tls|continued_cf, "matrixSslOpenWithConfig(\"" << MATRIXSSL_CONFIG << "\") = ");
-  matrixssl_error_code ret = matrixSslOpen();
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslOpen");
+  // Call this to have wolfssl print debug output (wolfssl must be configured with --enable-debug).
+  //wolfSSL_Debugging_ON();
 
+  Dout(dc::tls|continued_cf, "wolfSSL_Init() = ");
+  wolfssl_error_code ret = wolfSSL_Init();
+  Dout(dc::finish, ret);
+  if (ret != WOLFSSL_SUCCESS)
+    THROW_FALERTC(ret, "wolfSSL_Init");
+
+  // Create WOLFSSL_CTX.
+  s_context.create();
+
+  // Load client certificates into WOLFSSL_CTX.
+  for (auto&& CA_file : get_CA_files())
+  {
+    Dout(dc::tls|continued_cf, "wolfSSL_CTX_load_verify_locations(s_context, \"" << CA_file << "\", NULL) = ");
+    ret = wolfSSL_CTX_load_verify_locations(s_context, CA_file.c_str(), NULL);
+    Dout(dc::finish, ret);
+    if (ret != SSL_SUCCESS) {
+      s_context.destroy();
+      THROW_FALERTC(ret, "Failed to load Certificate Authority file \"[CA_FILE]\".", AIArgs("[CA_FILE]", CA_file));
+    }
+  }
+
+  // Initialization will succeed (no more throws follow).
+  s_cleanup_hook.initialized();
+
+#if 0
   Dout(dc::tls|continued_cf, "matrixSslNewKeys(&s_keys, NULL) = ");
   ret = matrixSslNewKeys(&s_keys, NULL);
   Dout(dc::finish, ret);
@@ -216,8 +337,10 @@ void TLS::global_tls_initialization()
     s_keys = nullptr;
     THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
   }
+#endif
 
 #ifdef CWDEBUG
+#if 0
   // Load RSA2048 test key pair.
   unsigned char const* cert_buf = RSA2048;
   int32 cert_buf_len = sizeof(RSA2048);
@@ -250,25 +373,23 @@ void TLS::global_tls_initialization()
   Dout(dc::finish, ret);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslLoadTls13Psk");
+#endif
 #endif // CWDEBUG
 }
 
-void TLS::global_tls_deinitialization()
+//static
+void TLS::global_tls_deinitialization() noexcept
 {
   DoutEntering(dc::tls|dc::notice, "evio::protocol::TLS::global_tls_deinitialization()");
 
-  if (s_keys)
-  {
-    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
-    matrixSslDeleteKeys(s_keys);
-    s_keys = nullptr;
-  }
+  // Destroy global SSL context.
+  s_context.destroy();
 
-  Dout(dc::tls, "matrixSslClose()");
-  matrixSslClose();
+  Dout(dc::tls, "wolfSSL_Cleanup()");
+  wolfSSL_Cleanup();
 }
 
-TLS::TLS() : m_session(nullptr), m_session_opts(nullptr), m_session_id(nullptr)
+TLS::TLS() : m_session(nullptr) /*, m_session_opts(nullptr), m_session_id(nullptr)*/
 {
   DoutEntering(dc::tls, "TLS::TLS() [" << this << "]");
   std::call_once(s_flag, global_tls_initialization);
@@ -277,18 +398,31 @@ TLS::TLS() : m_session(nullptr), m_session_opts(nullptr), m_session_id(nullptr)
 TLS::~TLS()
 {
   DoutEntering(dc::tls, "TLS::~TLS()");
-  Dout(dc::tls, "matrixSslDeleteSession(" << session() << ")");
-  matrixSslDeleteSession(session());
-  free(m_session_opts);
+  Dout(dc::tls, "wolfSSL_free(" << session() << ")");
+  // Not documented, but you can call wolfSSL_free with a nullptr, which is a no-op.
+  wolfSSL_free(session());
 }
 
+// Get SSL error string.
+//static
+std::string TLS::session_error_string(int session_error)
+{
+  std::string errorString(WOLFSSL_MAX_ERROR_SZ, '\0');  // Reserve space.
+  wolfSSL_ERR_error_string(session_error, errorString.data());
+  errorString.resize(errorString.find('\0'));           // Truncate to C string length.
+  return errorString;
+}
+
+#if 0
 // Certificate callback. See section 6 in the API manual for details.
 static int32_t certCb(ssl_t* UNUSED_ARG(ssl), psX509Cert_t* UNUSED_ARG(cert), int32_t alert)
 {
   // No extra checks of our own; simply accept the result of MatrixSSL's internal certificate validation.
   return alert;
 }
+#endif
 
+#if 0
 static int32_t extensionCb(ssl_t* UNUSED_ARG(ssl), uint16_t extType, uint8_t UNUSED_ARG(extLen), void* e)
 {
   if (extType == EXT_ALPN)
@@ -307,10 +441,28 @@ static int32_t extensionCb(ssl_t* UNUSED_ARG(ssl), uint16_t extType, uint8_t UNU
   }
   return PS_SUCCESS;
 }
+#endif
 
 void TLS::session_init(std::string const& ServerNameIndication)    // SNI
 {
   DoutEntering(dc::tls, "TLS::session_init(\"" << ServerNameIndication << "\")");
+  // Only call session_init() once.
+  ASSERT(!m_session);
+  Dout(dc::tls|continued_cf, "wolfSSL_new(" << s_context << ") = ");
+  m_session = wolfSSL_new(s_context);
+  Dout(dc::finish, m_session);
+  if (!m_session)
+    THROW_FALERT("wolfSSL_new returned NULL");
+#if 0
+  Dout(dc::tls|continued_cf, "wolfSSL_UseSNI(" << session() << ", WOLFSSL_SNI_HOST_NAME, \"" << ServerNameIndication << "\", " << ServerNameIndication.length() << ") = ");
+  wolfssl_error_code ret = wolfSSL_UseSNI(session(), WOLFSSL_SNI_HOST_NAME, ServerNameIndication.c_str(), ServerNameIndication.length());
+  Dout(dc::finish, ret);
+  if (ret != WOLFSSL_SUCCESS)
+    THROW_FALERTC(ret, "wolfSSL_UseSNI([SSL], WOLFSSL_SNI_HOST_NAME, [SNI], [SNILEN])",
+        AIArgs("[SSL]", session())("SNI", ServerNameIndication)("SNILEN", ServerNameIndication.length()));
+#endif
+
+#if 0
   // Only call session_init() once.
   ASSERT(!m_session_opts);
   m_session_opts = calloc(sizeof(sslSessOpts_t), 1);
@@ -412,8 +564,50 @@ void TLS::session_init(std::string const& ServerNameIndication)    // SNI
   matrixSslDeleteHelloExtension(extension);
   if (ret < 0)
     THROW_FALERTC(ret, "matrixSslDeleteHelloExtension");
+#endif
 }
 
+void TLS::set_fd(int fd)
+{
+  Dout(dc::tls|continued_cf, "wolfSSL_set_fd(" << session() << ", " << fd << ") = ");
+  wolfssl_error_code ret = wolfSSL_set_fd(session(), fd);
+  Dout(dc::finish, ret);
+  if (AI_UNLIKELY(ret != WOLFSSL_SUCCESS))
+    THROW_FALERTC(ret, "wolfSSL_set_fd");
+}
+
+TLS::result_type TLS::do_handshake()
+{
+  Dout(dc::tls|continued_cf, "wolfSSL_connect(" << session() << ") = ");
+  wolfssl_error_code ssl_result = wolfSSL_connect(session());
+#ifdef CWDEBUG
+  if (ssl_result == WOLFSSL_FATAL_ERROR)
+  {
+    wolfssl_error_code session_error = wolfSSL_get_error(session(), 0);
+    Dout(dc::finish, (int)ssl_result << " (" << session_error << ": " << session_error_string(session_error) << ")");
+  }
+  else
+    Dout(dc::finish, ssl_result);
+#endif
+  if (ssl_result == SSL_SUCCESS)
+    return HANDSHAKE_COMPLETE;
+  else if (wolfSSL_want_write(session()))
+  {
+    Dout(dc::tls, "wolfSSL_want_write(" << session() << ") returned true.");
+    return HANDSHAKE_WANT_WRITE;
+  }
+  else if (wolfSSL_want_read(session()))
+  {
+    Dout(dc::tls, "wolfSSL_want_read(" << session() << ") returned true.");
+    return HANDSHAKE_WANT_READ;
+  }
+  else
+  {
+    assert(false); // To be implemented.
+  }
+}
+
+#if 0
 int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
 {
   Dout(dc::tls|continued_cf, "matrixSslGetOutdata({" << *session() << "}, {");
@@ -571,6 +765,7 @@ uint32_t TLS::get_max_frag() const
   ASSERT(0 < max_frag && max_frag <= 0x4000);
   return max_frag;
 }
+#endif
 
 //============================================================================
 // Error code handling.
@@ -597,7 +792,7 @@ std::string ErrorCategory::message(int ev) const
   switch (static_cast<error_codes>(ev))
   {
     default:
-      return "GNUTLS ErrorCategory::message (unrecognized error)";
+      return "wolfTLS ErrorCategory::message (unrecognized error)";
   }
 }
 
@@ -611,71 +806,248 @@ std::error_code make_error_code(error_codes code)
 }
 
 //----------------------------------------------------------------------------
-// matrixssl error codes (as returned by matrixSslOpen, matrixSslNewKeys, matrixSslLoadRsaKeys, etc)
+// wolfssl error codes (as returned by wolfssl_connect, etc)
 
 namespace {
 
-struct MatrixSSLErrorCategory : std::error_category
+struct WolfSSLErrorCategory : std::error_category
 {
   char const* name() const noexcept override;
-  std::string message(int32 ev) const override;
+  std::string message(int ev) const override;
 };
 
-char const* MatrixSSLErrorCategory::name() const noexcept
+char const* WolfSSLErrorCategory::name() const noexcept
 {
-  return "matrixssl";
+  return "wolfssl";
 }
 
-std::string MatrixSSLErrorCategory::message(int32 ev) const
+std::string WolfSSLErrorCategory::message(int ev) const
 {
   switch (ev)
   {
-    // core API errors.
-    AI_CASE_RETURN(PS_SUCCESS);
-    AI_CASE_RETURN(PS_FAILURE);
-    AI_CASE_RETURN(PS_ARG_FAIL);
-    AI_CASE_RETURN(PS_PLATFORM_FAIL);
-    AI_CASE_RETURN(PS_MEM_FAIL);
-    AI_CASE_RETURN(PS_LIMIT_FAIL);
-    AI_CASE_RETURN(PS_UNSUPPORTED_FAIL);
-    AI_CASE_RETURN(PS_DISABLED_FEATURE_FAIL);
-    AI_CASE_RETURN(PS_PROTOCOL_FAIL);
-    AI_CASE_RETURN(PS_TIMEOUT_FAIL);
-    AI_CASE_RETURN(PS_INTERRUPT_FAIL);
-    AI_CASE_RETURN(PS_PENDING);
-    AI_CASE_RETURN(PS_EAGAIN);
-    AI_CASE_RETURN(PS_OUTPUT_LENGTH);
-    AI_CASE_RETURN(PS_HOSTNAME_RESOLUTION);
-    AI_CASE_RETURN(PS_CONNECT);
-    AI_CASE_RETURN(PS_INSECURE_PROTOCOL);
-    AI_CASE_RETURN(PS_VERIFICATION_FAILED);
-
+    AI_CASE_RETURN(SSL_SUCCESS);
+    // wolfSSL_Init errors.
+    //AI_CASE_RETURN(BAD_MUTEX_E);
+    //AI_CASE_RETURN(WC_INIT_E);          // wolfCrypt initialization error.
+    // wolfSSL_CTX_load_verify_locations errors.
+    AI_CASE_RETURN(SSL_FAILURE);        // Will be returned if ctx is NULL, or if both file and path are NULL.
+    AI_CASE_RETURN(SSL_BAD_FILETYPE);   // Will be returned if the file is the wrong format.
+    AI_CASE_RETURN(SSL_BAD_FILE);       // Will be returned if the file doesn’t exist, can’t be read, or is corrupted.
+    //AI_CASE_RETURN(MEMORY_E);           // Will be returned if an out of memory condition occurs.
+    //AI_CASE_RETURN(ASN_INPUT_E);        // Will be returned if Base16 decoding fails on the file.
+    //AI_CASE_RETURN(ASN_BEFORE_DATE_E);  // Will be returned if the current date is before the before date.
+    //AI_CASE_RETURN(ASN_AFTER_DATE_E);   // Will be returned if the current date is after the after date.
+    //AI_CASE_RETURN(BUFFER_E);           // Will be returned if a chain buffer is bigger than the receiving buffer.
+    //AI_CASE_RETURN(BAD_PATH_ERROR);     // Will be returned if opendir() fails when trying to open path.
+    // wolfSSL_connect errors.
+    AI_CASE_RETURN(SSL_FATAL_ERROR);    // Will be returned if an error occurred. To get a more detailed error code, call wolfSSL_get_error().
+    // wolfSSL_get_error.
+    AI_CASE_RETURN(UNSUPPORTED_SUITE);
+    AI_CASE_RETURN(INPUT_CASE_ERROR);
+    AI_CASE_RETURN(PREFIX_ERROR);
+    AI_CASE_RETURN(MEMORY_ERROR);
+    AI_CASE_RETURN(VERIFY_FINISHED_ERROR);
+    AI_CASE_RETURN(VERIFY_MAC_ERROR);
+    AI_CASE_RETURN(PARSE_ERROR);
+    AI_CASE_RETURN(SIDE_ERROR);
+    AI_CASE_RETURN(NO_PEER_CERT);
+    AI_CASE_RETURN(UNKNOWN_HANDSHAKE_TYPE);
+    AI_CASE_RETURN(SOCKET_ERROR_E);
+    AI_CASE_RETURN(SOCKET_NODATA);
+    AI_CASE_RETURN(INCOMPLETE_DATA);
+    AI_CASE_RETURN(UNKNOWN_RECORD_TYPE);
+    AI_CASE_RETURN(DECRYPT_ERROR);
+    AI_CASE_RETURN(FATAL_ERROR);
+    AI_CASE_RETURN(ENCRYPT_ERROR);
+    AI_CASE_RETURN(FREAD_ERROR);
+    AI_CASE_RETURN(NO_PEER_KEY);
+    AI_CASE_RETURN(NO_PRIVATE_KEY);
+    AI_CASE_RETURN(NO_DH_PARAMS);
+    AI_CASE_RETURN(RSA_PRIVATE_ERROR);
+    AI_CASE_RETURN(MATCH_SUITE_ERROR);
+    AI_CASE_RETURN(COMPRESSION_ERROR);
+    AI_CASE_RETURN(BUILD_MSG_ERROR);
+    AI_CASE_RETURN(BAD_HELLO);
+    AI_CASE_RETURN(DOMAIN_NAME_MISMATCH);
+    AI_CASE_RETURN(IPADDR_MISMATCH);
+    AI_CASE_RETURN(WANT_READ);
+    AI_CASE_RETURN(WOLFSSL_ERROR_WANT_READ);
+    AI_CASE_RETURN(NOT_READY_ERROR);
+    AI_CASE_RETURN(VERSION_ERROR);
+    AI_CASE_RETURN(WANT_WRITE);
+    AI_CASE_RETURN(WOLFSSL_ERROR_WANT_WRITE);
+    AI_CASE_RETURN(BUFFER_ERROR);
     // crypto API errors.
-    AI_CASE_RETURN(PS_PARSE_FAIL);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_BC);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_DN);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_SIG);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_REVOKED);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_EXTENSION);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_PATH_LEN);
-    AI_CASE_RETURN(PS_CERT_AUTH_FAIL_AUTHKEY);
-    AI_CASE_RETURN(PS_SIGNATURE_MISMATCH);
-    AI_CASE_RETURN(PS_AUTH_FAIL);
-    AI_CASE_RETURN(PS_MESSAGE_UNSUPPORTED);
-    AI_CASE_RETURN(PS_VERSION_UNSUPPORTED);
-    AI_CASE_RETURN(PS_SELFTEST_FAILED);
+    AI_CASE_RETURN(OPEN_RAN_E);
+    AI_CASE_RETURN(READ_RAN_E);
+    AI_CASE_RETURN(WINCRYPT_E);
+    AI_CASE_RETURN(CRYPTGEN_E);
+    AI_CASE_RETURN(RAN_BLOCK_E);
+    AI_CASE_RETURN(BAD_MUTEX_E);
+    AI_CASE_RETURN(WC_TIMEOUT_E);
+    AI_CASE_RETURN(WC_PENDING_E);
+    AI_CASE_RETURN(WC_NOT_PENDING_E);
+    AI_CASE_RETURN(MP_INIT_E);
+    AI_CASE_RETURN(MP_READ_E);
+    AI_CASE_RETURN(MP_EXPTMOD_E);
+    AI_CASE_RETURN(MP_TO_E);
+    AI_CASE_RETURN(MP_SUB_E);
+    AI_CASE_RETURN(MP_ADD_E);
+    AI_CASE_RETURN(MP_MUL_E);
+    AI_CASE_RETURN(MP_MULMOD_E);
+    AI_CASE_RETURN(MP_MOD_E);
+    AI_CASE_RETURN(MP_INVMOD_E);
+    AI_CASE_RETURN(MP_CMP_E);
+    AI_CASE_RETURN(MP_ZERO_E);
+    AI_CASE_RETURN(MEMORY_E);
+    AI_CASE_RETURN(VAR_STATE_CHANGE_E);
+    AI_CASE_RETURN(RSA_WRONG_TYPE_E);
+    AI_CASE_RETURN(RSA_BUFFER_E);
+    AI_CASE_RETURN(BUFFER_E);
+    AI_CASE_RETURN(ALGO_ID_E);
+    AI_CASE_RETURN(PUBLIC_KEY_E);
+    AI_CASE_RETURN(DATE_E);
+    AI_CASE_RETURN(SUBJECT_E);
+    AI_CASE_RETURN(ISSUER_E);
+    AI_CASE_RETURN(CA_TRUE_E);
+    AI_CASE_RETURN(EXTENSIONS_E);
+    AI_CASE_RETURN(ASN_PARSE_E);
+    AI_CASE_RETURN(ASN_VERSION_E);
+    AI_CASE_RETURN(ASN_GETINT_E);
+    AI_CASE_RETURN(ASN_RSA_KEY_E);
+    AI_CASE_RETURN(ASN_OBJECT_ID_E);
+    AI_CASE_RETURN(ASN_TAG_NULL_E);
+    AI_CASE_RETURN(ASN_EXPECT_0_E);
+    AI_CASE_RETURN(ASN_BITSTR_E);
+    AI_CASE_RETURN(ASN_UNKNOWN_OID_E);
+    AI_CASE_RETURN(ASN_DATE_SZ_E);
+    AI_CASE_RETURN(ASN_BEFORE_DATE_E);
+    AI_CASE_RETURN(ASN_AFTER_DATE_E);
+    AI_CASE_RETURN(ASN_SIG_OID_E);
+    AI_CASE_RETURN(ASN_TIME_E);
+    AI_CASE_RETURN(ASN_INPUT_E);
+    AI_CASE_RETURN(ASN_SIG_CONFIRM_E);
+    AI_CASE_RETURN(ASN_SIG_HASH_E);
+    AI_CASE_RETURN(ASN_SIG_KEY_E);
+    AI_CASE_RETURN(ASN_DH_KEY_E);
+    AI_CASE_RETURN(ASN_NTRU_KEY_E);
+    AI_CASE_RETURN(ASN_CRIT_EXT_E);
+    AI_CASE_RETURN(ASN_ALT_NAME_E);
+    AI_CASE_RETURN(ECC_BAD_ARG_E);
+    AI_CASE_RETURN(ASN_ECC_KEY_E);
+    AI_CASE_RETURN(ECC_CURVE_OID_E);
+    AI_CASE_RETURN(BAD_FUNC_ARG);
+    AI_CASE_RETURN(NOT_COMPILED_IN);
+    AI_CASE_RETURN(UNICODE_SIZE_E);
+    AI_CASE_RETURN(NO_PASSWORD);
+    AI_CASE_RETURN(ALT_NAME_E);
+    AI_CASE_RETURN(AES_GCM_AUTH_E);
+    AI_CASE_RETURN(AES_CCM_AUTH_E);
+    AI_CASE_RETURN(ASYNC_INIT_E);
+    AI_CASE_RETURN(COMPRESS_INIT_E);
+    AI_CASE_RETURN(COMPRESS_E);
+    AI_CASE_RETURN(DECOMPRESS_INIT_E);
+    AI_CASE_RETURN(DECOMPRESS_E);
+    AI_CASE_RETURN(BAD_ALIGN_E);
+    AI_CASE_RETURN(ASN_NO_SIGNER_E);
+    AI_CASE_RETURN(ASN_CRL_CONFIRM_E);
+    AI_CASE_RETURN(ASN_CRL_NO_SIGNER_E);
+    AI_CASE_RETURN(ASN_OCSP_CONFIRM_E);
+    AI_CASE_RETURN(ASN_NO_PEM_HEADER);
+    AI_CASE_RETURN(BAD_STATE_E);
+    AI_CASE_RETURN(BAD_PADDING_E);
+    AI_CASE_RETURN(REQ_ATTRIBUTE_E);
+    AI_CASE_RETURN(PKCS7_OID_E);
+    AI_CASE_RETURN(PKCS7_RECIP_E);
+    AI_CASE_RETURN(WC_PKCS7_WANT_READ_E);
+    AI_CASE_RETURN(FIPS_NOT_ALLOWED_E);
+    AI_CASE_RETURN(ASN_NAME_INVALID_E);
+    AI_CASE_RETURN(RNG_FAILURE_E);
+    AI_CASE_RETURN(HMAC_MIN_KEYLEN_E);
+    AI_CASE_RETURN(RSA_PAD_E);
+    AI_CASE_RETURN(LENGTH_ONLY_E);
+    AI_CASE_RETURN(IN_CORE_FIPS_E);
+    AI_CASE_RETURN(AES_KAT_FIPS_E);
+    AI_CASE_RETURN(DES3_KAT_FIPS_E);
+    AI_CASE_RETURN(HMAC_KAT_FIPS_E);
+    AI_CASE_RETURN(RSA_KAT_FIPS_E);
+    AI_CASE_RETURN(DRBG_KAT_FIPS_E);
+    AI_CASE_RETURN(DRBG_CONT_FIPS_E);
+    AI_CASE_RETURN(AESGCM_KAT_FIPS_E);
+    AI_CASE_RETURN(THREAD_STORE_KEY_E);
+    AI_CASE_RETURN(THREAD_STORE_SET_E);
+    AI_CASE_RETURN(MAC_CMP_FAILED_E);
+    AI_CASE_RETURN(IS_POINT_E);
+    AI_CASE_RETURN(ECC_INF_E);
+    AI_CASE_RETURN(ECC_OUT_OF_RANGE_E);
+    AI_CASE_RETURN(ECC_PRIV_KEY_E);
+    AI_CASE_RETURN(SRP_CALL_ORDER_E);
+    AI_CASE_RETURN(SRP_VERIFY_E);
+    AI_CASE_RETURN(SRP_BAD_KEY_E);
+    AI_CASE_RETURN(ASN_NO_SKID);
+    AI_CASE_RETURN(ASN_NO_AKID);
+    AI_CASE_RETURN(ASN_NO_KEYUSAGE);
+    AI_CASE_RETURN(SKID_E);
+    AI_CASE_RETURN(AKID_E);
+    AI_CASE_RETURN(KEYUSAGE_E);
+    AI_CASE_RETURN(EXTKEYUSAGE_E);
+    AI_CASE_RETURN(CERTPOLICIES_E);
+    AI_CASE_RETURN(WC_INIT_E);
+    AI_CASE_RETURN(SIG_VERIFY_E);
+    AI_CASE_RETURN(BAD_COND_E);
+    AI_CASE_RETURN(SIG_TYPE_E);
+    AI_CASE_RETURN(HASH_TYPE_E);
+    AI_CASE_RETURN(WC_KEY_SIZE_E);
+    AI_CASE_RETURN(ASN_COUNTRY_SIZE_E);
+    AI_CASE_RETURN(MISSING_RNG_E);
+    AI_CASE_RETURN(ASN_PATHLEN_SIZE_E);
+    AI_CASE_RETURN(ASN_PATHLEN_INV_E);
+    AI_CASE_RETURN(BAD_KEYWRAP_ALG_E);
+    AI_CASE_RETURN(BAD_KEYWRAP_IV_E);
+    AI_CASE_RETURN(WC_CLEANUP_E);
+    AI_CASE_RETURN(ECC_CDH_KAT_FIPS_E);
+    AI_CASE_RETURN(DH_CHECK_PUB_E);
+    AI_CASE_RETURN(BAD_PATH_ERROR);
+    AI_CASE_RETURN(ASYNC_OP_E);
+    AI_CASE_RETURN(BAD_OCSP_RESPONDER);
+    AI_CASE_RETURN(ECC_PRIVATEONLY_E);
+    AI_CASE_RETURN(WC_HW_E);
+    AI_CASE_RETURN(WC_HW_WAIT_E);
+    AI_CASE_RETURN(PSS_SALTLEN_E);
+    AI_CASE_RETURN(PRIME_GEN_E);
+    AI_CASE_RETURN(BER_INDEF_E);
+    AI_CASE_RETURN(RSA_OUT_OF_RANGE_E);
+    AI_CASE_RETURN(RSAPSS_PAT_FIPS_E);
+    AI_CASE_RETURN(ECDSA_PAT_FIPS_E);
+    AI_CASE_RETURN(DH_KAT_FIPS_E);
+    AI_CASE_RETURN(AESCCM_KAT_FIPS_E);
+    AI_CASE_RETURN(SHA3_KAT_FIPS_E);
+    AI_CASE_RETURN(ECDHE_KAT_FIPS_E);
+    AI_CASE_RETURN(AES_GCM_OVERFLOW_E);
+    AI_CASE_RETURN(AES_CCM_OVERFLOW_E);
+    AI_CASE_RETURN(RSA_KEY_PAIR_E);
+    AI_CASE_RETURN(DH_CHECK_PRIV_E);
+    AI_CASE_RETURN(WC_AFALG_SOCK_E);
+    AI_CASE_RETURN(WC_DEVCRYPTO_E);
+    AI_CASE_RETURN(ZLIB_INIT_ERROR);
+    AI_CASE_RETURN(ZLIB_COMPRESS_ERROR);
+    AI_CASE_RETURN(ZLIB_DECOMPRESS_ERROR);
+    AI_CASE_RETURN(PKCS7_NO_SIGNER_E);
+    AI_CASE_RETURN(CRYPTOCB_UNAVAILABLE);
+    AI_CASE_RETURN(PKCS7_SIGNEEDS_CHECK);
+    AI_CASE_RETURN(PSS_SALTLEN_RECOVER_E);
+    AI_CASE_RETURN(ASN_SELF_SIGNED_E);
   }
   return "Unknown error " + std::to_string(ev);
 }
 
-MatrixSSLErrorCategory const theMatrixSSLErrorCategory { };
+WolfSSLErrorCategory const theWolfSSLErrorCategory { };
 
 } // namespace
 
-std::error_code make_error_code(matrixssl_error_code code)
+std::error_code make_error_code(wolfssl_error_code code)
 {
-  return std::error_code(static_cast<int32>(code), theMatrixSSLErrorCategory);
+  return std::error_code(static_cast<int>(code), theWolfSSLErrorCategory);
 }
 
 } // namespace protocol

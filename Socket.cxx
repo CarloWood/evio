@@ -159,7 +159,7 @@ void Socket::write_to_fd(int& allow_deletion_count, int fd)
     if (m_connected)
     {
       m_connected(allow_deletion_count, true); // Signal successful connect.
-      // Now there is not longer a need to monitor the fd for writablity if the output buffer is empty.
+      // Now there is no longer a need to monitor the fd for writablity if the output buffer is empty.
       if (m_obuffer)
       {
         utils::FuzzyCondition condition_nothing_to_get([m_obuffer = m_obuffer]{

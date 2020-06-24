@@ -27,12 +27,13 @@
 
 #pragma once
 
-#include <mutex>
 #include "evio/FileDescriptor.h"
 #include "evio/Source.h"
 #include "evio/Sink.h"
 #include "evio/SocketAddress.h"
 #include "debug.h"
+#include <mutex>
+#include <vector>
 #ifdef CWDEBUG
 #include <libcwd/buf2str.h>
 #endif
@@ -75,26 +76,32 @@ struct TLSSink : public InputDecoder
 
 class TLS
 {
+ public:
+  class WolfSSL_Cleanup;
+
  private:
   static std::once_flag s_flag;
-  static std::string get_CA_files();                    // Returns a semi-colon separated list of all trusted CA certificate bundles that we could find.
+  static std::vector<std::string> get_CA_files();       // Returns a trusted CA certificate bundle.
   static void global_tls_initialization();
-  static void global_tls_deinitialization();
+  static void global_tls_deinitialization() noexcept;
+  static std::string session_error_string(int session_error);     // Return a descriptive string for the last error on the session.
 
   boost::intrusive_ptr<InputDevice> m_input_device;     // The underlaying input device.
   boost::intrusive_ptr<OutputDevice> m_output_device;   // The underlaying output device.
-  void* m_session;                                      // ssl_t* m_session; Session state.
-  void* m_session_opts;                                 // sslSessOpts_t* m_session_opts; Session options.
-  void* m_session_id;                                   // sslSessionId_t* m_session_id; Session resume data.
+  void* m_session;                                      // WOLFSSL* m_session; Session configuration and state.
+//  void* m_session_opts;                                 // sslSessOpts_t* m_session_opts; Session options.
+//  void* m_session_id;                                   // sslSessionId_t* m_session_id; Session resume data.
 
   // Accessor for m_session.
-  inline auto session() const;                          // Returns a ssl_t* const.
+  inline auto session() const;                          // Returns a WOLFSSL* const.
 
+#if 0
   // Accessor for m_session_opts.
   inline auto session_opts() const;                     // Returns a sslSessOpts_t* const.
 
   // Accessor for m_session_id.
   inline auto session_id() const;                       // Returns a sslSessionId_t* const.
+#endif
 
  public:
   TLS();
@@ -108,9 +115,14 @@ class TLS
   }
 
   void session_init(std::string const& ServerNameIndication);
+  void set_fd(int fd);
 
-  enum data_result_type
+  enum result_type
   {
+    HANDSHAKE_WANT_WRITE,
+    HANDSHAKE_WANT_READ,
+    HANDSHAKE_COMPLETE
+#if 0
     SUCCESS,
     REQUEST_SEND,
     REQUEST_RECV,
@@ -120,8 +132,12 @@ class TLS
     RECEIVED_ALERT_FATAL,
     APP_DATA,
     APP_DATA_COMPRESSED
+#endif
   };
 
+  result_type do_handshake();
+
+#if 0
   // Called from TLSSocket::write_to_fd.
   int32_t matrixSslGetOutdata(char** buf_ptr);
   data_result_type matrixSslSentData(ssize_t wlen);
@@ -131,6 +147,7 @@ class TLS
   data_result_type matrixSslProcessedData(char const** buf_ptr, uint32_t* buf_len_ptr);
   int32_t matrixSslEncodeToOutdata(char* buf, uint32_t len);
   uint32_t get_max_frag() const;
+#endif
 };
 
 enum error_codes
