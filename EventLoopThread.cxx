@@ -734,6 +734,8 @@ bool EventLoopThread::stop_if(FileDescriptor::state_t::wat const& state_w, utils
   if (AI_UNLIKELY(condition.is_false()))
   {
     Dout(dc::warning, "Calling EventLoopThread::stop_if(" << condition << ", " << active_flag << ", " << device << ") -- don't call stop_if when it is sure that it will fail?!");
+    // Revert the clear of the active flag.
+    state_w->m_flags.set_active(active_flag);
     return false;
   }
 
