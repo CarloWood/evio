@@ -78,13 +78,17 @@ class InputDevice : public virtual FileDescriptor
 
  protected:
   friend class Sink;
+  bool start_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void start_input_device(state_t::wat const& state_w);
+  bool stop_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
   void stop_input_device(state_t::wat const& state_w);
-  void remove_input_device(int& allow_deletion_count, state_t::wat const& state_w);
-  void disable_input_device();
+  bool disable_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
+  void disable_input_device(state_t::wat const& state_w);
   void enable_input_device();
+  void remove_input_device(int& allow_deletion_count, state_t::wat const& state_w);
 
   [[gnu::always_inline]] void stop_input_device() { stop_input_device(state_t::wat(m_state)); }
+  [[gnu::always_inline]] void disable_input_device() { disable_input_device(state_t::wat(m_state)); }
   [[gnu::always_inline]] void remove_input_device(int& allow_deletion_count) { remove_input_device(allow_deletion_count, state_t::wat(m_state)); }
  public: // ONLY public because StreamBuf::do_restart_input_device_if_needed() needs to call this :/
   [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }

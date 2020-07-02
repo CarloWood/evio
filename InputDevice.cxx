@@ -80,6 +80,18 @@ void InputDevice::init_input_device(state_t::wat const& state_w)
 #endif
 }
 
+bool InputDevice::start_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+{
+  DoutEntering(dc::evio, "InputDevice::start_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  // Call InputDevice::init before calling InputDevice::start_input_device.
+  ASSERT(state_w->m_flags.is_r_open());
+  // Don't call start_input_device with a condition that wasn't transitory_true in the first place.
+  // That is, if it is false - don't call this (it will fail anyway) and if it is true then there is
+  // no need for the condition (just call start_input_device without condition).
+  ASSERT(condition.is_transitory_true());
+  return EventLoopThread::instance().start_if(state_w, condition, this);
+}
+
 void InputDevice::start_input_device(state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "InputDevice::start_input_device({" << *state_w << "}) [" << this << ']');
@@ -102,6 +114,18 @@ void InputDevice::remove_input_device(int& allow_deletion_count, state_t::wat co
   EventLoopThread::instance().remove(allow_deletion_count, state_w, this);
 }
 
+bool InputDevice::stop_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+{
+  DoutEntering(dc::evio, "InputDevice::stop_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  // Call InputDevice::init before calling InputDevice::stop_input_device.
+  ASSERT(state_w->m_flags.is_r_open());
+  // Don't call stop_input_device with a condition that wasn't transitory_true in the first place.
+  // That is, if it is false - don't call this (it will fail anyway) and if it is true then there is
+  // no need for the condition (just call stop_input_device without condition).
+  ASSERT(condition.is_transitory_true());
+  return EventLoopThread::instance().stop_if(state_w, condition, this);
+}
+
 void InputDevice::stop_input_device(state_t::wat const& state_w)
 {
   // It is normal to call stop_input_device() when we are already stopped (ie, from close()),
@@ -114,10 +138,21 @@ void InputDevice::stop_input_device(state_t::wat const& state_w)
   // A subsequent call to start_input_device() will resume handling it.
 }
 
-void InputDevice::disable_input_device()
+bool InputDevice::disable_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::evio, "InputDevice::disable_input_device()");
-  state_t::wat state_w(m_state);
+  DoutEntering(dc::evio, "InputDevice::disable_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  if (!state_w->m_flags.is_r_disabled())
+  {
+    state_w->m_flags.set_r_disabled();
+    return stop_input_device(state_w, condition);
+  }
+  // We are indeed stopped now.
+  return true;
+}
+
+void InputDevice::disable_input_device(state_t::wat const& state_w)
+{
+  DoutEntering(dc::evio, "InputDevice::disable_input_device(" << *state_w << ") [" << this << ']');
   if (!state_w->m_flags.is_r_disabled())
   {
     state_w->m_flags.set_r_disabled();
