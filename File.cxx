@@ -40,7 +40,7 @@ void File::init(int fd, std::string const& filename)
 {
   m_filename = filename;
   state_t::wat(m_state)->m_flags.set_regular_file();
-  FileDescriptor::init(fd, false);      // There is no need to be non-blocking for a regular file.
+  fd_init(fd, false);      // There is no need to be non-blocking for a regular file.
 }
 
 void File::open(std::string const& filename, std::ios_base::openmode mode, int prot, int additional_posix_modes)
@@ -81,7 +81,7 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
   else
     posix_mode = O_RDONLY;
 
-  // Do not call open() on a device that is already initialized with a fd (see FileDescriptor::init) or call close() first.
+  // Do not call open() on a device that is already initialized with a fd (see FileDescriptor::fd_init) or call close() first.
   ASSERT(!state_t::rat(m_state)->m_flags.is_open());
 
   // Meant to be used for things like O_CLOEXEC, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOATIME, O_NOFOLLOW, O_NONBLOCK, O_SYNC, O_TMPFILE, ...

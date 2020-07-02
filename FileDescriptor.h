@@ -418,7 +418,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   // make_fd_non_blocking should be true except when the fd is a standard stream (i.e. fd <= 2) or fd is a regular file
   // (or when you are sure that the fd is already non-blocking).
   // The best way to represent a standard stream is therefore with an evio::File.
-  void init(int fd, bool make_fd_non_blocking = true);
+  virtual void fd_init(int fd, bool make_fd_non_blocking = true);
 
 #if CW_DEBUG
  public:

@@ -125,9 +125,9 @@ bool is_valid(int fd)
 #endif
 }
 
-void FileDescriptor::init(int fd, bool make_fd_non_blocking)
+void FileDescriptor::fd_init(int fd, bool make_fd_non_blocking)
 {
-  DoutEntering(dc::evio, "FileDescriptor::init(" << fd << ") [" << this << ']');
+  DoutEntering(dc::evio, "FileDescriptor::fd_init(" << fd << ") [" << this << ']');
   // Close the device before opening it again.
   ASSERT(!is_valid(m_fd));
   // Only call init() with a valid, open filedescriptor.

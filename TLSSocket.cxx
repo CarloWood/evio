@@ -697,6 +697,13 @@ buffer_full1:
 #endif
 }
 
+void TLSSocket::fd_init(int fd, bool make_non_blocking)
+{
+  DoutEntering(dc::evio, "TLSSocket::fd_init(" << fd << ", " << std::boolalpha << make_non_blocking << ") [" << this << "]");
+  FileDescriptor::fd_init(fd, make_non_blocking);
+  m_tls.set_device(this, fd, this, fd);     // We are both, input device and output device.
+}
+
 void TLSSocket::set_sni(std::string const& ServerNameIndication)
 {
   // Do not call set_sni (before or) after you already called tls_init (or do not call set_sni twice).

@@ -125,7 +125,7 @@ void Socket::init(int fd, SocketAddress const& remote_address)
   m_remote_address = remote_address;
   m_connected_flags = 0;
 
-  FileDescriptor::init(fd);     // link in
+  fd_init(fd);     // link in
   state_t::wat state_w(m_state);
   if (m_ibuffer)
     start_input_device(state_w);

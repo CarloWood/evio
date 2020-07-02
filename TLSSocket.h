@@ -91,6 +91,7 @@ class TLSSocket : public Socket
   void data_received(int& allow_deletion_count, char const* new_data, size_t rlen) override;
 
  private:
+  void fd_init(int fd, bool make_non_blocking) override;                // Called after FileDescriptor::m_fd is set, but before the device is started.
   void set_sni(std::string const& ServerNameIndication) override;
   void tls_init(SocketAddress const& socket_address, std::string const& ServerNameIndication);
   bool handshake_completed() const { return m_max_frag != s_max_frag_magic; }

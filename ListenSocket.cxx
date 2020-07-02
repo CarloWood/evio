@@ -106,7 +106,7 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog, size_t r
   else
     Dout(dc::system, "listen(" << fd << ", " << backlog << ") = " << res);
 
-  init(fd);
+  fd_init(fd);
   Dout(dc::notice, "Added listen socket " << fd << " at " << m_bind_addr);
 
   // set_sink() does not need to be called here, because we override read_from_fd.

@@ -101,7 +101,7 @@ class ListenSocketDevice : public InputDevice
     // The ListenSocket must be closed before you can reuse it.
     ASSERT(!bind_addr.is_unspecified() && (m_bind_addr.is_unspecified() || state_t::rat(m_state)->m_flags.is_dead()));
     m_bind_addr = std::move(bind_addr);
-    init(fd);
+    fd_init(fd);
     state_t::wat state_w(m_state);
     start_input_device(state_w);
   }
