@@ -423,7 +423,6 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
 #if CW_DEBUG
  public:
   // For inspection only.
-  int get_fd() const { return m_fd; }
   FileDescriptorFlags const get_flags() const { return state_t::crat(m_state)->m_flags; }
 #endif
 
@@ -620,7 +619,14 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     DoutFatal(dc::core, "Calling FileDescriptor::write_to_fd() on object [" << this << "] that isn't an OutputDevice.");
   }
 
+#ifdef CWDEBUG
+ public:
+  // Used for debug code.
+#endif
+  // Reading or writing this fd is never safe, except when done from read_from_fd() / write_to_fd() of a specialized class like TLSSocket.
+  int get_fd() const { return m_fd; }
 
+ protected:
   // Stream socket peer closed connection before reading all data that was sent, or shut down writing half of connection (ie a pipe(2)).
   //
   // If this is not an OutputDevice then this default will be used: the HUP is ignored. The idea is that in most cases this will
