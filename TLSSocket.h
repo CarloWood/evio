@@ -35,44 +35,23 @@ namespace evio {
 class TLSSocket : public Socket
 {
  private:
-  // SLL session state bits.
-  static constexpr int want_write = 1;
-  static constexpr int want_read = 2;
-  static constexpr int stopped = 4;             // Output device was stopped.
-  static constexpr int post_handshake = 8;
-
- public:
-  enum session_state_type {
-    preconnect =                0,                                       // We're not connected yet.
-    handshake_want_write =                                  want_write,  // We must call m_tls.do_handshake() when the socket is writable.
-    handshake_want_read =                        want_read,              // We must call m_tls.do_handshake() when the socket is readable.
-    app_want_write =            post_handshake |            want_write,  // We must call m_tls.do_write when the socket is writable.
-    app_idle_out =              post_handshake | want_read,              // All encrypted data was written, stream was stopped (post handshake).
-    app_write_error =           post_handshake ,                         // A write error occurred.
-  };
-
-  static char const* session_state_to_str(session_state_type session_state);
-  static bool is_post_handshake(session_state_type session_state) { return session_state & post_handshake; }
-  static bool is_stopped(session_state_type session_state) { return session_state & stopped; }
-
- private:
   protocol::TLS m_tls;
-  std::mutex m_session_state_mutex;
-  std::atomic<session_state_type> m_session_state;
   uint32_t m_max_frag;
   static constexpr uint32_t s_max_frag_magic = 0x5000;  // Must be larger than 0x4000.
   std::string m_ServerNameIndication;
 
  public:
+#ifdef DEBUGDEVICESTATS
+  TLSSocket() : m_tls(m_sent_bytes, m_received_bytes) { }
+#endif
+
   bool connect(SocketAddress const& socket_address, std::string const& ServerNameIndication = {}, size_t rcvbuf_size = 0, size_t sndbuf_size = 0, SocketAddress const& if_addr = {})
   {
     tls_init(socket_address, ServerNameIndication);
     bool in_progress = evio::Socket::connect(socket_address, rcvbuf_size, sndbuf_size, if_addr);
     if (in_progress)
     {
-      // We want to write the TLS client hello message, but Socket::connect() didn't start
-      // the output device because our output buffer is empty (since that is used for plain text
-      // app data).
+      // We want to write the TLS client hello message, but Socket::connect() might not have started the output device.
       start_output_device(state_t::wat(m_state));
     }
     return in_progress;
@@ -82,13 +61,12 @@ class TLSSocket : public Socket
   {
     tls_init(socket_address, ServerNameIndication);
     evio::Socket::init(fd, socket_address);
-    // Since this function is not calling start_output_device (see connect),
-    // the TLS handshake is delayed until we try to write app data.
+    // We need to write the TLS client hello message so make sure the device is started.
+    start_output_device(state_t::wat(m_state));
   }
 
   void write_to_fd(int& allow_deletion_count, int fd) override;
   void read_from_fd(int& allow_deletion_count, int fd) override;
-  void data_received(int& allow_deletion_count, char const* new_data, size_t rlen) override;
 
  private:
   void fd_init(int fd, bool make_non_blocking) override;                // Called after FileDescriptor::m_fd is set, but before the device is started.

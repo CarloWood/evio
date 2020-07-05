@@ -30,13 +30,10 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 #ifdef CWDEBUG
-//#include "testkeys/RSA/2048_RSA.h"
-//#include "testkeys/RSA/2048_RSA_KEY.h"
-//#include "testkeys/RSA/ALL_RSA_CAS.h"
-//#include "testkeys/PSK/tls13_psk.h"
-#include "utils/debug_ostream_operators.h"
-#include <libcwd/buf2str.h>
 #include <filesystem>
+#include "utils/debug_ostream_operators.h"
+#include "utils/print_using.h"
+#include <libcwd/buf2str.h>
 #endif
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
@@ -60,14 +57,7 @@ std::error_code make_error_code(wolfssl_error_code);
 
 std::ostream& operator<<(std::ostream& os, wolfssl_error_code code)
 {
-  // Also support printing positive values as just integers...
-  int val = code;
-#if 0
-  if (val > 0)
-    os << val;
-  else
-#endif
-    os << make_error_code(code).category().message(code);
+  os << make_error_code(code).category().message(code);
   return os;
 }
 
@@ -90,100 +80,12 @@ namespace {
 
 WOLFSSL_CTX* s_ctx;
 
-#if 0
-// Signature algorithms that we are willing to support.
-// See the sigalg* macros in matrixssl/crypto/cryptolib.h for a complete list.
-uint16_t const sigalgs[] = {
-#ifdef USE_ECC
-    sigalg_ecdsa_secp256r1_sha256,
-# ifdef USE_SECP384R1
-    sigalg_ecdsa_secp384r1_sha384,
-# endif
-# ifdef USE_SECP521R1
-    sigalg_ecdsa_secp521r1_sha512,
-# endif
-#endif // USE_ECC
-#ifdef USE_RSA
-# ifdef USE_PKCS1_PSS
-    sigalg_rsa_pss_rsae_sha256,
-#   ifdef USE_SHA384
-    sigalg_rsa_pss_rsae_sha384,
-#   endif
-# endif // USE_RSA
-    sigalg_rsa_pkcs1_sha256,
-#endif
-    0
-};
-constexpr int32_t sigalgs_len = sizeof(sigalgs) / sizeof(sigalgs[0]) - 1; // -1: remove the trailing 0.
-
-// Ciphersuites that we are willing to support.
-// See matrixssl/matrixssl/matrixsslApiCipher.h for a complete list.
-psCipher16_t const ciphersuites[] = {
-#ifdef USE_TLS_1_3
-    TLS_AES_128_GCM_SHA256,
-#endif
-#ifdef USE_ECC
-    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-#endif
-#ifdef USE_RSA
-# ifdef USE_ECC
-    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-# endif
-    TLS_RSA_WITH_AES_128_GCM_SHA256,
-#endif // USE_RSA
-    0
-};
-constexpr int32_t ciphersuites_len = sizeof(ciphersuites) / sizeof(ciphersuites[0]) - 1;
-
-// The protocol versions that we're willing to support.
-// See matrixssl/matrixssl/matrixsslApiVer.h for all possibilities.
-psProtocolVersion_t const versions[] =
-{
-# ifdef USE_TLS_1_3
-    v_tls_1_3,
-# endif
-# ifdef USE_TLS_1_2
-    v_tls_1_2,
-# endif
-    0
-};
-constexpr int32_t versions_len = sizeof(versions) / sizeof(versions[0]) - 1;
-#endif
-
 } // namespace
 
-#if 0   // IOReadCtx / IOWriteCtx not set.
 #ifdef CWDEBUG
-std::ostream& operator<<(std::ostream& os, WOLFSSL const& session)
+std::ostream& operator<<(std::ostream& os, WOLFSSL const* session)
 {
-  FileDescriptor const* input_device = static_cast<InputDevice*>(wolfSSL_GetIOReadCtx(const_cast<WOLFSSL*>(&session)));
-  FileDescriptor const* output_device = static_cast<OutputDevice*>(wolfSSL_GetIOWriteCtx(const_cast<WOLFSSL*>(&session)));
-  if (input_device == output_device)
-    os << input_device;
-  else
-    os << "{input:" << input_device << ",output:" << output_device << '}';
-  return os;
-}
-#endif
-#endif
-
-//inline
-auto TLS::session() const
-{
-  return static_cast<WOLFSSL*>(m_session);
-}
-
-#if 0
-//inline
-auto TLS::session_opts() const
-{
-  return static_cast<sslSessOpts_t*>(m_session_opts);
-}
-
-//inline
-auto TLS::session_id() const
-{
-  return static_cast<sslSessionId_t*>(m_session_id);
+  return os << "(WOLFSSL*)" << (void*)session;
 }
 #endif
 
@@ -214,14 +116,14 @@ std::vector<std::string> TLS::get_CA_files()
   return CA_files;
 }
 
-class TLS::WolfSSL_Cleanup
+class TLS::Cleanup
 {
  private:
   bool m_need_deinitialization;
 
  public:
-  WolfSSL_Cleanup() : m_need_deinitialization(false) { }
-  ~WolfSSL_Cleanup() { if (m_need_deinitialization) TLS::global_tls_deinitialization(); }
+  Cleanup() : m_need_deinitialization(false) { }
+  ~Cleanup() { if (m_need_deinitialization) TLS::global_tls_deinitialization(); }
   void initialized() { m_need_deinitialization = true; }
 };
 
@@ -277,13 +179,160 @@ class WolfSSL_CTX
   }
 };
 
+#ifdef CWDEBUG
+void print_buf2hex_on(std::ostream& os, std::string_view const& sv)
+{
+  std::ios save_format(nullptr);
+  save_format.copyfmt(os);
+
+  constexpr int nb = 6;
+  char const* buf = sv.data();
+  int const len = sv.size();
+  bool const small = len <= 2 * nb;
+  int mn = small ? len : nb;
+  os << std::hex << std::setfill('0') << std::setw(2);
+  char const* separator = "0x";
+  for (int n = 0; n < mn; ++n)
+  {
+    os << separator << (int)(unsigned char)buf[n];
+    separator = " 0x";
+  }
+  if (!small)
+  {
+    os << " ...";
+    for (size_t n = len - nb; n < len; ++n)
+    {
+      os << separator << (int)(unsigned char)buf[n];
+      separator = " 0x";
+    }
+  }
+
+  // Restore previous formatting settings.
+  os.copyfmt(save_format);
+}
+#endif
+
 // Global SSL context.
 WolfSSL_CTX s_context;
 
 // Cause TLS::global_tls_deinitialization() to be called when destructing global objects.
-TLS::WolfSSL_Cleanup s_cleanup_hook;
+TLS::Cleanup s_cleanup_hook;
 
 } // namespace
+
+//inline
+int TLS::send(char* buf, int len)
+{
+  DoutEntering(dc::evio, "TLS::send(" << (void*)buf << ", " << len << ") [" << static_cast<WOLFSSL*>(m_write_session) << ", " << m_output_device.get() << "]");
+  int wlen;
+
+  for (;;) // EINTR loop.
+  {
+    Dout(dc::system|dc::tls|continued_cf, "send(" << m_send_fd << ", \"" << utils::print_using(std::string_view(buf, len), print_buf2hex_on) << "\", " << len << ", 0) = ");
+    wlen = ::send(m_send_fd, buf, len, 0);
+    if (AI_UNLIKELY(wlen < 0))
+    {
+      Dout(dc::finish|error_cf, wlen);
+      int const err = errno;
+      if (err == EWOULDBLOCK || err == EAGAIN)
+        return WOLFSSL_CBIO_ERR_WANT_WRITE;
+      if (err == EINTR)
+        continue;
+      // For more detailed error reporting, store the error in the TLS struct.
+      m_send_error = err;
+      if (err == ECONNRESET)
+        return WOLFSSL_CBIO_ERR_CONN_RST;
+      if (err == EPIPE)
+        return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+      return WOLFSSL_CBIO_ERR_GENERAL;
+    }
+#ifdef DEBUGDEVICESTATS
+    m_sent_bytes += wlen;
+#endif
+    Dout(dc::continued, wlen
+#ifdef DEBUGDEVICESTATS
+        << " [total sent now " << m_sent_bytes << " bytes]"
+#endif
+    );
+#ifdef CWDEBUG
+    if (wlen < len)      // This means we can't write more at the moment.
+      Dout(dc::finish, " (Tried to write " << len << " bytes)");
+    else
+      Dout(dc::finish, "");
+#endif
+    break;
+  }
+
+  return wlen;
+}
+
+static int send(WOLFSSL*, char* buf, int len, void* tls_ptr)
+{
+  // Set with wolfSSL_CTX_SetIOSend below.
+  TLS* tls = static_cast<TLS*>(tls_ptr);
+  return tls->send(buf, len);
+}
+
+//inline
+int TLS::recv(char* buf, int space)
+{
+  DoutEntering(dc::evio, "TLS::recv(" << (void*)buf << ", " << space << ") [" << static_cast<WOLFSSL*>(m_read_session) << ", " << m_input_device.get() << "]");
+
+  int rlen;
+  for (;;) // EINTR loop.
+  {
+    Dout(dc::system|dc::tls|continued_cf, "recv(" << m_recv_fd << ", ");
+    rlen = ::recv(m_recv_fd, buf, space, 0);
+    if (rlen > 0)
+    {
+#ifdef DEBUGDEVICESTATS
+      m_received_bytes += rlen;
+#endif
+      Dout(dc::finish, "{\"" << utils::print_using(std::string_view(buf, rlen), print_buf2hex_on) << "\"}, " << space << ", 0) = " << rlen
+#ifdef DEBUGDEVICESTATS
+        << " [total received now: " << m_received_bytes << " bytes]"
+#endif
+      );
+    }
+    else
+    {
+      int const err = errno;
+      Dout(dc::finish|cond_error_cf(rlen < 0), (void*)buf << ", " << space << ", 0) = " << rlen);
+      if (AI_UNLIKELY(rlen <= 0))
+      {
+        if (err == EWOULDBLOCK || err == EAGAIN)
+          return WOLFSSL_CBIO_ERR_WANT_READ;
+        if (err == EINTR)
+          continue;
+        if (rlen == 0)
+        {
+          if (space == 0)
+          {
+            // From recv(2): the value 0 may also be returned if the requested
+            // number of bytes to receive from a stream socket was 0.
+            return 0;
+          }
+          return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+        }
+        m_recv_error = err;
+        if (err == ECONNRESET)
+          return WOLFSSL_CBIO_ERR_CONN_RST;
+        return WOLFSSL_CBIO_ERR_GENERAL;
+      }
+    }
+
+    break;
+  }
+
+  return rlen;
+}
+
+static int recv(WOLFSSL*, char* buf, int space, void* tls_ptr)
+{
+  // Set with wolfSSL_CTX_SetIORecv below.
+  TLS* tls = static_cast<TLS*>(tls_ptr);
+  return tls->recv(buf, space);
+}
 
 //static
 void TLS::global_tls_initialization()
@@ -314,67 +363,12 @@ void TLS::global_tls_initialization()
     }
   }
 
+  // Set I/O callbacks.
+  wolfSSL_CTX_SetIORecv(s_context, protocol::recv);
+  wolfSSL_CTX_SetIOSend(s_context, protocol::send);
+
   // Initialization will succeed (no more throws follow).
   s_cleanup_hook.initialized();
-
-#if 0
-  Dout(dc::tls|continued_cf, "matrixSslNewKeys(&s_keys, NULL) = ");
-  ret = matrixSslNewKeys(&s_keys, NULL);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-  {
-    s_keys = nullptr;
-    THROW_FALERTC(ret, "matrixSslNewKeys");
-  }
-
-  Dout(dc::tls|continued_cf, "matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, \"" << get_CA_files() << "\") = ");
-  ret = matrixSslLoadRsaKeys(s_keys, NULL, NULL, NULL, get_CA_files().c_str());
-  Dout(dc::finish, ret);
-  if (ret < 0)
-  {
-    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
-    matrixSslDeleteKeys(s_keys);
-    s_keys = nullptr;
-    THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
-  }
-#endif
-
-#ifdef CWDEBUG
-#if 0
-  // Load RSA2048 test key pair.
-  unsigned char const* cert_buf = RSA2048;
-  int32 cert_buf_len = sizeof(RSA2048);
-  unsigned char const* key_buf = RSA2048KEY;
-  int32 key_buf_len = sizeof(RSA2048KEY);
-  int32 trustedCALen = sizeof(RSACAS);
-  unsigned char* trustedCABuf = (unsigned char*)psMalloc(NULL, trustedCALen);
-  std::memcpy(trustedCABuf, RSACAS, trustedCALen);
-
-  Dout(dc::tls|continued_cf, "matrixSslLoadRsaKeysMem(s_keys, RSA2048, " << cert_buf_len << ", RSA2048KEY, " << key_buf_len << ", RSACAS, " << trustedCALen << ") = ");
-  ret = matrixSslLoadRsaKeysMem(s_keys, cert_buf, cert_buf_len, key_buf, key_buf_len, trustedCABuf, trustedCALen);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-  {
-    Dout(dc::tls, "matrixSslDeleteKeys(s_keys)");
-    matrixSslDeleteKeys(s_keys);
-    s_keys = nullptr;
-    THROW_FALERTC(ret, "matrixSslLoadRsaKeys");
-  }
-
-  // Load the TLS 1.3 test PSKs.
-  Dout(dc::tls|continued_cf, "matrixSslLoadTls13Psk(g_tls13_test_psk_256, " << sizeof(g_tls13_test_psk_256) <<
-      ", g_tls13_test_psk_id_sha256, " << sizeof(g_tls13_test_psk_id_sha256) << ", NULL) = ");
-  ret = matrixSslLoadTls13Psk(s_keys,
-      g_tls13_test_psk_256,
-      sizeof(g_tls13_test_psk_256),
-      g_tls13_test_psk_id_sha256,
-      sizeof(g_tls13_test_psk_id_sha256),
-      NULL);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslLoadTls13Psk");
-#endif
-#endif // CWDEBUG
 }
 
 //static
@@ -389,7 +383,15 @@ void TLS::global_tls_deinitialization() noexcept
   wolfSSL_Cleanup();
 }
 
-TLS::TLS() : m_session(nullptr) /*, m_session_opts(nullptr), m_session_id(nullptr)*/
+#ifdef DEBUGDEVICESTATS
+TLS::TLS(size_t& sent_bytes, size_t& received_bytes)
+#else
+TLS::TLS()
+#endif
+  : m_read_session(nullptr), m_write_session(nullptr), m_session_state(s_want_write)
+#ifdef DEBUGDEVICESTATS
+  , m_sent_bytes(sent_bytes), m_received_bytes(received_bytes)
+#endif
 {
   DoutEntering(dc::tls, "TLS::TLS() [" << this << "]");
   std::call_once(s_flag, global_tls_initialization);
@@ -398,9 +400,13 @@ TLS::TLS() : m_session(nullptr) /*, m_session_opts(nullptr), m_session_id(nullpt
 TLS::~TLS()
 {
   DoutEntering(dc::tls, "TLS::~TLS()");
-  Dout(dc::tls, "wolfSSL_free(" << session() << ")");
+  WOLFSSL* read_session = static_cast<WOLFSSL*>(m_read_session);
+  WOLFSSL* write_session = static_cast<WOLFSSL*>(m_write_session);
+  Dout(dc::tls, "wolfSSL_free(" << read_session << ")");
   // Not documented, but you can call wolfSSL_free with a nullptr, which is a no-op.
-  wolfSSL_free(session());
+  wolfSSL_free(read_session);
+  if (write_session != read_session)
+    wolfSSL_free(write_session);
 }
 
 // Get SSL error string.
@@ -413,359 +419,230 @@ std::string TLS::session_error_string(int session_error)
   return errorString;
 }
 
-#if 0
-// Certificate callback. See section 6 in the API manual for details.
-static int32_t certCb(ssl_t* UNUSED_ARG(ssl), psX509Cert_t* UNUSED_ARG(cert), int32_t alert)
+//static
+std::string_view TLS::session_state_to_str(int session_state)
 {
-  // No extra checks of our own; simply accept the result of MatrixSSL's internal certificate validation.
-  return alert;
+  std::string str;
+  if ((session_state & s_want_write))
+    str += "|s_want_write";
+  if ((session_state & s_inside_do_handshake))
+    str += "|s_inside_do_handshake";
+  if ((session_state & s_post_handshake))
+    str += "|s_post_handshake";
+  if ((session_state & s_have_plain_text))
+    str += "|s_have_plain_text";
+  if ((session_state & s_handshake_completed))
+    str += "|s_handshake_completed";
+  if ((session_state & s_handshake_error))
+    str += "|s_handshake_error";
+  std::string_view result = str;
+  result.remove_prefix(1);
+  return result;
 }
-#endif
 
-#if 0
-static int32_t extensionCb(ssl_t* UNUSED_ARG(ssl), uint16_t extType, uint8_t UNUSED_ARG(extLen), void* e)
+void TLS::set_device(InputDevice* input_device, int recv_fd, OutputDevice* output_device, int send_fd)
 {
-  if (extType == EXT_ALPN)
-  {
-    unsigned char* c = (unsigned char*)e;
-    char proto[128];
-    std::memset(proto, 0, sizeof(proto));
-    // Two byte proto list len, one byte proto len, then proto.
-    c += 2;     // Skip proto list len.
-    unsigned short len = *c++;
-    if (len >= sizeof(proto))
-      return PS_FAILURE;
-    std::memcpy(proto, c, len);
-    proto[sizeof(proto) - 1] = 0;
-    Dout(dc::tls, "Server agreed to use " << buf2str(proto, len));
-  }
-  return PS_SUCCESS;
+  DoutEntering(dc::tls, "TLS::set_device(" << input_device << ", " << recv_fd << ", " << output_device << ", " << send_fd << ")");
+  m_input_device = input_device;
+  // Pass the correct recv_fd.
+  ASSERT(recv_fd == m_input_device->get_fd());
+  m_recv_fd = recv_fd;
+  m_output_device = output_device;
+  // Pass the correct send_fd.
+  ASSERT(send_fd = m_output_device->get_fd());
+  m_send_fd = send_fd;
 }
-#endif
 
 void TLS::session_init(std::string const& ServerNameIndication)    // SNI
 {
   DoutEntering(dc::tls, "TLS::session_init(\"" << ServerNameIndication << "\")");
   // Only call session_init() once.
-  ASSERT(!m_session);
+  ASSERT(!m_read_session);
   Dout(dc::tls|continued_cf, "wolfSSL_new(" << s_context << ") = ");
-  m_session = wolfSSL_new(s_context);
-  Dout(dc::finish, m_session);
-  if (!m_session)
+  WOLFSSL* session = wolfSSL_new(s_context);
+  Dout(dc::finish, session);
+  if (!session)
     THROW_FALERT("wolfSSL_new returned NULL");
-#if 0
-  Dout(dc::tls|continued_cf, "wolfSSL_UseSNI(" << session() << ", WOLFSSL_SNI_HOST_NAME, \"" << ServerNameIndication << "\", " << ServerNameIndication.length() << ") = ");
-  wolfssl_error_code ret = wolfSSL_UseSNI(session(), WOLFSSL_SNI_HOST_NAME, ServerNameIndication.c_str(), ServerNameIndication.length());
+  m_read_session = m_write_session = session;
+  wolfSSL_SetIOReadCtx(session, this);
+  wolfSSL_SetIOWriteCtx(session, this);
+  Dout(dc::tls|continued_cf, "wolfSSL_UseSNI(" << session << ", WOLFSSL_SNI_HOST_NAME, \"" << ServerNameIndication << "\", " << ServerNameIndication.length() << ") = ");
+  wolfssl_error_code ret = wolfSSL_UseSNI(session, WOLFSSL_SNI_HOST_NAME, ServerNameIndication.c_str(), ServerNameIndication.length());
   Dout(dc::finish, ret);
   if (ret != WOLFSSL_SUCCESS)
     THROW_FALERTC(ret, "wolfSSL_UseSNI([SSL], WOLFSSL_SNI_HOST_NAME, [SNI], [SNILEN])",
-        AIArgs("[SSL]", session())("SNI", ServerNameIndication)("SNILEN", ServerNameIndication.length()));
-#endif
-
-#if 0
-  // Only call session_init() once.
-  ASSERT(!m_session_opts);
-  m_session_opts = calloc(sizeof(sslSessOpts_t), 1);
-  session_opts()->userPtr = static_cast<FileDescriptor*>(m_output_device.get());
-
-  // Set supported protocol versions.
-  Dout(dc::tls|continued_cf, "matrixSslSessOptsSetClientTlsVersions(...) = ");
-  matrixssl_error_code ret = matrixSslSessOptsSetClientTlsVersions(session_opts(), versions, versions_len);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslSessOptsSetClientTlsVersions");
-
-#ifdef USE_ECC
-  // Set supported ECC curves for signatures and key exchange The RoT Edition only supports the P-256, P-384 and P-521 curves.
-  session_opts()->ecFlags = IS_SECP256R1;
-#ifdef USE_SECP384R1
-  session_opts()->ecFlags |= IS_SECP384R1;
-#endif
-#ifdef USE_SECP521R1
-  session_opts()->ecFlags |= IS_SECP521R1;
-#endif
-#endif // USE_ECC
-
-  Dout(dc::tls|continued_cf, "matrixSslNewSessionId(&m_session_id, NULL) = ");
-  ret = matrixSslNewSessionId(reinterpret_cast<sslSessionId_t**>(&m_session_id), NULL);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslNewSessionId");
-
-  // Set supported signature algorithms.
-  Dout(dc::tls|continued_cf, "matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len) = ");
-  ret = matrixSslSessOptsSetSigAlgs(session_opts(), sigalgs, sigalgs_len);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslSessOptsSetSigAlgs");
-
-  tlsExtension_t* extension;
-  Dout(dc::tls|continued_cf, "matrixSslNewHelloExtension(&extension, NULL) = ");
-  ret = matrixSslNewHelloExtension(&extension, NULL);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslNewHelloExtension");
-
-  unsigned char* ext;
-  int32 extLen;
-  Dout(dc::tls|continued_cf, "matrixSslCreateSNIext(NULL, \"" << ServerNameIndication << "\", " << ServerNameIndication.length() << ", &ext, &extLen) = ");
-  ret = matrixSslCreateSNIext(NULL, ServerNameIndication.c_str(), ServerNameIndication.length(), &ext, &extLen);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslCreateSNIext");
-
-  Dout(dc::tls|continued_cf, "matrixSslLoadHelloExtension(...) = ");
-  ret = matrixSslLoadHelloExtension(extension, ext, extLen, EXT_SNI);
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslLoadHelloExtension");
-
-  psFree(ext, NULL);
-
-#ifdef USE_ALPN
-  // Application Layer Protocol Negotiation.
-  alpn[0] = (unsigned char *)psMalloc(NULL, Strlen("http/1.0"));
-  Memcpy(alpn[0], "http/1.0", Strlen("http/1.0"));
-  alpnLen[0] = Strlen("http/1.0");
-
-  alpn[1] = (unsigned char *)psMalloc(NULL, Strlen("http/1.1"));
-  Memcpy(alpn[1], "http/1.1", Strlen("http/1.1"));
-  alpnLen[1] = Strlen("http/1.1");
-
-  matrixSslCreateALPNext(NULL, 2, alpn, alpnLen, &ext, &extLen);
-  matrixSslLoadHelloExtension(extension, ext, extLen, EXT_ALPN);
-  psFree(alpn[0], NULL);
-  psFree(alpn[1], NULL);
-#endif
-
-  Dout(dc::tls|continued_cf, "matrixSslNewClientSession(&m_session, s_keys, session_id(), ciphersuites, " <<
-      ciphersuites_len << ", certCb, \"" << ServerNameIndication << "\", NULL, NULL, session_opts()) = ");
-  ret = matrixSslNewClientSession(
-      reinterpret_cast<ssl_t**>(&m_session),
-      s_keys,
-      session_id(),
-      ciphersuites,
-      ciphersuites_len,
-      certCb,
-      ServerNameIndication.c_str(),
-      extension,
-      extensionCb,
-      session_opts());
-  Dout(dc::finish, ret);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslNewClientSession");
-  // Pass a non-empty ServerNameIndication to connect() or init(fd, ...) or call Socket::set_sni() when you only have a pointer to the Socket base class.
-  ASSERT(!ServerNameIndication.empty());
-  // As per documentation of matrixSslNewClientSession:
-  // Success. The ssl_t context is initialized and the CLIENT_HELLO message has been encoded and is ready to be sent to the server to being the SSL handshake.
-  ASSERT(ret == MATRIXSSL_REQUEST_SEND);
-
-  Dout(dc::tls|continued_cf, "matrixSslDeleteHelloExtension(extension) = ");
-  matrixSslDeleteHelloExtension(extension);
-  if (ret < 0)
-    THROW_FALERTC(ret, "matrixSslDeleteHelloExtension");
-#endif
+        AIArgs("[SSL]", session)("SNI", ServerNameIndication)("SNILEN", ServerNameIndication.length()));
 }
 
-void TLS::set_fd(int fd)
+int TLS::do_handshake(int& error)
 {
-  Dout(dc::tls|continued_cf, "wolfSSL_set_fd(" << session() << ", " << fd << ") = ");
-  wolfssl_error_code ret = wolfSSL_set_fd(session(), fd);
-  Dout(dc::finish, ret);
-  if (AI_UNLIKELY(ret != WOLFSSL_SUCCESS))
-    THROW_FALERTC(ret, "wolfSSL_set_fd");
-}
+  DoutEntering(dc::tls, "TLS::do_handshake()");
+  // Try to own the critical area of wolfSSL_connect by incrementing m_session_state.
+  int prev_state = m_session_state.fetch_add(s_inside_do_handshake, std::memory_order_relaxed);
+  if (is_blocked_or_handshake_finished(prev_state))   // Is (was) there already another thread in the critical area (or is the handshake finished)?
+  {
+    // Undo the increment and return prev_state to signal that we did not enter wolfSSL_connect.
+    m_session_state.fetch_sub(s_inside_do_handshake, std::memory_order_relaxed);
+    return prev_state;  // Fuzzy.
+  }
 
-TLS::result_type TLS::do_handshake()
-{
-  Dout(dc::tls|continued_cf, "wolfSSL_connect(" << session() << ") = ");
-  wolfssl_error_code ssl_result = wolfSSL_connect(session());
+  //                            *** wolfSSL_connect CRITICAL AREA ***
+  // Only one thread at a time can get here (of the two threads that compete; the read and write thread).
+  //
+  // If we get here then prev_state has neither inside_do_handshake nor inside_do_handshake2 set
+  // (inside_do_handshake2 can only ever be set in m_session_state after the above line when
+  // prev_state has inside_do_handshake set, hence is_blocked() returned true). Also post_handshake
+  // can not be set because also then is_blocked() returns true.
+  //
+  // The only possible values of prev_state are therefore: want_write or 0 (meaning, want_read).
+
+  // Before the handshake is finished, there is only one session: read_session and write_session are the same.
+  WOLFSSL* session = static_cast<WOLFSSL*>(m_read_session);
+
+  Dout(dc::tls|continued_cf, "wolfSSL_connect(" << session << ") = ");
+  wolfssl_error_code ssl_result = wolfSSL_connect(session);
+  // By default reset the want_write bit.
+  int correction = prev_state & s_want_write;
 #ifdef CWDEBUG
   if (ssl_result == WOLFSSL_FATAL_ERROR)
   {
-    wolfssl_error_code session_error = wolfSSL_get_error(session(), 0);
+    wolfssl_error_code session_error = wolfSSL_get_error(session, 0);
     Dout(dc::finish, (int)ssl_result << " (" << session_error << ": " << session_error_string(session_error) << ")");
   }
   else
     Dout(dc::finish, ssl_result);
 #endif
   if (ssl_result == SSL_SUCCESS)
-    return HANDSHAKE_COMPLETE;
-  else if (wolfSSL_want_write(session()))
   {
-    Dout(dc::tls, "wolfSSL_want_write(" << session() << ") returned true.");
-    return HANDSHAKE_WANT_WRITE;
+    // Set m_session_state to post_handshake - and relinquish the inside_do_handshake bit.
+    correction -= s_post_handshake - s_inside_do_handshake;
+#ifndef HAVE_WRITE_DUP
+#error "wolfSSL wasn't configured with --enable-writedup"
+#endif
+    // Now that the handshake is finished, create a separate handle for writing.
+    // m_read_session can only be used for reading after this.
+    m_write_session = wolfSSL_write_dup(session);
+    prev_state = m_session_state.fetch_sub(correction, std::memory_order_relaxed);
+    // Return handshake_finished too, because it was this thread that finished the handshake.
+    return prev_state - correction + s_handshake_completed;
   }
-  else if (wolfSSL_want_read(session()))
+  else if (wolfSSL_want_write(session))
   {
-    Dout(dc::tls, "wolfSSL_want_read(" << session() << ") returned true.");
-    return HANDSHAKE_WANT_READ;
+    Dout(dc::tls, "wolfSSL_want_write(" << session << ") returned true.");
+    // Set m_session_state to want_write - and relinquish the inside_do_handshake bit.
+    correction -= s_want_write - s_inside_do_handshake;
+  }
+  else if (wolfSSL_want_read(session))
+  {
+    Dout(dc::tls, "wolfSSL_want_read(" << session << ") returned true.");
+    // Set m_session_state to 0 (want_read) - and relinquish the inside_do_handshake bit.
+    correction += s_inside_do_handshake;
   }
   else
   {
-    assert(false); // To be implemented.
+    // A really fatal error.
+    error = (ssl_result != WOLFSSL_FATAL_ERROR) ? ssl_result : wolfssl_error_code(wolfSSL_get_error(session, 0));
+    // Set m_session_state to handshake_error - and relinquish the inside_do_handshake bit.
+    correction -= s_handshake_error - s_inside_do_handshake;
   }
+  prev_state = m_session_state.fetch_sub(correction, std::memory_order_relaxed);
+  //
+  //                         *** End of wolfSSL_connect CRITICAL AREA ***
+  return prev_state - correction;
 }
 
-#if 0
-int32_t TLS::matrixSslGetOutdata(char** buf_ptr)
+int TLS::read(char* plain_text_buffer, ssize_t space, int& error)
 {
-  Dout(dc::tls|continued_cf, "matrixSslGetOutdata({" << *session() << "}, {");
-  matrixssl_error_code ret = ::matrixSslGetOutdata(session(), reinterpret_cast<unsigned char**>(buf_ptr));
-  if (AI_UNLIKELY(ret < 0))
+  DoutEntering(dc::tls, "TLS::read(plain_text_buffer, " << space << ")");
+  WOLFSSL* session = static_cast<WOLFSSL*>(m_read_session);
+  Dout(dc::tls|continued_cf, "wolfSSL_read(" << session << ", ");
+  int ret = wolfSSL_read(session, plain_text_buffer, space);
+  if (AI_UNLIKELY(ret < 0))     // WOLFSSL_ERROR_WANT_READ is unfortunately not super unlikely, but fast-track the path that actually read data anyway.
   {
-    Dout(dc::finish, "-}) = " << ret);
-    THROW_FALERTC(ret, "matrixSslGetOutdata");
+    wolfssl_error_code err = wolfSSL_get_error(session, ret);
+    Dout(dc::finish, "plain_text_buffer, " << space << ") = " << ret << " [" << err << "]");
+    ASSERT(err != WOLFSSL_ERROR_WANT_WRITE); // WTF? I don't expect this to be possible.
+    switch (err)
+    {
+      case WOLFSSL_ERROR_WANT_READ:
+        error = EWOULDBLOCK;
+        break;
+      case SOCKET_ERROR_E:
+        error = m_recv_error;
+        break;
+      case SOCKET_PEER_CLOSED_E:
+        error = ECONNRESET;
+        break;
+      case BAD_MUTEX_E:
+        error = EDEADLK;                // Could be one of several errors (assuming this was a call to pthread_mutex_lock).
+        break;
+      case BAD_FUNC_ARG:
+        error = EINVAL;
+        break;
+      case WRITE_DUP_READ_E:            // Should never happen.
+        error = EPERM;
+        break;
+      default:
+        DoutFatal(dc::core, "Unhandled error " << err);
+        break;
+    }
+    return -1;
   }
-  Dout(dc::finish, "...}) = " << ret);
+  Dout(dc::finish, "{\"" << buf2str(plain_text_buffer, ret) << "\"}, " << space << ") = " << ret);
   return ret;
 }
 
-TLS::data_result_type TLS::matrixSslSentData(ssize_t wlen)
+int TLS::write(char const* plain_text, size_t len, int& error)
 {
-  matrixssl_error_code ret = ::matrixSslSentData(session(), wlen);
-  Dout(dc::tls, "matrixSslSentData({" << *session() << "}, " << wlen << ") = " << ret);
-
-  if (AI_UNLIKELY(ret < 0))
-    THROW_FALERTC(ret, "matrixSslSentData");
-
-  if (ret == MATRIXSSL_SUCCESS)
-    return SUCCESS;	                // Success. No pending data remaining.
-
-  if (ret == MATRIXSSL_HANDSHAKE_COMPLETE)
-    return HANDSHAKE_COMPLETE;          // All done.
-
-  if (AI_UNLIKELY(ret == MATRIXSSL_REQUEST_CLOSE))
-    return REQUEST_CLOSE;               // All done.
-
-  ASSERT(ret == MATRIXSSL_REQUEST_SEND);
-  return REQUEST_SEND;                  // There is more to send.
-}
-
-int32_t TLS::matrixSslGetReadbuf(char** buf_ptr)
-{
-  Dout(dc::tls|continued_cf, "matrixSslGetReadbuf({");
-  matrixssl_error_code ret = ::matrixSslGetReadbuf(session(), reinterpret_cast<unsigned char**>(buf_ptr));
-  if (AI_UNLIKELY(ret < 0))
+  DoutEntering(dc::tls, "TLS::write(plain_text, " << len << ")");
+  WOLFSSL* session = static_cast<WOLFSSL*>(m_write_session);
+  Dout(dc::tls|continued_cf, "wolfSSL_write(" << session << ", \"" << buf2str(plain_text, len) << "\", " << len << ") = ");
+  int ret = wolfSSL_write(session, plain_text, len);
+  Dout(dc::finish, ret);
+  // wolfSSL_write returns 0 when the error SOCKET_PEER_CLOSED_E happened, which will be returned by wolfSSL_get_error as well.
+  wolfssl_error_code err = AI_UNLIKELY(ret == 0) ? SOCKET_PEER_CLOSED_E : (ret < 0) ? wolfSSL_get_error(session, ret) : 0;
+  if (AI_UNLIKELY(err)) // WOLFSSL_ERROR_WANT_WRITE is unfortunately not super unlikely, but fast-track the path that actually wrote data anyway.
   {
-    Dout(dc::finish, "...}) = " << ret);
-    THROW_FALERTC(ret, "matrixSslGetReadbuf");
+    Dout(dc::notice, "ret == " << ret << "; err = " << err);
+    ASSERT(err != WOLFSSL_ERROR_WANT_READ); // WTF? I don't expect this to be possible.
+    switch (err)
+    {
+      case WOLFSSL_ERROR_WANT_WRITE:
+        error = EWOULDBLOCK;
+        break;
+      case SOCKET_ERROR_E:
+        error = m_send_error;
+        break;
+      case SOCKET_PEER_CLOSED_E:
+        error = ECONNRESET;
+        break;
+      case BAD_MUTEX_E:
+        error = EDEADLK;                // Could be one of several errors (assuming this was a call to pthread_mutex_lock).
+        break;
+      case BAD_FUNC_ARG:
+        error = EINVAL;
+        break;
+      case WRITE_DUP_WRITE_E:           // Should never happen.
+        error = EPERM;
+        break;
+      default:
+        DoutFatal(dc::core, "Unhandled error " << err);
+        break;
+    }
+    return -1;
   }
-  Dout(dc::finish, (void*)*buf_ptr << "}) = " << ret);
   return ret;
 }
 
-TLS::data_result_type TLS::matrixSslReceivedData(ssize_t rlen, char const** buf_ptr, uint32_t* buf_len_ptr)
-{
-  Dout(dc::tls|continued_cf, "matrixSslReceivedData({" << *session() << "}, " << rlen << ", {");
-  matrixssl_error_code ret = ::matrixSslReceivedData(session(), rlen, const_cast<unsigned char**>(reinterpret_cast<unsigned char const**>(buf_ptr)), buf_len_ptr);
-
-  if (AI_UNLIKELY(ret < 0))
-  {
-    Dout(dc::finish, "...}, {...}) = " << ret);
-    THROW_FALERTC(ret, "matrixSslReceivedData");
-  }
-
-  Dout(dc::continued, buf2str(*buf_ptr, *buf_len_ptr) << "}, {" << *buf_len_ptr << "}) = ");
-
-  switch (ret)
-  {
-    case PS_SUCCESS:
-      Dout(dc::finish, ret);
-      return SUCCESS;
-
-    case MATRIXSSL_REQUEST_SEND:
-      Dout(dc::finish, "MATRIXSSL_REQUEST_SEND");
-      return REQUEST_SEND;
-
-    case MATRIXSSL_REQUEST_RECV:
-      Dout(dc::finish, "MATRIXSSL_REQUEST_RECV");
-      return REQUEST_RECV;
-
-    case MATRIXSSL_HANDSHAKE_COMPLETE:
-      Dout(dc::finish, "MATRIXSSL_HANDSHAKE_COMPLETE");
-      return HANDSHAKE_COMPLETE;
-
-    case MATRIXSSL_RECEIVED_ALERT:
-      Dout(dc::finish, "MATRIXSSL_RECEIVED_ALERT");
-      ASSERT(*buf_len_ptr == 2);
-      return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
-
-    case MATRIXSSL_APP_DATA:
-      Dout(dc::finish, "MATRIXSSL_APP_DATA");
-      return APP_DATA;
-  }
-  ASSERT(ret == MATRIXSSL_APP_DATA_COMPRESSED);
-  Dout(dc::finish, "MATRIXSSL_APP_DATA_COMPRESSED");
-  return APP_DATA_COMPRESSED;
-}
-
-TLS::data_result_type TLS::matrixSslProcessedData(char const** buf_ptr, uint32_t* buf_len_ptr)
-{
-  Dout(dc::tls|continued_cf, "matrixSslProcessedData({");
-  matrixssl_error_code ret = ::matrixSslProcessedData(session(), const_cast<unsigned char**>(reinterpret_cast<unsigned char const**>(buf_ptr)), buf_len_ptr);
-
-  if (ret < 0)
-  {
-    Dout(dc::finish, "...}, {...}) = " << ret);
-    THROW_FALERTC(ret, "matrixSslProcessedData");
-  }
-
-  Dout(dc::finish, buf2str(*buf_ptr, *buf_len_ptr) << "}, {" << *buf_len_ptr << "}) = " << ret);
-
-  switch (ret)
-  {
-    case PS_SUCCESS:
-      return SUCCESS;
-
-    case MATRIXSSL_APP_DATA:
-      return APP_DATA;
-
-    case MATRIXSSL_REQUEST_SEND:
-      return REQUEST_SEND;
-
-    case MATRIXSSL_REQUEST_RECV:
-      return REQUEST_RECV;
-  }
-  ASSERT(ret == MATRIXSSL_RECEIVED_ALERT);
-  ASSERT(*buf_len_ptr == 2);
-  return ((*buf_ptr)[0] == SSL_ALERT_LEVEL_WARNING) ? RECEIVED_ALERT_WARNING : RECEIVED_ALERT_FATAL;
-}
-
-int32_t TLS::matrixSslEncodeToOutdata(char* buf, uint32_t len)
-{
-  matrixssl_error_code ret = ::matrixSslEncodeToOutdata(session(), reinterpret_cast<unsigned char*>(buf), len);
-  Dout(dc::tls, "TLS::matrixSslEncodeToOutdata(\"" << buf2str(buf, len) << "\", " << len << ") = " << ret);
-
-  if (AI_UNLIKELY(ret < 0))
-    THROW_FALERTC(ret, "matrixSslEncodeToOutdata");
-
-  if (AI_LIKELY(ret > 0))
-    return ret;
-
-  // Just translate the matrixssl error to some similar system error.
-  switch (ret)
-  {
-    case PS_LIMIT_FAIL:           // The plaintext length must be smaller than the SSL specified value of 16KB.
-      return -EMSGSIZE;
-    case PS_MEM_FAIL:             // The internal allocation of the destination buffer failed.
-      return -ENOMEM;
-    case PS_ARG_FAIL:             // Bad input parameters.
-      return -EINVAL;
-    case PS_PROTOCOL_FAIL:        // This session is flagged for closure.
-      return -EPROTO;
-  }
-  ASSERT(ret == PS_FAILURE);    // Internal error managing buffers.
-  return -ENOBUFS;
-}
-
+#ifndef HAVE_TLS_EXTENSIONS
+#error "WolfSSL wasn't configured with --enable-maxfragment"
+#endif
 uint32_t TLS::get_max_frag() const
 {
-  int32 max_frag = session()->maxPtFrag;
+  uint32_t max_frag = 0x2000; // FIXME m_read_session->max_fragment;
   ASSERT(0 < max_frag && max_frag <= 0x4000);
   return max_frag;
 }
-#endif
 
 //============================================================================
 // Error code handling.
@@ -806,7 +683,7 @@ std::error_code make_error_code(error_codes code)
 }
 
 //----------------------------------------------------------------------------
-// wolfssl error codes (as returned by wolfssl_connect, etc)
+// wolfssl error codes (as returned by wolfSSL_connect, etc)
 
 namespace {
 
@@ -1037,6 +914,8 @@ std::string WolfSSLErrorCategory::message(int ev) const
     AI_CASE_RETURN(PKCS7_SIGNEEDS_CHECK);
     AI_CASE_RETURN(PSS_SALTLEN_RECOVER_E);
     AI_CASE_RETURN(ASN_SELF_SIGNED_E);
+    // wolfSSL_write errors.
+    AI_CASE_RETURN(SOCKET_PEER_CLOSED_E);
   }
   return "Unknown error " + std::to_string(ev);
 }

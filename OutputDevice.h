@@ -95,7 +95,7 @@ class OutputDevice : public virtual FileDescriptor
   // races (aka, there are no possible races allowed).
   // Only the producer thread will start an output device automatically. Which means
   // that either the caller *is* the producer thread, or is certain the device is
-  // stopped and producer thread is running -- aka nobody is writing to the device
+  // stopped and no producer thread is running -- aka nobody is writing to the device
   // when this function is being called.
   friend class Source;
   bool start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);

@@ -107,7 +107,7 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(state_w->m_flags.is_w_open());
   // Don't call start_output_device with a condition that wasn't transitory_true in the first place.
-  // That is, if is false - don't call this (it will fail anyway) and if it is true then there is
+  // That is, if it is false - don't call this (it will fail anyway) and if it is true then there is
   // no need for the condition (just call start_output_device without condition).
   ASSERT(condition.is_transitory_true());
   return EventLoopThread::instance().start_if(state_w, condition, this);
