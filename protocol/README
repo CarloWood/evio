@@ -1,0 +1,41 @@
+InputProtocol is a base class for Sink, which in turn is a base class
+for InputDecoder which implements the protocol.
+
+The reason for the splitting into three different classes is internal;
+the user only has to do with InputDecoder, even though passing an
+object that is derived from InputDecoder to an InputDevice is done
+by a InputDevice::set_sink (which takes an InputDecoder anyway).
+
+The following virtual functions need to be defined:
+
+* size_t minimum_block_size()
+
+  InputProtocol has a good default, that implements this
+  in terms of its virtual funtion minimum_block_size_estimate(),
+  which in turn is implemented in terms of average_message_length().
+  InputProtocol::average_message_length() returns 512 bytes, which
+  is a good default, but derived protocol classes might want to
+  override that function.
+
+* size_t end_of_msg_finder(char const* new_data, size_t rlen)
+
+  Returns the size of the shortest decodable chunk (aka, the first
+  message (including end of msg sequence, if any)), or 0 if there
+  is no complete message.
+  This method should only be called by InputDevice::data_received()
+  or classes that override that.
+
+  For convenience, InputDecoder defines a default that searches
+  for the first carriage return character ('\n').
+
+* void decode(int& allow_deletion_count, MsgBlock&& msg)
+
+  This function must decode the message in `msg`, which will
+  be contiguous. On failure, or when the end of input is reached,
+  it should call close_input_device(allow_deletion_count).
+
+  InputDecoder::decode is pure virtual because it makes no sense
+  to provide a default: close_input_device really should always
+  be called and it is not possible to define a sensible default
+  for that.
+
