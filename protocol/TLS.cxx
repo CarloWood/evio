@@ -29,6 +29,7 @@
 #include "TLS.h"
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
+#include <wolfssl/error-ssl.h>
 #ifdef CWDEBUG
 #include <filesystem>
 #include "utils/debug_ostream_operators.h"
@@ -357,7 +358,7 @@ void TLS::global_tls_initialization()
     Dout(dc::tls|continued_cf, "wolfSSL_CTX_load_verify_locations(s_context, \"" << CA_file << "\", NULL) = ");
     ret = wolfSSL_CTX_load_verify_locations(s_context, CA_file.c_str(), NULL);
     Dout(dc::finish, ret);
-    if (ret != SSL_SUCCESS) {
+    if (ret != WOLFSSL_SUCCESS) {
       s_context.destroy();
       THROW_FALERTC(ret, "Failed to load Certificate Authority file \"[CA_FILE]\".", AIArgs("[CA_FILE]", CA_file));
     }
@@ -512,7 +513,7 @@ int TLS::do_handshake(int& error)
   else
     Dout(dc::finish, ssl_result);
 #endif
-  if (ssl_result == SSL_SUCCESS)
+  if (ssl_result == WOLFSSL_SUCCESS)
   {
     // Set m_session_state to post_handshake - and relinquish the inside_do_handshake bit.
     correction -= s_post_handshake - s_inside_do_handshake;
@@ -702,14 +703,14 @@ std::string WolfSSLErrorCategory::message(int ev) const
 {
   switch (ev)
   {
-    AI_CASE_RETURN(SSL_SUCCESS);
+    AI_CASE_RETURN(WOLFSSL_SUCCESS);
     // wolfSSL_Init errors.
     //AI_CASE_RETURN(BAD_MUTEX_E);
     //AI_CASE_RETURN(WC_INIT_E);          // wolfCrypt initialization error.
     // wolfSSL_CTX_load_verify_locations errors.
-    AI_CASE_RETURN(SSL_FAILURE);        // Will be returned if ctx is NULL, or if both file and path are NULL.
-    AI_CASE_RETURN(SSL_BAD_FILETYPE);   // Will be returned if the file is the wrong format.
-    AI_CASE_RETURN(SSL_BAD_FILE);       // Will be returned if the file doesn’t exist, can’t be read, or is corrupted.
+    AI_CASE_RETURN(WOLFSSL_FAILURE);      // Will be returned if ctx is NULL, or if both file and path are NULL.
+    AI_CASE_RETURN(WOLFSSL_BAD_FILETYPE); // Will be returned if the file is the wrong format.
+    AI_CASE_RETURN(WOLFSSL_BAD_FILE);     // Will be returned if the file doesn’t exist, can’t be read, or is corrupted.
     //AI_CASE_RETURN(MEMORY_E);           // Will be returned if an out of memory condition occurs.
     //AI_CASE_RETURN(ASN_INPUT_E);        // Will be returned if Base16 decoding fails on the file.
     //AI_CASE_RETURN(ASN_BEFORE_DATE_E);  // Will be returned if the current date is before the before date.
@@ -717,7 +718,7 @@ std::string WolfSSLErrorCategory::message(int ev) const
     //AI_CASE_RETURN(BUFFER_E);           // Will be returned if a chain buffer is bigger than the receiving buffer.
     //AI_CASE_RETURN(BAD_PATH_ERROR);     // Will be returned if opendir() fails when trying to open path.
     // wolfSSL_connect errors.
-    AI_CASE_RETURN(SSL_FATAL_ERROR);    // Will be returned if an error occurred. To get a more detailed error code, call wolfSSL_get_error().
+    AI_CASE_RETURN(WOLFSSL_FATAL_ERROR);  // Will be returned if an error occurred. To get a more detailed error code, call wolfSSL_get_error().
     // wolfSSL_get_error.
     AI_CASE_RETURN(UNSUPPORTED_SUITE);
     AI_CASE_RETURN(INPUT_CASE_ERROR);
