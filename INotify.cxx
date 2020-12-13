@@ -41,7 +41,7 @@
 
 namespace evio {
 
-class INotifyDecoder : public InputDecoder
+class INotifyDecoder : public protocol::Decoder
 {
  private:
   size_t m_len_so_far;

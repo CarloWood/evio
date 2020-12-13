@@ -328,8 +328,8 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   size_t len;
   while ((len = m_sink->end_of_msg_finder(new_data, rlen)) > 0)
   {
-    // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a InputDecoder.
-    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_sink);
+    // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a Decoder.
+    protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
     // We seem to have a complete new message and need to call `decode'
     if (m_ibuffer->has_multiple_blocks())
     {
@@ -340,7 +340,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
 
       if (m_ibuffer->is_contiguous(msg_len))
       {
-        input_decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
+        decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
         m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -351,7 +351,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
         MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        input_decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
 
@@ -373,7 +373,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
     {
       char* start = m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
-      input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
+      decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
       m_ibuffer->raw_gbump(msg_len);
 
       ASSERT(m_ibuffer->get_data_size() == rlen - len);
@@ -385,7 +385,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
       if (rlen == 0)
         break; // Buffer is precisely empty anyway.
       new_data += len;
-    } while ((len = input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
+    } while ((len = decoder->end_of_msg_finder(new_data, rlen)) > 0);
     break;
   }
   return;
@@ -397,8 +397,8 @@ size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_
   // We're just hijacking InputDevice::data_received here. We're both, get and put thread.
   start_output_device();
   // This function MUST return 0 (returning a value larger than 0 is only allowed
-  // by InputDecoder::end_of_msg_finder() or classes derived from InputDecoder).
-  // See the cast to InputDecoder in InputDevice::data_received.
+  // by Decoder::end_of_msg_finder() or classes derived from Decoder).
+  // See the cast to Decoder in InputDevice::data_received.
   return 0;
 }
 

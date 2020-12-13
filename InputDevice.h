@@ -36,10 +36,13 @@
 
 namespace evio {
 
-class InputDecoder;
 class InputBuffer;
 class LinkBufferPlus;
 class Sink;
+
+namespace protocol {
+class Decoder;
+} // namespace protocol
 
 class InputDevice : public virtual FileDescriptor
 {
@@ -142,7 +145,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments);
+  void set_sink(protocol::Decoder& decoder, Args... input_create_buffer_arguments);
 
   void close_input_device(int& allow_deletion_count) override final;
 
@@ -166,23 +169,24 @@ class InputDevice : public virtual FileDescriptor
 
 } // namespace evio
 
-#include "InputDecoder.h"
+#include "protocol/Decoder.h"
 
 namespace evio {
 
 template<typename... Args>
-void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments)
+void InputDevice::set_sink(protocol::Decoder& decoder, Args... input_create_buffer_arguments)
 {
 #ifdef CWDEBUG
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
   LibcwDoutStream << "Entering InputDevice::set_sink<";
   LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
-    (void*)&input_decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
+    (void*)&decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
   LibcwDoutScopeEnd;
   NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
 #endif
-  m_ibuffer = static_cast<Sink&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
-  m_sink = &input_decoder;
+  // The cast is needed to make use of the friend declaration in Sink.
+  m_ibuffer = static_cast<Sink&>(decoder).create_buffer(this, input_create_buffer_arguments...);
+  m_sink = &decoder;
 }
 
 // Device-device link declarations.
@@ -210,7 +214,7 @@ class LinkBufferPlus : public LinkBuffer, public Sink, public Source
 void InputDevice::set_sink(LinkBufferPlus* link_buffer)
 {
   // You can't pass an InputDevice to a OutputDevice::set_source() when the InputDevice
-  // already has a buffer (ie, you called already InputDevice::set_sink(InputDecoder&, ...)).
+  // already has a buffer (ie, you called already InputDevice::set_sink(Decoder&, ...)).
   //
   // If you *really* need to do this then it is possible to replace the buffer by
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and

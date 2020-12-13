@@ -2,9 +2,9 @@
  * evio -- A cwm4 git submodule for adding support for buffered, iostream oriented, epoll based I/O.
  *
  * @file
- * @brief Definition of class InputDecoder.
+ * @brief Definition of namespace evio; class MessageLengthInterface.
  *
- * @Copyright (C) 2019  Carlo Wood.
+ * @Copyright (C) 2020  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -25,25 +25,18 @@
  * along with evio.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "sys.h"
-#include "InputDecoder.h"
-#include "debug.h"
+#include "MessageLengthInterface.h"
+#include <iostream>
 
 namespace evio {
+namespace protocol {
 
-InputBuffer* InputDecoder::create_buffer(InputDevice* input_device, size_t buffer_full_watermark, size_t max_alloc)
+std::ostream& operator<<(std::ostream& os, MessageLengthInterface const& message_length_interface)
 {
-  DoutEntering(dc::evio, "InputDecoder::create_buffer(" << input_device << ", " << buffer_full_watermark << ", " << max_alloc << ")");
-  m_input_device = input_device;
-  InputBuffer* input_buffer = new InputBuffer(input_device, minimum_block_size(), buffer_full_watermark, max_alloc);
-  return input_buffer;
+  os << "MessageLengthInterface:{average_message_length:" << message_length_interface.average_message_length() <<
+        ", minimum_block_size:" << message_length_interface.minimum_block_size() << "}";
+  return os;
 }
 
-size_t InputDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
-{
-  DoutEntering(dc::io, "InputDecoder::end_of_msg_finder(..., " << rlen << ")");
-  char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
-  return newline ? newline - new_data + 1 : 0;
-}
-
+} // namespace protocol
 } // namespace evio

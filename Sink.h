@@ -25,40 +25,42 @@
  * along with evio.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// InputDevice should be included first.
+// InputDevice must be included first.
 #include "InputDevice.h"
 
 #ifndef EVIO_SINK_H
 #define EVIO_SINK_H
 
-#include "Protocol.h"
+#include "protocol/MessageLengthInterface.h"
 #include <limits>
 
 namespace evio {
 
-// Protocol
+// MessageLengthInterface
 //  |
 //  v                  ::set_sink()
 // Sink <============= InputDevice <=== fd
 // ::m_input_device ->
 //  |
 //  v
-// InputDecoder (defines decode())
+// Decoder (defines decode())
 //
-// The size of the input buffer is derived from the (average) message size as hinted by the Protocol.
+// The size of the input buffer is derived from the (average) message length as hinted by the Decoder.
 //
-// This class is used as the base class of InputDecoder or LinkBufferPlus. Any class that is not (an)
-// InputDecoder that derives from this class must define a end_of_msg_finder that returns 0.
-// Only (classes derived from) InputDecoder::end_of_msg_finder is allowed to return a non-zero value,
-// in that case the Sink is static_cast-ed to InputDecoder and decode() is called on the new message.
+// This class is used as the base class of Decoder or LinkBufferPlus. Any class that is not (a)
+// Decoder that derives from this class MUST define a end_of_msg_finder that returns 0.
+//
+// Only (classes derived from) Decoder::end_of_msg_finder is allowed to return a non-zero value:
+// in that case the Sink is static_cast-ed to Decoder and decode() is called on the new message.
 
-class Sink : public Protocol
+class Sink : public protocol::MessageLengthInterface
 {
  protected:
   InputDevice* m_input_device;
 
-  void start_input_device() { m_input_device->start_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
-  void stop_input_device() { m_input_device->stop_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
+  // decode needs access to these.
+  void start_input_device() { m_input_device->start_input_device(); }
+  void stop_input_device() { m_input_device->stop_input_device(); }
   void close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
 
   friend class InputDevice;

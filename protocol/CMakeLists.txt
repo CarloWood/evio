@@ -11,9 +11,12 @@ add_library(evio_protocol_ObjLib OBJECT)
 # The list of source files.
 target_sources(evio_protocol_ObjLib
   PRIVATE
-    "TLS.cxx"
-
-    "TLS.h"
+    TLS.cxx
+    TLS.h
+    MessageLengthInterface.cxx
+    MessageLengthInterface.h
+    Decoder.cxx
+    Decoder.h
 )
 
 # Required include search-paths.

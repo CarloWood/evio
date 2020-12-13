@@ -34,7 +34,7 @@ namespace evio {
 template<typename INPUTDECODER, typename OUTPUTDEVICEPTR>
 class AcceptedSocket : public Socket
 {
-  static_assert(std::is_base_of_v<InputDecoder, INPUTDECODER>, "INPUTDECODER must be derived from evio::InputDecoder.");
+  static_assert(std::is_base_of_v<protocol::Decoder, INPUTDECODER>, "INPUTDECODER must be derived from evio::protocol::Decoder.");
   static_assert(std::is_base_of_v<Source, OUTPUTDEVICEPTR>, "OUTPUTDEVICEPTR must be derived from evio::Source (e.g. evio::OutputStream).");
  public:
   // These are using by ListenSocketDevice.
