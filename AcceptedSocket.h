@@ -42,7 +42,7 @@ class AcceptedSocket : public Socket
   using output_protocol_type = OUTPUTDEVICEPTR;
 
  protected:
-  INPUTDECODER m_input;
+  INPUTDECODER m_decoder;
   OUTPUTDEVICEPTR m_output;
 
  public:
@@ -53,7 +53,7 @@ class AcceptedSocket : public Socket
 #else
     DoutEntering(dc::evio, "AcceptedSocket<>()");
 #endif
-    set_sink(m_input);
+    set_protocol_decoder(m_decoder);
     set_source(m_output);
   }
 

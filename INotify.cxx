@@ -87,7 +87,7 @@ class INotifyDevice : public InputDevice, public virtual FileDescriptor
 
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
-  INotifyDevice() { set_sink(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1 + block_overhead_c) - block_overhead_c); }
+  INotifyDevice() { set_protocol_decoder(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1 + block_overhead_c) - block_overhead_c); }
 
   int add_watch(char const* pathname, uint32_t mask, INotify* obj);
   void rm_watch(int wd);

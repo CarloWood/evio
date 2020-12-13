@@ -145,7 +145,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_sink(protocol::Decoder& decoder, Args... input_create_buffer_arguments);
+  void set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments);
 
   void close_input_device(int& allow_deletion_count) override final;
 
@@ -174,11 +174,11 @@ class InputDevice : public virtual FileDescriptor
 namespace evio {
 
 template<typename... Args>
-void InputDevice::set_sink(protocol::Decoder& decoder, Args... input_create_buffer_arguments)
+void InputDevice::set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments)
 {
 #ifdef CWDEBUG
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
-  LibcwDoutStream << "Entering InputDevice::set_sink<";
+  LibcwDoutStream << "Entering InputDevice::set_protocol_decoder<";
   LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
     (void*)&decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
   LibcwDoutScopeEnd;
@@ -214,7 +214,7 @@ class LinkBufferPlus : public LinkBuffer, public Sink, public Source
 void InputDevice::set_sink(LinkBufferPlus* link_buffer)
 {
   // You can't pass an InputDevice to a OutputDevice::set_source() when the InputDevice
-  // already has a buffer (ie, you called already InputDevice::set_sink(Decoder&, ...)).
+  // already has a buffer (ie, you called already InputDevice::set_protocol_decoder(Decoder&, ...)).
   //
   // If you *really* need to do this then it is possible to replace the buffer by
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and
