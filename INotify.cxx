@@ -200,6 +200,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
       // Read the additional number of bytes.
       for (int i = 0; i < n_new - n_old; ++i)
         m_buf[i + n_old] = new_data[i];
+      std::memmove(&m_name_len, m_buf, sizeof(m_buf));    // Change active union member to m_name_len.
       if (n_new < 4)                                      // Still don't have name_len completely?
         return 0;
     }
