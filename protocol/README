@@ -1,19 +1,19 @@
-InputProtocol is a base class for Sink, which in turn is a base class
-for InputDecoder which implements the protocol.
+The following classes are defined in namespace protocol.
+
+protocol::MessageLengthInterface is a base class for Sink, which in turn
+is a base class for protocol::Decoder which implements the protocol.
 
 The reason for the splitting into three different classes is internal;
-the user only has to do with InputDecoder, even though passing an
-object that is derived from InputDecoder to an InputDevice is done
-by a InputDevice::set_sink (which takes an InputDecoder anyway).
+the user only has to do with Decoder.
 
 The following virtual functions need to be defined:
 
 * size_t minimum_block_size()
 
-  InputProtocol has a good default, that implements this
+  protocol::MessageLength has a good default, that implements this
   in terms of its virtual funtion minimum_block_size_estimate(),
   which in turn is implemented in terms of average_message_length().
-  InputProtocol::average_message_length() returns 512 bytes, which
+  MessageLength::average_message_length() returns 512 bytes, which
   is a good default, but derived protocol classes might want to
   override that function.
 
@@ -25,7 +25,7 @@ The following virtual functions need to be defined:
   This method should only be called by InputDevice::data_received()
   or classes that override that.
 
-  For convenience, InputDecoder defines a default that searches
+  For convenience, protocol::Decoder defines a default that searches
   for the first carriage return character ('\n').
 
 * void decode(int& allow_deletion_count, MsgBlock&& msg)
@@ -34,8 +34,8 @@ The following virtual functions need to be defined:
   be contiguous. On failure, or when the end of input is reached,
   it should call close_input_device(allow_deletion_count).
 
-  InputDecoder::decode is pure virtual because it makes no sense
+  Decoder::decode is pure virtual because it makes no sense
   to provide a default: close_input_device really should always
   be called and it is not possible to define a sensible default
-  for that.
+  for when that should happen.
 
