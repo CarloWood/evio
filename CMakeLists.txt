@@ -59,6 +59,7 @@ target_sources(evio_ObjLib
     "SocketAddress.cxx"
     "SocketAddressList.cxx"
     "Socket.cxx"
+    "Source.cxx"
     "StreamBuf.cxx"
     "TLSSocket.cxx"
 

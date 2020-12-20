@@ -1,4 +1,8 @@
-#pragma once
+// InputDevice.h must be included first.
+#include "evio/InputDevice.h"
+
+#ifndef EVIO_PROTOCOL_DECODER_H
+#define EVIO_PROTOCOL_DECODER_H
 
 #include "evio/Sink.h"
 #include <cstring>
@@ -26,3 +30,5 @@ class Decoder : public Sink
 
 } // namespace protocol
 } // namespace evio
+
+#endif // EVIO_PROTOCOL_DECODER_H

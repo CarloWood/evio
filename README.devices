@@ -32,9 +32,11 @@ OutputDevice::close_output_device() have been called (in the case of a
 I/O device that is derived from both). FileDescriptor::close calls both
 and therefore guarantees to close the fd.
 
-Initialization also starts a device: if there is something in the output
-buffer then start_output_device() is called; start_input_device() is
-always called (for an InputDevice).
+Initialization also starts a device (starts monitoring it with epoll):
+if there is something in the output buffer then start_output_device() is
+called; start_input_device() is always called (for an InputDevice),
+provided the InputDevice has an input buffer, which is only the case
+when set_protocol_decoder was called on the (input) device.
 
 When just looking at the InputDevice or OutputDevice, there are four
 common states:
@@ -93,6 +95,9 @@ more or less be final and just waiting for the counter part to
 be closed as well-- if it exists and wasn't closed yet.
 
 5. Flushing
+
+This state means: flush what is in the output buffer and then close
+the output device.
 
 In this state the OutputDevice is basically Active, but a transition
 from Active to Added is no longer possible. Instead it can only

@@ -79,6 +79,7 @@ struct epoll_event EventLoopThread::s_events[maxevents];
 void EventLoopThread::s_wakeup_handler(int)
 {
   EventLoopThread& self(instance());
+  Dout(dc::evio(self.m_terminate != not_yet), "EventLoopThread::s_wakeup_handler: self.m_active = " << self.m_active);
   if (self.m_terminate == forced || (self.m_terminate == cleanly && self.m_active == 0))
   {
     Dout(dc::evio, "EventLoopThread::s_wakeup_handler: Stopping event loop thread because m_active == 0.");

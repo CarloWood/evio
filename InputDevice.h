@@ -50,14 +50,16 @@ class InputDevice : public virtual FileDescriptor
   // Event: 'fd' is readable.
   //
   // This default implementation reads data from the fd into the buffer until
-  // 1) read(2) reads less than the available buffer space, or
-  // 2) read(2) returns 0.
-  // 3) The buffer is full and max_alloc was reached.
+  // 1) is_stream_oriented() returns true and read(2) reads less than the available buffer space, or
+  // 2) is_stream_oriented() returns false and read(2) returns EAGAIN.
+  // 3) read(2) returns 0.
+  // 4) The buffer is full and max_alloc was reached.
   // When the buffer is full stop_input_device is called.
   // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
-  // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
+  // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE, EAGAIN or EWOULDBLOCK)
   // it calls the virtual function read_error, see below.
   void read_from_fd(int& allow_deletion_count, int fd) override;
+  virtual bool is_stream_oriented() { return true; }
 
   // The default behaviour is to close() the filedescriptor.
   virtual void read_returned_zero(int& allow_deletion_count) { close_input_device(allow_deletion_count); }

@@ -48,6 +48,10 @@ class File : public InputDevice, public OutputDevice
  private:
   std::string m_filename;       // The name of the opened file.
 
+  // read(2) can return less bytes then is really available (on disk).
+  // Setting this to false causes us to continue reading until EAGAIN.
+  bool is_stream_oriented() override { return false; }
+
  public:
   //---------------------------------------------------------------------------
   // Constructors

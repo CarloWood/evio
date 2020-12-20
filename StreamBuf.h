@@ -282,7 +282,7 @@ struct RecordingData
 // to the buffer of this object, while the istream interface of the std::streambuf
 // (the get area) reads from a different buffer (StreamBuf object).
 //
-// It is currently assumed that the other StreamBuf (pointed to by m_input_buffer)
+// It is currently assumed that the other StreamBuf (pointed to by m_input_streambuf)
 // symmetrically reads from our buffer (see the ASCII-art image below).
 //
 // StreamBuf is derived from (evio::)streambuf (which in turn is derived from
@@ -304,7 +304,7 @@ struct RecordingData
 //        +------------------'||       \/       +------------------'||
 //        | !streambuf!       ||       /\       | !streambuf!       ||
 //        |                   ||      /  \      |                   ||
-//        | m_input_buffer----++-----'    `-----+-m_input_buffer    ||
+//        | m_input_streambuf-++-----'    `-----+-m_input_streambuf ||
 //        +-------------------'|                +-------------------'|
 //        | !StreamBuf!        |                | !StreamBuf!        |
 //        |                    |                |                    |
@@ -435,12 +435,14 @@ class StreamBufCommon : public std::streambuf
 // This class provides the interface for the producer thread.
 //
 
+class Sink;
+
 class StreamBufProducer : public StreamBufCommon
 {
  public:
-  size_t const m_minimum_block_size;            // Size of the smallest block.
-  size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
-  size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
+  size_t m_minimum_block_size;                  // Size of the smallest block.
+  size_t m_buffer_full_watermark;               // 'buffer_full' returns true when this amount is buffered.
+  size_t m_max_allocated_block_size;            // The maximum amount of allocated data size (total block size).
 
  protected:
   // The total accumulated amount of memory allocated for this buffer.
@@ -488,6 +490,20 @@ class StreamBufProducer : public StreamBufCommon
   {
     // ~StreamBufConsumer should have freed all blocks (~StreamBufConsumer should be called before ~StreamBufProducer due to inheritance order).
     ASSERT(m_total_allocated == m_total_freed);
+  }
+
+  friend class Sink;
+  void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size)
+  {
+    // These values are read by the producer thread.
+    m_minimum_block_size = minimum_block_size;                  // StreamBufProducer::new_block_size, StreamBufProducer::overflow_a,
+                                                                //   StreamBufProducer::xsputn_a and StreamBuf::reduce_buf.
+    m_buffer_full_watermark = buffer_full_watermark;            // StreamBufProducer::buffer_full and StreamBufProducer::buffer_not_full_anymore.
+    m_max_allocated_block_size = max_allocated_block_size;      // StreamBufProducer::overflow_a and StreamBufProducer::xsputn_a.
+    // In the case of StreamBuf::reduce_buf the calling thread is both, the consumer thread and the producer thread.
+
+    // Hence, this function may only be called by the producer thread,
+    // in particular by the overriden decode() of protocol::Decoder.
   }
 
   // Note that the way m_last_pptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.

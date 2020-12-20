@@ -152,6 +152,9 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
     size_t block_size = new_block_size();
     if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
     {
+      // This is possible when m_max_allocated_block_size was reduced (by a call to change_specs).
+      if (get_allocated_upper_bound() > m_max_allocated_block_size)
+        return static_cast<int_type>(EOF);
       block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
       if (block_size < m_minimum_block_size)
         return static_cast<int_type>(EOF);
@@ -611,6 +614,9 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
       size_t block_size = new_block_size();
       if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
       {
+        // This is possible when m_max_allocated_block_size was reduced (by a call to change_specs).
+        if (get_allocated_upper_bound() > m_max_allocated_block_size)
+          return static_cast<int_type>(EOF);
         block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
         if (block_size < m_minimum_block_size)
           return static_cast<int_type>(EOF);
@@ -673,7 +679,10 @@ void StreamBuf::reduce_buffer()
 {
   DoutEntering(dc::notice, "StreamBuf::reduce_buffer");
   // The buffer if empty, so there is only one block (get_area_block_node == put_area_block_node).
-  if (m_get_area_block_node->get_size() > m_minimum_block_size)
+  // Reduce get_area_block_node if it is larger than the minimum. If it is less than the minimum,
+  // which can happen when m_minimum_block_size was increased by a call to change_specs, then
+  // replace it with a larger block.
+  if (m_get_area_block_node->get_size() != m_minimum_block_size)
   {
     //===========================================================
     // Replace first and only MemoryBlock.

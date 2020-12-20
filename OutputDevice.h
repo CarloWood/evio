@@ -109,7 +109,21 @@ class OutputDevice : public virtual FileDescriptor
   void disable_output_device();
   void enable_output_device();
 
-  [[gnu::always_inline]] void start_output_device() { start_output_device(state_t::wat(m_state)); }
+  bool start_output_device(utils::FuzzyCondition const& condition)
+  {
+    state_t::wat state_w(m_state);
+    // This test is just to catch a race condition where this device is being closed at the same time.
+    if (AI_UNLIKELY(!state_w->m_flags.is_writable()))
+      return false;
+    return start_output_device(state_w, condition);
+  }
+  void start_output_device()
+  {
+    state_t::wat state_w(m_state);
+    // This test is just to catch a race condition where this device is being closed at the same time.
+    if (AI_LIKELY(state_w->m_flags.is_writable()))
+      start_output_device(state_w);
+  }
   [[gnu::always_inline]] void remove_output_device(int& allow_deletion_count) { remove_output_device(allow_deletion_count, state_t::wat(m_state)); }
 
  protected:

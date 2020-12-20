@@ -93,6 +93,8 @@ void OutputDevice::init_output_device(state_t::wat const& state_w)
 void OutputDevice::start_output_device(state_t::wat const& state_w)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ") [" << this << ']');
+  // Test for state_w->m_flags.is_writable() before calling this function!
+  ASSERT(!state_w->m_flags.is_dead());
   // Call OutputDevice::init before calling OutputDevice::start_output_device and
   // don't call start_output_device when the device was closed.
   ASSERT(state_w->m_flags.is_w_open());
@@ -104,6 +106,8 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
 bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  // Test for state_w->m_flags.is_writable() before calling this function!
+  ASSERT(!state_w->m_flags.is_dead());
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
   ASSERT(state_w->m_flags.is_w_open());
   // Don't call start_output_device with a condition that wasn't transitory_true in the first place.
@@ -426,7 +430,7 @@ int OutputDevice::sync()
     Dout(dc::warning, "!is_active(type) is not momentary_true");
   // Start the output device if (at the moment) the buffer is not empty and we are not already active.
   if ((condition_not_empty && !is_active(type)).is_momentary_true())
-    start_output_device(state_t::wat(m_state), condition_not_empty);
+    start_output_device(condition_not_empty);
   return 0;
 }
 

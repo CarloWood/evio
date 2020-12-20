@@ -25,16 +25,14 @@
  * along with evio.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// InputDevice must be included first.
-#include "InputDevice.h"
-
-#ifndef EVIO_SINK_H
-#define EVIO_SINK_H
+#pragma once
 
 #include "protocol/MessageLengthInterface.h"
 #include <limits>
 
 namespace evio {
+
+class InputDevice;
 
 // MessageLengthInterface
 //  |
@@ -58,10 +56,9 @@ class Sink : public protocol::MessageLengthInterface
  protected:
   InputDevice* m_input_device;
 
-  // decode needs access to these.
-  void start_input_device() { m_input_device->start_input_device(); }
-  void stop_input_device() { m_input_device->stop_input_device(); }
-  void close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
+  [[gnu::always_inline]] inline void start_input_device();
+  [[gnu::always_inline]] inline void stop_input_device();
+  [[gnu::always_inline]] inline void close_input_device(int& allow_deletion_count);
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)
@@ -75,6 +72,12 @@ class Sink : public protocol::MessageLengthInterface
   virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t)
       { /*This should never be used*/ ASSERT(false); return nullptr; }
 
+ protected:
+  // decode is only called from InputDevice::data_received, which is both consumer
+  // and producer thread of m_input_device->m_ibuffer; therefore this function,
+  // which maybe only be called from decode() can call StreamBuf::reduce_buffer.
+  [[gnu::always_inline]] inline void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const;
+
  public:
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // Should only be called by InputDevice::data_received() or classes that override that.
@@ -83,4 +86,18 @@ class Sink : public protocol::MessageLengthInterface
 
 } // namespace evio
 
-#endif // EVIO_SINK_H
+#include "InputDevice.h"
+
+namespace evio {
+
+// decode needs access to these.
+void Sink::start_input_device() { m_input_device->start_input_device(); }
+void Sink::stop_input_device() { m_input_device->stop_input_device(); }
+void Sink::close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
+
+void Sink::change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const
+{
+  m_input_device->m_ibuffer->change_specs(minimum_block_size, buffer_full_watermark, max_allocated_block_size);
+}
+
+} // namespace evio

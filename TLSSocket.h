@@ -52,7 +52,7 @@ class TLSSocket : public Socket
     if (in_progress)
     {
       // We want to write the TLS client hello message, but Socket::connect() might not have started the output device.
-      start_output_device(state_t::wat(m_state));
+      start_output_device();
     }
     return in_progress;
   }

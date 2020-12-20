@@ -314,6 +314,13 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
     //
     // Therefore for stream-oriented (and only for stream-oriented) devices it would be safe to
     // break here when space > 0.
+    //
+    // If the fd that we're handling here is message oriented, then the program is ill-formed, because
+    // it is possible that we're at the end of the buffer and read -say- just a single byte, which would
+    // be much less than the typical message length of a message oriented protocol. But this function
+    // is also used for regular files, so we have to test this explicitly.
+    if (space > 0 && is_stream_oriented())
+      break;
   }
 }
 
