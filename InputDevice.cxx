@@ -337,7 +337,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   {
     // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a Decoder.
     protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
-    // We seem to have a complete new message and need to call `decode'
+    // We seem to have a complete new message and need to call `decode'.
     if (m_ibuffer->has_multiple_blocks())
     {
       // The new message must start at the beginning of the buffer,

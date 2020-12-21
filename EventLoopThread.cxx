@@ -348,8 +348,8 @@ void EventLoopThread::emain()
     // can lead to events that access memory that might no longer be allocated once
     // we return from the EventLoopThread main loop.
     //
-    // If you core dump here then you have a bug in your program: before
-    // leaving the main loop (destructing evio::EventLoop) do one of the following:
+    // If you assert here then you have a bug in your program: before leaving the
+    // main loop (destructing evio::EventLoop) do one of the following:
     //
     // In the case of an OutputDevice (FDS_W_OPEN is set), either call close_output_device()
     // (or close()) to forcefully close the device (ie, if it is in an error state),

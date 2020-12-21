@@ -131,7 +131,7 @@ class MemoryBlock
   static MemoryBlock* create(size_t block_size)
   {
     // The caller is responsible to make this work by passing the value
-    // utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock)
+    // utils::malloc_size(m_minimum_block_size + sizeof(evio::MemoryBlock)) - sizeof(evio::MemoryBlock)
     ASSERT(utils::is_power_of_two(sizeof(MemoryBlock) + block_size + malloc_overhead_c) ||
            (sizeof(MemoryBlock) + block_size + malloc_overhead_c) % 4096 == 0);
     // No mutex locking is required while creating a new memory block.
