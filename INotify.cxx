@@ -177,6 +177,7 @@ void INotifyDevice::rm_watch(int wd)
 // BRT.
 size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
 {
+  size_t const old_len = m_len_so_far;
   m_len_so_far += rlen;
   // Fast track first.
   if (AI_LIKELY(m_len_so_far >= sizeof(int) + 12) && m_name_len == -1)
@@ -184,7 +185,6 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
   else
   {
     // Now the slower cases.
-    size_t old_len = m_len_so_far - rlen;
     if (old_len < sizeof(int) + 12)                       // Did not have name_len complete before already?
     {
       if (m_len_so_far <= sizeof(int) + 8)                // Still not any name_len bytes now?
@@ -210,7 +210,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
     return 0;
   m_len_so_far = 0;
   m_name_len = -1;
-  return msg_len;
+  return msg_len - old_len;
 }
 
 void INotifyDecoder::decode(int& UNUSED_ARG(allow_deletion_count), MsgBlock&& msg)
