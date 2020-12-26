@@ -332,17 +332,28 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
 
+  bool single_block_left = false;
   size_t len;
   while ((len = m_sink->end_of_msg_finder(new_data, rlen)) > 0)
   {
+    // We seem to have a complete new message and need to call `decode'.
+
     // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a Decoder.
     protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
-    // We seem to have a complete new message and need to call `decode'.
-    if (m_ibuffer->has_multiple_blocks())
+
+    if (single_block_left ||    // Once we have only a single block left, that will continue to be the case.
+        (single_block_left = !m_ibuffer->has_multiple_blocks()))
     {
-      // The new message must start at the beginning of the buffer,
-      // so the total length of the new message is total size of
-      // the buffer minus what was read on top of it.
+      char* start = m_ibuffer->raw_gptr();
+      size_t msg_len = (size_t)(new_data - start) + len;
+      decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
+      m_ibuffer->raw_gbump(msg_len);
+    }
+    else
+    {
+      // The new message must start at gptr(), the beginning of the unread data in the buffer,
+      // so the total length of the new message is the total size of the data in the buffer
+      // minus any extra data that was already read beyond this message.
       size_t msg_len = m_ibuffer->get_data_size() - (rlen - len);
 
       if (m_ibuffer->is_contiguous(msg_len))
@@ -361,41 +372,20 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
         decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
-
-      ASSERT(m_ibuffer->get_data_size() == rlen - len);
-
-      m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
-        return;
-      rlen -= len;
-      if (rlen == 0)
-        break; // Buffer is precisely empty anyway.
-      new_data += len;
-      // See if what is left in the buffer is a message too:
-      continue;
     }
-    // At this point we have only one block left.
-    // The next loop eats up all complete messages in this last block.
-    do
-    {
-      char* start = m_ibuffer->raw_gptr();
-      size_t msg_len = (size_t)(new_data - start) + len;
-      decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
-      m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(m_ibuffer->get_data_size() == rlen - len);
+    // After processing this message, the remaining data in the buffer must be equal
+    // to the number of bytes that we read beyond that message.
+    ASSERT(m_ibuffer->get_data_size() == rlen - len);
 
-      m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
-        return;
-      rlen -= len;
-      if (rlen == 0)
-        break; // Buffer is precisely empty anyway.
-      new_data += len;
-    } while ((len = decoder->end_of_msg_finder(new_data, rlen)) > 0);
-    break;
+    m_ibuffer->raw_reduce_buffer_if_empty();
+    if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
+      return;
+    rlen -= len;
+    if (rlen == 0)
+      return;   // Buffer is precisely empty anyway.
+    new_data += len;
   }
-  return;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))
