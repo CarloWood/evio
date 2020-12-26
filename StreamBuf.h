@@ -495,6 +495,8 @@ class StreamBufProducer : public StreamBufCommon
   friend class Sink;
   void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size)
   {
+    DoutEntering(dc::io, "StreamBufProducer::change_specs(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << "]");
+
     // These values are read by the producer thread.
     m_minimum_block_size = minimum_block_size;                  // StreamBufProducer::new_block_size, StreamBufProducer::overflow_a,
                                                                 //   StreamBufProducer::xsputn_a and StreamBuf::reduce_buf.
