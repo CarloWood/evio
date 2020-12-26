@@ -53,7 +53,6 @@ using namespace libcwd;
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 channel_ct io("IO");
-channel_ct evio("EVIO");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -122,7 +121,7 @@ size_t StreamBufProducer::new_block_size() const
 
 MemoryBlock* StreamBufProducer::create_memory_block(size_t block_size)
 {
-  Dout(dc::evio, "StreamBufProducer::create: allocating new memory block of size " << block_size);
+  Dout(dc::io, "StreamBufProducer::create: allocating new memory block of size " << block_size);
   MemoryBlock* new_block = MemoryBlock::create(block_size);
   m_total_allocated += block_size;
 #ifdef DEBUGSTREAMBUFSTATS
@@ -137,7 +136,7 @@ MemoryBlock* StreamBufProducer::create_memory_block(size_t block_size)
 
 StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
 {
-  DoutEntering(dc::evio, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
+  DoutEntering(dc::io, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -195,7 +194,7 @@ char* StreamBufConsumer::release_memory_block(MemoryBlock*& get_area_block_node)
   // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
   // pointing to that, now newly allocated, memory!
   store_last_gptr(start);
-  Dout(dc::evio, "StreamBufConsumer::release: freeing memory block of size " << prev_get_area_block_node->get_size());
+  Dout(dc::io, "StreamBufConsumer::release: freeing memory block of size " << prev_get_area_block_node->get_size());
   // As only the consumer thread writes to m_total_freed, we can avoid a RMW operation here.
   std::streamsize new_total_freed = common().m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
   prev_get_area_block_node->release();
@@ -336,7 +335,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 #ifdef DEBUGSTREAMBUFSTATS
     ++m_number_of_get_area_resets;
 #endif
-    Dout(dc::evio, "update_get_area: resetting get area.");
+    Dout(dc::io, "update_get_area: resetting get area.");
     common().m_last_gptr.store(start, std::memory_order_relaxed);       // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, start, 0);
@@ -415,7 +414,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 // Get thread.
 int StreamBufConsumer::underflow_a()
 {
-  DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << static_cast<StreamBuf*>(this) << ']');
+  DoutEntering(dc::io, "StreamBuf::underflow_a() [" << static_cast<StreamBuf*>(this) << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -430,13 +429,13 @@ int StreamBufConsumer::underflow_a()
   {
     // There is nothing to read anymore at the moment.
     store_last_gptr(cur_gptr);
-    Dout(dc::evio, "Returning EOF");
+    Dout(dc::io, "Returning EOF");
     result = EOF;
   }
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
-  Dout(dc::evio, "Returning 0 (available " << available << " bytes).");
+  Dout(dc::io, "Returning 0 (available " << available << " bytes).");
   return result;
 }
 
@@ -483,7 +482,7 @@ std::streamsize StreamBufConsumer::showmanyc_a()
 //Get Thread.
 std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
+  DoutEntering(dc::io|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -556,7 +555,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
       // streambuf constructor.
       cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while m_resetting is false then the buffer is truely empty (gptr == pptr).
   {
-    Dout(dc::evio, "update_put_area: resetting put area.");
+    Dout(dc::io, "update_put_area: resetting put area.");
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
@@ -585,7 +584,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
 
 std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const n)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << static_cast<StreamBuf*>(this) << "] ");
+  DoutEntering(dc::io|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << static_cast<StreamBuf*>(this) << "] ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif

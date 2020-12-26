@@ -594,7 +594,7 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
       // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
       // which also calls InputDevice::remove_input_device).
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-      Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+      Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
     }
     device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }
