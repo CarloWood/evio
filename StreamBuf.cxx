@@ -694,6 +694,18 @@ void StreamBuf::reduce_buffer()
     std::streamsize new_total_freed = m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
     prev_get_area_block_node->release();
     m_total_freed.store(new_total_freed, std::memory_order_release);
+    // By allocating a new block, unused_in_last_block() should change
+    // from its currently value to m_minimum_block_size. But since we
+    // don't reset the put area yet, unused_in_last_block() has the
+    // wrong value in the line below that updates m_total_reset.
+    // The net total effect of this function should be subtracting
+    // unused_in_last_block() from m_total_reset, so we have to do:
+    //
+    // m_total_reset -= unused_in_last_block();
+    // m_total_reset -= m_minimum_block_size - unused_in_last_block();     // Negate the effect of line below.
+    //
+    // which boils down to:
+    m_total_reset -= m_minimum_block_size;                                 // This can lead to negative values of m_total_reset :/
     //===========================================================
   }
   // Reset the empty buffer.
