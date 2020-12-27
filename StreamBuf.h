@@ -35,6 +35,7 @@
 #include "utils/is_power_of_two.h"
 #include "utils/nearest_power_of_two.h"
 #include "utils/FuzzyBool.h"
+#include "utils/AIAlert.h"
 #include "threadsafe/aithreadsafe.h"
 #include <atomic>
 #include <mutex>
@@ -136,6 +137,8 @@ class MemoryBlock
            (sizeof(MemoryBlock) + block_size + malloc_overhead_c) % 4096 == 0);
     // No mutex locking is required while creating a new memory block.
     MemoryBlock* memory_block = (MemoryBlock*)malloc(sizeof(MemoryBlock) + block_size);
+    if (!memory_block)
+      THROW_FMALERTE("Failed to allocate [BLOCK_SIZE] bytes", AIArgs("[BLOCK_SIZE]", sizeof(MemoryBlock) + block_size));
     AllocTag1(memory_block);
 #ifdef DEBUGKEEPMEMORYBLOCKS
     std::memset(reinterpret_cast<char*>(memory_block + 1), 0xff, block_size);
@@ -898,6 +901,37 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
     // Relaxed because missing a beat doesn't really matter.
     if (AI_UNLIKELY(m_buffer_was_full.load(std::memory_order_relaxed)))
       do_restart_input_device_if_needed();
+  }
+
+  // Same as force_available_contiguous_number_of_bytes, but never returns 0.
+  // Throws when out of memory.
+  size_t force_additional_block()
+  {
+    // Only call this after force_available_contiguous_number_of_bytes() failed and has_multiple_blocks() returned false.
+    ASSERT(m_buffer_was_full && !has_multiple_blocks());
+
+    size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+    try
+    {
+      //===========================================================
+      // Create a new MemoryBlock.
+      MemoryBlock* new_block = create_memory_block(block_size);         // This can throw.
+      char* start = new_block->block_start();
+      m_put_area_block_node->m_next = new_block;
+      setp(start, start + block_size);
+      m_put_area_block_node = new_block;
+      //===========================================================
+#ifdef DEBUGDBSTREAMBUF
+      printOn(std::cerr);
+#endif
+    }
+    catch (AIAlert::ErrorCode const& error)
+    {
+      // Prepend our function name.
+      THROW_FALERT(error);
+    }
+
+    return block_size;
   }
 
  protected:     // destructor

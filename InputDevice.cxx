@@ -234,16 +234,30 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
         (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
       Dout(dc::warning, "InputDevice::read_from_fd(" << fd << "): the input buffer has reached max. capacity!");
-      stop_input_device();      // Stop reading the filedescriptor.
-      // After a call to stop_input_device() it is possible that another thread
-      // starts it again and enters read_from_fd from the top. We are therefore
-      // no longer allowed to do anything. We also don't need to do anything
-      // anymore, but just saying. See README.devices for more info.
-      return;
+      // Since below we become the consumer thread, aren't we now not already?
+      // Aka, there is no other thread that is touching the buffer right now, no?
+      if (m_ibuffer->has_multiple_blocks())
+      {
+        stop_input_device();      // Stop reading the filedescriptor.
+        // After a call to stop_input_device() it is possible that another thread
+        // starts it again and enters read_from_fd from the top. We are therefore
+        // no longer allowed to do anything. We also don't need to do anything
+        // anymore, but just saying. See README.devices for more info.
+        return;
+      }
+      // See the comments in overflow_a StreamBufProducer::overflow_a.
+      // In order to make sure we don't get into a deadlock where nothing
+      // is read from the buffer because it is undecodable and nothing is
+      // written either because dev2buf_contiguous_forced returns 0 we have
+      // to convince the latter to allocate memory, regardless of the
+      // current setting.
+      space = m_ibuffer->force_additional_block();
     }
 
+    // At this point space == epptr() - pptr() > 0.
+
     ssize_t rlen;
-    char* new_data = m_ibuffer->dev2buf_ptr();
+    char* new_data = m_ibuffer->dev2buf_ptr();          // pptr().
 
     for (;;)                                            // Loop for EINTR.
     {
@@ -298,7 +312,7 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
       break;    // We were closed.
     }
 
-    // It might happen that more data is available, even rlen < space (for example when the read() was
+    // It might happen that more data is available, even if rlen < space (for example when the read() was
     // interrupted (POSIX allows to just return the number of bytes read so far)).
     // If this is a File (including PersistenInputFile) then we really should not take any risk and
     // continue to read till the EOF, and end this function with a call to stop_input_device().
