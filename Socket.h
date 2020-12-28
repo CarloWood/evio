@@ -71,7 +71,7 @@ class Socket : public InputDevice, public OutputDevice
   // Called, if on_connected() was called, as soon as the socket becomes writable for the first time
   // (in the case of TLSSocket when the TLS handshake completed) or when such permanently failed.
   std::function<void(int&, bool)> m_connected;
-  // Called when a connection is terminated and onDisconnected() was called.
+  // Called when a connection is terminated and on_disconnected() was called.
   std::function<void(int&, bool)> m_disconnected;
 
   uint8_t m_connected_flags;
@@ -121,9 +121,9 @@ class Socket : public InputDevice, public OutputDevice
 
   // Call this to set a call back for the disconnected event.
   // Success means it was a clean termination. Not called when the connect failed.
-  void onDisconnected(std::function<void(int&, bool)>&& disconnected_cb)
+  void on_disconnected(std::function<void(int&, bool)>&& disconnected_cb)
   {
-    // Call onDisconnected before calling init / connect.
+    // Call on_disconnected before calling init / connect.
     ASSERT(!get_flags().is_open());
     m_disconnected = std::move(disconnected_cb);
   }
