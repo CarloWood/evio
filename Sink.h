@@ -78,6 +78,16 @@ class Sink : public protocol::MessageLengthInterface
   // which maybe only be called from decode() can call StreamBuf::reduce_buffer.
   [[gnu::always_inline]] inline void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const;
 
+  // These can be called from Decoder::decode().
+  [[gnu::always_inline]] inline void switch_protocol_decoder(Sink& new_decoder,
+                               size_t buffer_full_watermark,
+                               size_t max_alloc = std::numeric_limits<size_t>::max());
+
+  void switch_protocol_decoder(Sink& new_decoder)
+  {
+    switch_protocol_decoder(new_decoder, 8 * StreamBuf::round_up_minimum_block_size(new_decoder.minimum_block_size()), std::numeric_limits<size_t>::max());
+  }
+
  public:
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // Should only be called by InputDevice::data_received() or classes that override that.
@@ -98,6 +108,15 @@ void Sink::close_input_device(int& allow_deletion_count) { m_input_device->close
 void Sink::change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const
 {
   m_input_device->m_ibuffer->change_specs(minimum_block_size, buffer_full_watermark, max_allocated_block_size);
+}
+
+void Sink::switch_protocol_decoder(Sink& new_decoder, size_t buffer_full_watermark, size_t max_alloc)
+{
+  DoutEntering(dc::evio, "Sink::switch_protocol_decoder(new_decoder, " << buffer_full_watermark << ", " << max_alloc << ")");
+  change_specs(new_decoder.minimum_block_size(), buffer_full_watermark, max_alloc);
+  new_decoder.m_input_device = m_input_device;
+  m_input_device->switch_protocol_decoder(new_decoder);
+  m_input_device = nullptr;
 }
 
 } // namespace evio

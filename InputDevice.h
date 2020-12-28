@@ -161,6 +161,8 @@ class InputDevice : public virtual FileDescriptor
  private:
   // This function is called by OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
   inline void set_sink(LinkBufferPlus* link_buffer);
+  // This function is called by Sink::switch_protocol_decoder. Never call it from anywhere else.
+  void switch_protocol_decoder(Sink& new_decoder) { m_sink = &new_decoder; }
   // Give access to the above function.
   template<typename INPUT_DEVICE>
   friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
@@ -186,6 +188,9 @@ void InputDevice::set_protocol_decoder(protocol::Decoder& decoder, Args... input
   LibcwDoutScopeEnd;
   NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
 #endif
+  // Only call set_protocol_decoder once.
+  // Use Decoder::switch_protocol_decoder from the decode() of the current decoder to change protocol decoder.
+  ASSERT(!m_ibuffer);
   // The cast is needed to make use of the friend declaration in Sink.
   m_ibuffer = static_cast<Sink&>(decoder).create_buffer(this, input_create_buffer_arguments...);
   m_sink = &decoder;
