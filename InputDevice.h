@@ -225,7 +225,7 @@ void InputDevice::set_sink(LinkBufferPlus* link_buffer)
   //
   // If you *really* need to do this then it is possible to replace the buffer by
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and
-  // then calling from the derived intput device:
+  // then calling from the derived input device:
   //     if (m_ibuffer->release(CWDEBUG_ONLY(this)))
   //       m_ibuffer = nullptr;
   // before passing it to OutputDevice::set_source().
