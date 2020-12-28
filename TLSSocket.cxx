@@ -155,6 +155,7 @@ void TLSSocket::write_to_fd(int& allow_deletion_count, int fd)
         Dout(dc::tls, "Handshake completed!");
         m_max_frag = m_tls.get_max_frag();
         Dout(dc::tls, "m_max_frag = " << m_max_frag);
+        ASSERT(handshake_completed());
         // Do the m_connected() callback at this point  (as opposed to when the TCP connection was established),
         // as in most cases it will be used as a "you can now send/receive data" signal...
         if (m_connected)
@@ -276,6 +277,9 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
       if (TLS::handshake_completed(state))
       {
         Dout(dc::tls, "Handshake completed!");
+        m_max_frag = m_tls.get_max_frag();
+        Dout(dc::tls, "m_max_frag = " << m_max_frag);
+        ASSERT(handshake_completed());
         m_connected_flags |= is_connected;
         // Do the m_connected() callback at this point  (as opposed to when the TCP connection was established),
         // as in most cases it will be used as a "you can now send/receive data" signal...

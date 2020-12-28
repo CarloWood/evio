@@ -121,6 +121,7 @@ class TLS
   int m_send_fd;                                                // Copy of m_output_device->get_fd().
   int m_recv_error;                                             // Set to errno when send(2) returns an error.
   int m_send_error;                                             // Set to errno when recv(2) returns an error.
+  uint32_t m_max_frag;
 #ifdef DEBUGDEVICESTATS
   size_t& m_sent_bytes;
   size_t& m_received_bytes;
@@ -266,10 +267,14 @@ class TLS
 
   // Accessor for the post_handshake state bit.
   // Once the post_handshake bit is set, it will not be reset.
-  utils::FuzzyBool is_post_handshake() const { return is_post_handshake(m_session_state.load(std::memory_order_relaxed)) ? fuzzy::True : fuzzy::WasFalse; }
+  utils::FuzzyBool is_post_handshake() const
+  {
+    // std::memory_order_acquire to synchronize with m_max_frag.
+    return is_post_handshake(m_session_state.load(std::memory_order_acquire)) ? fuzzy::True : fuzzy::WasFalse;
+  }
 
   // Return the maximum (negotiated) fragment length.
-  uint32_t get_max_frag() const;
+  uint32_t get_max_frag() const { return m_max_frag; }
 
   // These should always be inline: they are swallowed by static functions in TLS.cxx,
   // which is why they have to be public. Do not call them from anywhere else.

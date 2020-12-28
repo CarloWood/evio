@@ -523,7 +523,12 @@ int TLS::do_handshake(int& error)
     // Now that the handshake is finished, create a separate handle for writing.
     // m_read_session can only be used for reading after this.
     m_write_session = wolfSSL_write_dup(session);
-    prev_state = m_session_state.fetch_sub(correction, std::memory_order_relaxed);
+#ifndef HAVE_MAX_FRAGMENT
+#error "wolfSSL wasn't configured with --enable-maxfragment"
+#endif
+    m_max_frag = wolfSSL_GetMaxOutputSize(session);
+    Dout(dc::tls, "wolfSSL_GetMaxOutputSize() returned " << m_max_frag);
+    prev_state = m_session_state.fetch_sub(correction, std::memory_order_release);
     // Return handshake_finished too, because it was this thread that finished the handshake.
     return prev_state - correction + s_handshake_completed;
   }
@@ -633,16 +638,6 @@ int TLS::write(char const* plain_text, size_t len, int& error)
     return -1;
   }
   return ret;
-}
-
-#ifndef HAVE_TLS_EXTENSIONS
-#error "WolfSSL wasn't configured with --enable-maxfragment"
-#endif
-uint32_t TLS::get_max_frag() const
-{
-  uint32_t max_frag = 0x2000; // FIXME m_read_session->max_fragment;
-  ASSERT(0 < max_frag && max_frag <= 0x4000);
-  return max_frag;
 }
 
 //============================================================================

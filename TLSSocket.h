@@ -37,7 +37,7 @@ class TLSSocket : public Socket
  private:
   protocol::TLS m_tls;
   uint32_t m_max_frag;
-  static constexpr uint32_t s_max_frag_magic = 0x5000;  // Must be larger than 0x4000.
+  static constexpr uint32_t s_max_frag_magic = 0x4001;  // Must be one larger than the maximum allowed SSL fragment size of 0x4000.
   std::string m_ServerNameIndication;
 
  public:
@@ -72,7 +72,7 @@ class TLSSocket : public Socket
   void fd_init(int fd, bool make_non_blocking) override;                // Called after FileDescriptor::m_fd is set, but before the device is started.
   void set_sni(std::string const& ServerNameIndication) override;
   void tls_init(SocketAddress const& socket_address, std::string const& ServerNameIndication);
-  bool handshake_completed() const { return m_max_frag != s_max_frag_magic; }
+  bool handshake_completed() const { return m_max_frag < s_max_frag_magic; }
 
  protected:
   int sync() override;
