@@ -35,6 +35,7 @@
 #include "utils/is_power_of_two.h"
 #include "utils/nearest_power_of_two.h"
 #include "utils/FuzzyBool.h"
+#include "utils/AIAlert.h"
 #include "threadsafe/aithreadsafe.h"
 #include <atomic>
 #include <mutex>
@@ -131,11 +132,13 @@ class MemoryBlock
   static MemoryBlock* create(size_t block_size)
   {
     // The caller is responsible to make this work by passing the value
-    // utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock)
+    // utils::malloc_size(m_minimum_block_size + sizeof(evio::MemoryBlock)) - sizeof(evio::MemoryBlock)
     ASSERT(utils::is_power_of_two(sizeof(MemoryBlock) + block_size + malloc_overhead_c) ||
            (sizeof(MemoryBlock) + block_size + malloc_overhead_c) % 4096 == 0);
     // No mutex locking is required while creating a new memory block.
     MemoryBlock* memory_block = (MemoryBlock*)malloc(sizeof(MemoryBlock) + block_size);
+    if (!memory_block)
+      THROW_FMALERTE("Failed to allocate [BLOCK_SIZE] bytes", AIArgs("[BLOCK_SIZE]", sizeof(MemoryBlock) + block_size));
     AllocTag1(memory_block);
 #ifdef DEBUGKEEPMEMORYBLOCKS
     std::memset(reinterpret_cast<char*>(memory_block + 1), 0xff, block_size);
@@ -282,7 +285,7 @@ struct RecordingData
 // to the buffer of this object, while the istream interface of the std::streambuf
 // (the get area) reads from a different buffer (StreamBuf object).
 //
-// It is currently assumed that the other StreamBuf (pointed to by m_input_buffer)
+// It is currently assumed that the other StreamBuf (pointed to by m_input_streambuf)
 // symmetrically reads from our buffer (see the ASCII-art image below).
 //
 // StreamBuf is derived from (evio::)streambuf (which in turn is derived from
@@ -304,7 +307,7 @@ struct RecordingData
 //        +------------------'||       \/       +------------------'||
 //        | !streambuf!       ||       /\       | !streambuf!       ||
 //        |                   ||      /  \      |                   ||
-//        | m_input_buffer----++-----'    `-----+-m_input_buffer    ||
+//        | m_input_streambuf-++-----'    `-----+-m_input_streambuf ||
 //        +-------------------'|                +-------------------'|
 //        | !StreamBuf!        |                | !StreamBuf!        |
 //        |                    |                |                    |
@@ -435,12 +438,14 @@ class StreamBufCommon : public std::streambuf
 // This class provides the interface for the producer thread.
 //
 
+class Sink;
+
 class StreamBufProducer : public StreamBufCommon
 {
  public:
-  size_t const m_minimum_block_size;            // Size of the smallest block.
-  size_t const m_buffer_full_watermark;         // 'buffer_full' returns true when this amount is buffered.
-  size_t const m_max_allocated_block_size;      // The maximum amount of allocated data size (total block size).
+  size_t m_minimum_block_size;                  // Size of the smallest block.
+  size_t m_buffer_full_watermark;               // 'buffer_full' returns true when this amount is buffered.
+  size_t m_max_allocated_block_size;            // The maximum amount of allocated data size (total block size).
 
  protected:
   // The total accumulated amount of memory allocated for this buffer.
@@ -488,6 +493,22 @@ class StreamBufProducer : public StreamBufCommon
   {
     // ~StreamBufConsumer should have freed all blocks (~StreamBufConsumer should be called before ~StreamBufProducer due to inheritance order).
     ASSERT(m_total_allocated == m_total_freed);
+  }
+
+  friend class Sink;
+  void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size)
+  {
+    DoutEntering(dc::io, "StreamBufProducer::change_specs(" << minimum_block_size << ", " << buffer_full_watermark << ", " << max_allocated_block_size << ") [" << this << "]");
+
+    // These values are read by the producer thread.
+    m_minimum_block_size = minimum_block_size;                  // StreamBufProducer::new_block_size, StreamBufProducer::overflow_a,
+                                                                //   StreamBufProducer::xsputn_a and StreamBuf::reduce_buf.
+    m_buffer_full_watermark = buffer_full_watermark;            // StreamBufProducer::buffer_full and StreamBufProducer::buffer_not_full_anymore.
+    m_max_allocated_block_size = max_allocated_block_size;      // StreamBufProducer::overflow_a and StreamBufProducer::xsputn_a.
+    // In the case of StreamBuf::reduce_buf the calling thread is both, the consumer thread and the producer thread.
+
+    // Hence, this function may only be called by the producer thread,
+    // in particular by the overriden decode() of protocol::Decoder.
   }
 
   // Note that the way m_last_pptr is updated demands that the data was already written to the buffer before pbump() or setp_pbump() is called.
@@ -880,6 +901,37 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
     // Relaxed because missing a beat doesn't really matter.
     if (AI_UNLIKELY(m_buffer_was_full.load(std::memory_order_relaxed)))
       do_restart_input_device_if_needed();
+  }
+
+  // Same as force_available_contiguous_number_of_bytes, but never returns 0.
+  // Throws when out of memory.
+  size_t force_additional_block()
+  {
+    // Only call this after force_available_contiguous_number_of_bytes() failed and has_multiple_blocks() returned false.
+    ASSERT(m_buffer_was_full && !has_multiple_blocks());
+
+    size_t block_size = utils::malloc_size(m_minimum_block_size + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
+    try
+    {
+      //===========================================================
+      // Create a new MemoryBlock.
+      MemoryBlock* new_block = create_memory_block(block_size);         // This can throw.
+      char* start = new_block->block_start();
+      m_put_area_block_node->m_next = new_block;
+      setp(start, start + block_size);
+      m_put_area_block_node = new_block;
+      //===========================================================
+#ifdef DEBUGDBSTREAMBUF
+      printOn(std::cerr);
+#endif
+    }
+    catch (AIAlert::ErrorCode const& error)
+    {
+      // Prepend our function name.
+      THROW_FALERT(error);
+    }
+
+    return block_size;
   }
 
  protected:     // destructor

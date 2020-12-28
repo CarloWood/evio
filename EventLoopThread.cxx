@@ -79,6 +79,7 @@ struct epoll_event EventLoopThread::s_events[maxevents];
 void EventLoopThread::s_wakeup_handler(int)
 {
   EventLoopThread& self(instance());
+  Dout(dc::evio(self.m_terminate != not_yet), "EventLoopThread::s_wakeup_handler: self.m_active = " << self.m_active);
   if (self.m_terminate == forced || (self.m_terminate == cleanly && self.m_active == 0))
   {
     Dout(dc::evio, "EventLoopThread::s_wakeup_handler: Stopping event loop thread because m_active == 0.");
@@ -347,8 +348,8 @@ void EventLoopThread::emain()
     // can lead to events that access memory that might no longer be allocated once
     // we return from the EventLoopThread main loop.
     //
-    // If you core dump here then you have a bug in your program: before
-    // leaving the main loop (destructing evio::EventLoop) do one of the following:
+    // If you assert here then you have a bug in your program: before leaving the
+    // main loop (destructing evio::EventLoop) do one of the following:
     //
     // In the case of an OutputDevice (FDS_W_OPEN is set), either call close_output_device()
     // (or close()) to forcefully close the device (ie, if it is in an error state),
@@ -593,7 +594,7 @@ void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDes
       // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
       // which also calls InputDevice::remove_input_device).
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-      Dout(dc::evio, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+      Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
     }
     device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }

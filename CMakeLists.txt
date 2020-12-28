@@ -48,7 +48,6 @@ target_sources(evio_ObjLib
     "FileDescriptor.cxx"
     "inet_support.cxx"
     "INotify.cxx"
-    "InputDecoder.cxx"
     "InputDevice.cxx"
     "Interface.cxx"
     "ListenSocket.cxx"
@@ -60,6 +59,7 @@ target_sources(evio_ObjLib
     "SocketAddress.cxx"
     "SocketAddressList.cxx"
     "Socket.cxx"
+    "Source.cxx"
     "StreamBuf.cxx"
     "TLSSocket.cxx"
 
@@ -70,7 +70,6 @@ target_sources(evio_ObjLib
     "File.h"
     "inet_support.h"
     "INotify.h"
-    "InputDecoder.h"
     "InputDevice.h"
     "Interface.h"
     "ListenSocket.h"

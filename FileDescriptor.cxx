@@ -32,6 +32,12 @@
 #include <unistd.h>     // Needed for fcntl.
 #include <fcntl.h>
 
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+channel_ct evio("EVIO");
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 char const* epoll_op_str(int op)
 {
   switch (op)

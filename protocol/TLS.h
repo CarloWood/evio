@@ -61,7 +61,7 @@ struct TLSSource : public Source
   }
 };
 
-struct TLSSink : public InputDecoder
+struct TLSSink : public Decoder
 {
   size_t end_of_msg_finder(const char*, size_t) override
   {

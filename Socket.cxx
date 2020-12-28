@@ -102,6 +102,12 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   }
   Dout(dc::finish|cond_error_cf(ret < 0), ret);
 
+  // Either call set_protocol_decoder to give the socket an input buffer, or
+  // call set_source AND fill the buffer with something (including a std::flush), or
+  // call on_connected on the socket, before calling connect().
+  // Otherwise the socket is not monitored (nothing to read or write) and will just sit there.
+  ASSERT(m_ibuffer || (m_obuffer && m_obuffer->StreamBufConsumer::nothing_to_get().is_false()) || m_connected);
+
   init(fd, remote_address);
 
   return true;
@@ -117,7 +123,7 @@ void Socket::init(int fd, SocketAddress const& remote_address)
   if (!m_remote_address.is_unspecified())
     Dout(dc::warning, "Socket::init: Already connected to " << m_remote_address << " ?!");
 
-  // Call Socket::set_source and/or Socket::set_sink before calling Socket::init.
+  // Call Socket::set_source and/or Socket::set_protocol_decoder before calling Socket::init.
   // If you don't call either - then this socket is not usable for input/output respectively!
   ASSERT(m_ibuffer || m_obuffer);
 
@@ -128,12 +134,19 @@ void Socket::init(int fd, SocketAddress const& remote_address)
   state_t::wat state_w(m_state);
   if (m_ibuffer)
     start_input_device(state_w);
+  else
+    Dout(dc::warning, "This socket does not have an input buffer; input device not started.");
   if (m_connected)
     start_output_device(state_w);
   else if (m_obuffer)
   {
     if (m_obuffer->StreamBufConsumer::nothing_to_get().is_false())      // We are both consumer and producer.
       start_output_device(state_w);
+  }
+  else
+  {
+    ASSERT(m_ibuffer);
+    Dout(dc::warning, "This socket does not have an output buffer; output device not started.");
   }
 }
 

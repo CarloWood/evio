@@ -53,7 +53,6 @@ using namespace libcwd;
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 channel_ct io("IO");
-channel_ct evio("EVIO");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -122,7 +121,7 @@ size_t StreamBufProducer::new_block_size() const
 
 MemoryBlock* StreamBufProducer::create_memory_block(size_t block_size)
 {
-  Dout(dc::evio, "StreamBufProducer::create: allocating new memory block of size " << block_size);
+  Dout(dc::io, "StreamBufProducer::create: allocating new memory block of size " << block_size);
   MemoryBlock* new_block = MemoryBlock::create(block_size);
   m_total_allocated += block_size;
 #ifdef DEBUGSTREAMBUFSTATS
@@ -137,7 +136,7 @@ MemoryBlock* StreamBufProducer::create_memory_block(size_t block_size)
 
 StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
 {
-  DoutEntering(dc::evio, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
+  DoutEntering(dc::io, "StreamBufProducer::overflow_a(" << char2str(c) << ") [" << this << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -152,9 +151,92 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
     size_t block_size = new_block_size();
     if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
     {
-      block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
-      if (block_size < m_minimum_block_size)
+      if (get_allocated_upper_bound() > m_max_allocated_block_size ||   // This is possible when m_max_allocated_block_size was reduced (by a call to change_specs).
+          (block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock)) < m_minimum_block_size)
+      {
+        // Ever since the introduction of change_specs the history of a previous protocol
+        // (with its own buffer sizes) can cause a deadlock in the current protocol
+        // because that considers the buffer "full" (we get here) while there is only
+        // one, incomplete, message in the buffer, aka there is nothing to decode or read
+        // from the buffer, but also nothing new is written to it.
+        //
+        // Such a deadlock looks as follows:                                __ this message is incomplete.
+        //                                                                 |
+        //                                                                 v
+        // [...data of old protocol that was all read and decoded...|new protocol]
+        //                                                          ^
+        //                                                          |__ after decoding up till here,
+        //                                                              we switched protocol.
+        //
+        // So, because this is only an issue when switching protocol (that uses a
+        // smaller max_allocated_block_size) all of the old protocol must have been
+        // read (and decoded, or we wouldn't switch protocol). Also the block must
+        // be large because it was used for the previous protocol; hence that the
+        // above image is the only possible situation where we can run into this.
+        //
+        // The deadlock then occurs because we are not allowed to allocate more
+        // memory, but the 'new protocol' message is incomplete and can not be
+        // processed.
+        //
+        // With just one protocol involved, the minimum block size of the buffer
+        // should already be enough to fit several messages. It should never happen
+        // that we get here and deadlock (having nothing left in the buffer that
+        // can be decoded) while using a single block that is nearly the size of
+        // m_max_allocated_block_size, because the latter must be *guaranteed* to
+        // fit the maximum possible message size several times (I'd reverse that:
+        // IF we'd get here and deadlock then the given max_allocated_block_size was
+        // simply too small and the program is illformed.
+        //
+        // I think that the most sensible thing to do in the case of a deadlock
+        // is to wave the max alloc restriction and simply allocate a new block
+        // of size m_minimum_block_size. That decision therefore has to be made
+        // here; which means we need -here- be able to detect if the buffer
+        // ends on an incomplete message that was already passed to end_of_msg_finder,
+        // which subsequently returned 0.
+        //
+        // Note that to be able to distinguish between this situation and others
+        // (or at least avoid extra complications), we must assure that end_of_msg_finder
+        // is only called with an rlen > 0. Since end_of_msg_finder is only called
+        // by InputDevice::data_received that translates into that data_received
+        // should only be called with rlen > 0, which is the case given that rlen
+        // is the return value of a call to read(2): if that returned 0 then we
+        // have an error and, not more data.
+        //
+        // We get here BEFORE calling read(2) though: when looking for a new
+        // contiguous piece of memory that we can read into.
+        //
+        // So we have to detect that a *previous* call to InputDevice::read_from_fd
+        // did read(2) into the buffer, filling it up entirely, and then wasn't
+        // able to decode all of it.
+        //
+        // The very fact that we are here means that the buffer *is* full
+        // (epptr() == pptr()): the variable 'space' in InputDevice::read_from_fd
+        // is zero after all, causing it to call m_ibuffer->dev2buf_contiguous_forced(),
+        // leading to a call to this function. And if we return EOF then
+        // dev2buf_contiguous_forced will return 0 (which is again assigned to
+        // space) causing this input device to be stopped.
+        //
+        // This means that the last call to
+        //
+        //   rlen = ::read(fd, new_data, space)
+        //
+        // returned a value rlen == space > 0, with which subsequently
+        // data_received() has been called. That function tries to decode all
+        // messages by default; it won't return unless it processed all
+        // data that was passed to it. Hence, unless the buffer is empty
+        // (in which case we wouldn't be here) our conditions for a deadlock
+        // are always met, except when we have more than one block.
+        //
+        // Unfortunately, we can't call has_multiple_blocks() from here: this
+        // is StreamBufProducer. Therefore we have to pass the responsibility
+        // for all this to the caller that -hopefully- is both producer and
+        // consumer thread. You see this reflected too in the fact that we
+        // used get_allocated_upper_bound() which might have returned a
+        // value that is too large, causing a seemingly full buffer while
+        // that isn't really the case (anymore).
+
         return static_cast<int_type>(EOF);
+      }
     }
     MemoryBlock* new_block = create_memory_block(block_size);
     char* start = new_block->block_start();
@@ -192,7 +274,7 @@ char* StreamBufConsumer::release_memory_block(MemoryBlock*& get_area_block_node)
   // that the producer thread reuses it-- and gets a pptr equal to the old m_last_gptr value that is still
   // pointing to that, now newly allocated, memory!
   store_last_gptr(start);
-  Dout(dc::evio, "StreamBufConsumer::release: freeing memory block of size " << prev_get_area_block_node->get_size());
+  Dout(dc::io, "StreamBufConsumer::release: freeing memory block of size " << prev_get_area_block_node->get_size());
   // As only the consumer thread writes to m_total_freed, we can avoid a RMW operation here.
   std::streamsize new_total_freed = common().m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
   prev_get_area_block_node->release();
@@ -333,7 +415,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 #ifdef DEBUGSTREAMBUFSTATS
     ++m_number_of_get_area_resets;
 #endif
-    Dout(dc::evio, "update_get_area: resetting get area.");
+    Dout(dc::io, "update_get_area: resetting get area.");
     common().m_last_gptr.store(start, std::memory_order_relaxed);       // We are going to reset gptr to start.
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (common().recording_pool) RecordingData(read_stream_offset, start, 0);
@@ -412,7 +494,7 @@ bool StreamBufConsumer::update_get_area(MemoryBlock*& get_area_block_node, char*
 // Get thread.
 int StreamBufConsumer::underflow_a()
 {
-  DoutEntering(dc::evio, "StreamBuf::underflow_a() [" << static_cast<StreamBuf*>(this) << ']');
+  DoutEntering(dc::io, "StreamBuf::underflow_a() [" << static_cast<StreamBuf*>(this) << ']');
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -427,13 +509,13 @@ int StreamBufConsumer::underflow_a()
   {
     // There is nothing to read anymore at the moment.
     store_last_gptr(cur_gptr);
-    Dout(dc::evio, "Returning EOF");
+    Dout(dc::io, "Returning EOF");
     result = EOF;
   }
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
-  Dout(dc::evio, "Returning 0 (available " << available << " bytes).");
+  Dout(dc::io, "Returning 0 (available " << available << " bytes).");
   return result;
 }
 
@@ -480,7 +562,7 @@ std::streamsize StreamBufConsumer::showmanyc_a()
 //Get Thread.
 std::streamsize StreamBufConsumer::xsgetn_a(char* s, std::streamsize const n)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
+  DoutEntering(dc::io|continued_cf, "StreamBuf::xsgetn_a(s, " << n << ") [" << this << "]... ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -553,7 +635,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
       // streambuf constructor.
       cur_pptr == m_last_gptr.load(std::memory_order_acquire))          // If this happens while m_resetting is false then the buffer is truely empty (gptr == pptr).
   {
-    Dout(dc::evio, "update_put_area: resetting put area.");
+    Dout(dc::io, "update_put_area: resetting put area.");
 #ifdef DEBUGEVENTRECORDING
     RecordingData* data = new (recording_pool) RecordingData(write_stream_offset, cur_pptr, 0);
     resetting_put_area(data);
@@ -582,7 +664,7 @@ char* StreamBufProducer::update_put_area(std::streamsize& available)
 
 std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const n)
 {
-  DoutEntering(dc::evio|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << static_cast<StreamBuf*>(this) << "] ");
+  DoutEntering(dc::io|continued_cf, "StreamBuf::xsputn_a(\"" << buf2str(s, n) << "\", " << n << ") [" << static_cast<StreamBuf*>(this) << "] ");
 #ifdef DEBUGDBSTREAMBUF
   printOn(std::cerr);
 #endif
@@ -611,6 +693,9 @@ std::streamsize StreamBufProducer::xsputn_a(char const* s, std::streamsize const
       size_t block_size = new_block_size();
       if (AI_UNLIKELY(get_allocated_upper_bound() + block_size > m_max_allocated_block_size)) // Max alloc reached?
       {
+        // This is possible when m_max_allocated_block_size was reduced (by a call to change_specs).
+        if (get_allocated_upper_bound() > m_max_allocated_block_size)
+          return static_cast<int_type>(EOF);
         block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
         if (block_size < m_minimum_block_size)
           return static_cast<int_type>(EOF);
@@ -673,7 +758,10 @@ void StreamBuf::reduce_buffer()
 {
   DoutEntering(dc::notice, "StreamBuf::reduce_buffer");
   // The buffer if empty, so there is only one block (get_area_block_node == put_area_block_node).
-  if (m_get_area_block_node->get_size() > m_minimum_block_size)
+  // Reduce get_area_block_node if it is larger than the minimum. If it is less than the minimum,
+  // which can happen when m_minimum_block_size was increased by a call to change_specs, then
+  // replace it with a larger block.
+  if (m_get_area_block_node->get_size() != m_minimum_block_size)
   {
     //===========================================================
     // Replace first and only MemoryBlock.
@@ -686,6 +774,18 @@ void StreamBuf::reduce_buffer()
     std::streamsize new_total_freed = m_total_freed.load(std::memory_order_relaxed) + prev_get_area_block_node->get_size();
     prev_get_area_block_node->release();
     m_total_freed.store(new_total_freed, std::memory_order_release);
+    // By allocating a new block, unused_in_last_block() should change
+    // from its currently value to m_minimum_block_size. But since we
+    // don't reset the put area yet, unused_in_last_block() has the
+    // wrong value in the line below that updates m_total_reset.
+    // The net total effect of this function should be subtracting
+    // unused_in_last_block() from m_total_reset, so we have to do:
+    //
+    // m_total_reset -= unused_in_last_block();
+    // m_total_reset -= m_minimum_block_size - unused_in_last_block();     // Negate the effect of line below.
+    //
+    // which boils down to:
+    m_total_reset -= m_minimum_block_size;                                 // This can lead to negative values of m_total_reset :/
     //===========================================================
   }
   // Reset the empty buffer.

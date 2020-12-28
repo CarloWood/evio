@@ -198,12 +198,13 @@ void TLSSocket::read_from_fd(int& allow_deletion_count, int fd)
             (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
         {
           Dout(dc::warning, "InputDevice::read_from_fd(" << fd << "): the input buffer has reached max. capacity!");
-          stop_input_device();      // Stop reading the filedescriptor.
-          // After a call to stop_input_device() it is possible that another thread
-          // starts it again and enters read_from_fd from the top. We are therefore
-          // no longer allowed to do anything. We also don't need to do anything
-          // anymore, but just saying. See README.devices for more info.
-          return;
+          // See InputDevice::read_from_fd.
+          if (m_ibuffer->has_multiple_blocks())
+          {
+            stop_input_device();
+            return;
+          }
+          space = m_ibuffer->force_additional_block();
         }
 
         ssize_t rlen;

@@ -234,16 +234,30 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
         (space = m_ibuffer->dev2buf_contiguous_forced()) == 0)
     {
       Dout(dc::warning, "InputDevice::read_from_fd(" << fd << "): the input buffer has reached max. capacity!");
-      stop_input_device();      // Stop reading the filedescriptor.
-      // After a call to stop_input_device() it is possible that another thread
-      // starts it again and enters read_from_fd from the top. We are therefore
-      // no longer allowed to do anything. We also don't need to do anything
-      // anymore, but just saying. See README.devices for more info.
-      return;
+      // Since below we become the consumer thread, aren't we now not already?
+      // Aka, there is no other thread that is touching the buffer right now, no?
+      if (m_ibuffer->has_multiple_blocks())
+      {
+        stop_input_device();      // Stop reading the filedescriptor.
+        // After a call to stop_input_device() it is possible that another thread
+        // starts it again and enters read_from_fd from the top. We are therefore
+        // no longer allowed to do anything. We also don't need to do anything
+        // anymore, but just saying. See README.devices for more info.
+        return;
+      }
+      // See the comments in overflow_a StreamBufProducer::overflow_a.
+      // In order to make sure we don't get into a deadlock where nothing
+      // is read from the buffer because it is undecodable and nothing is
+      // written either because dev2buf_contiguous_forced returns 0 we have
+      // to convince the latter to allocate memory, regardless of the
+      // current setting.
+      space = m_ibuffer->force_additional_block();
     }
 
+    // At this point space == epptr() - pptr() > 0.
+
     ssize_t rlen;
-    char* new_data = m_ibuffer->dev2buf_ptr();
+    char* new_data = m_ibuffer->dev2buf_ptr();          // pptr().
 
     for (;;)                                            // Loop for EINTR.
     {
@@ -298,7 +312,7 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
       break;    // We were closed.
     }
 
-    // It might happen that more data is available, even rlen < space (for example when the read() was
+    // It might happen that more data is available, even if rlen < space (for example when the read() was
     // interrupted (POSIX allows to just return the number of bytes read so far)).
     // If this is a File (including PersistenInputFile) then we really should not take any risk and
     // continue to read till the EOF, and end this function with a call to stop_input_device().
@@ -314,6 +328,13 @@ void InputDevice::read_from_fd(int& allow_deletion_count, int fd)
     //
     // Therefore for stream-oriented (and only for stream-oriented) devices it would be safe to
     // break here when space > 0.
+    //
+    // If the fd that we're handling here is message oriented, then the program is ill-formed, because
+    // it is possible that we're at the end of the buffer and read -say- just a single byte, which would
+    // be much less than the typical message length of a message oriented protocol. But this function
+    // is also used for regular files, so we have to test this explicitly.
+    if (space > 0 && is_stream_oriented())
+      break;
   }
 }
 
@@ -325,22 +346,33 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   // thread should be accessing this buffer by either reading from it or writing to
   // it while we're here, or the program is ill-formed.
 
+  bool single_block_left = false;
   size_t len;
   while ((len = m_sink->end_of_msg_finder(new_data, rlen)) > 0)
   {
-    // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a InputDecoder.
-    InputDecoder* input_decoder = static_cast<InputDecoder*>(m_sink);
-    // We seem to have a complete new message and need to call `decode'
-    if (m_ibuffer->has_multiple_blocks())
+    // We seem to have a complete new message and need to call `decode'.
+
+    // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a Decoder.
+    protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
+
+    if (single_block_left ||    // Once we have only a single block left, that will continue to be the case.
+        (single_block_left = !m_ibuffer->has_multiple_blocks()))
     {
-      // The new message must start at the beginning of the buffer,
-      // so the total length of the new message is total size of
-      // the buffer minus what was read on top of it.
+      char* start = m_ibuffer->raw_gptr();
+      size_t msg_len = (size_t)(new_data - start) + len;
+      decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
+      m_ibuffer->raw_gbump(msg_len);
+    }
+    else
+    {
+      // The new message must start at gptr(), the beginning of the unread data in the buffer,
+      // so the total length of the new message is the total size of the data in the buffer
+      // minus any extra data that was already read beyond this message.
       size_t msg_len = m_ibuffer->get_data_size() - (rlen - len);
 
       if (m_ibuffer->is_contiguous(msg_len))
       {
-        input_decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
+        decoder->decode(allow_deletion_count, MsgBlock(m_ibuffer->raw_gptr(), msg_len, m_ibuffer->get_get_area_block_node()));
         m_ibuffer->raw_gbump(msg_len);
       }
       else
@@ -351,44 +383,23 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
         MemoryBlock* memory_block = MemoryBlock::create(block_size);
         AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
         m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
-        input_decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
+        decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
         memory_block->release();
       }
-
-      ASSERT(m_ibuffer->get_data_size() == rlen - len);
-
-      m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
-        return;
-      rlen -= len;
-      if (rlen == 0)
-        break; // Buffer is precisely empty anyway.
-      new_data += len;
-      // See if what is left in the buffer is a message too:
-      continue;
     }
-    // At this point we have only one block left.
-    // The next loop eats up all complete messages in this last block.
-    do
-    {
-      char* start = m_ibuffer->raw_gptr();
-      size_t msg_len = (size_t)(new_data - start) + len;
-      input_decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
-      m_ibuffer->raw_gbump(msg_len);
 
-      ASSERT(m_ibuffer->get_data_size() == rlen - len);
+    // After processing this message, the remaining data in the buffer must be equal
+    // to the number of bytes that we read beyond that message.
+    ASSERT(m_ibuffer->get_data_size() == rlen - len);
 
-      m_ibuffer->raw_reduce_buffer_if_empty();
-      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
-        return;
-      rlen -= len;
-      if (rlen == 0)
-        break; // Buffer is precisely empty anyway.
-      new_data += len;
-    } while ((len = input_decoder->end_of_msg_finder(new_data, rlen)) > 0);
-    break;
+    m_ibuffer->raw_reduce_buffer_if_empty();
+    if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
+      return;
+    rlen -= len;
+    if (rlen == 0)
+      return;   // Buffer is precisely empty anyway.
+    new_data += len;
   }
-  return;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))
@@ -397,8 +408,8 @@ size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_
   // We're just hijacking InputDevice::data_received here. We're both, get and put thread.
   start_output_device();
   // This function MUST return 0 (returning a value larger than 0 is only allowed
-  // by InputDecoder::end_of_msg_finder() or classes derived from InputDecoder).
-  // See the cast to InputDecoder in InputDevice::data_received.
+  // by Decoder::end_of_msg_finder() or classes derived from Decoder).
+  // See the cast to Decoder in InputDevice::data_received.
   return 0;
 }
 

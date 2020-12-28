@@ -25,41 +25,40 @@
  * along with evio.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// InputDevice should be included first.
-#include "InputDevice.h"
+#pragma once
 
-#ifndef EVIO_SINK_H
-#define EVIO_SINK_H
-
-#include "Protocol.h"
+#include "protocol/MessageLengthInterface.h"
 #include <limits>
 
 namespace evio {
 
-// Protocol
+class InputDevice;
+
+// MessageLengthInterface
 //  |
 //  v                  ::set_sink()
 // Sink <============= InputDevice <=== fd
 // ::m_input_device ->
 //  |
 //  v
-// InputDecoder (defines decode())
+// Decoder (defines decode())
 //
-// The size of the input buffer is derived from the (average) message size as hinted by the Protocol.
+// The size of the input buffer is derived from the (average) message length as hinted by the Decoder.
 //
-// This class is used as the base class of InputDecoder or LinkBufferPlus. Any class that is not (an)
-// InputDecoder that derives from this class must define a end_of_msg_finder that returns 0.
-// Only (classes derived from) InputDecoder::end_of_msg_finder is allowed to return a non-zero value,
-// in that case the Sink is static_cast-ed to InputDecoder and decode() is called on the new message.
+// This class is used as the base class of Decoder or LinkBufferPlus. Any class that is not (a)
+// Decoder that derives from this class MUST define a end_of_msg_finder that returns 0.
+//
+// Only (classes derived from) Decoder::end_of_msg_finder is allowed to return a non-zero value:
+// in that case the Sink is static_cast-ed to Decoder and decode() is called on the new message.
 
-class Sink : public Protocol
+class Sink : public protocol::MessageLengthInterface
 {
  protected:
   InputDevice* m_input_device;
 
-  void start_input_device() { m_input_device->start_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
-  void stop_input_device() { m_input_device->stop_input_device(FileDescriptor::state_t::wat(m_input_device->m_state)); }
-  void close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
+  [[gnu::always_inline]] inline void start_input_device();
+  [[gnu::always_inline]] inline void stop_input_device();
+  [[gnu::always_inline]] inline void close_input_device(int& allow_deletion_count);
 
   friend class InputDevice;
   InputBuffer* create_buffer(InputDevice* input_device)
@@ -73,6 +72,22 @@ class Sink : public Protocol
   virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t)
       { /*This should never be used*/ ASSERT(false); return nullptr; }
 
+ protected:
+  // decode is only called from InputDevice::data_received, which is both consumer
+  // and producer thread of m_input_device->m_ibuffer; therefore this function,
+  // which maybe only be called from decode() can call StreamBuf::reduce_buffer.
+  [[gnu::always_inline]] inline void change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const;
+
+  // These can be called from Decoder::decode().
+  [[gnu::always_inline]] inline void switch_protocol_decoder(Sink& new_decoder,
+                               size_t buffer_full_watermark,
+                               size_t max_alloc = std::numeric_limits<size_t>::max());
+
+  void switch_protocol_decoder(Sink& new_decoder)
+  {
+    switch_protocol_decoder(new_decoder, 8 * StreamBuf::round_up_minimum_block_size(new_decoder.minimum_block_size()), std::numeric_limits<size_t>::max());
+  }
+
  public:
   // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // Should only be called by InputDevice::data_received() or classes that override that.
@@ -81,4 +96,27 @@ class Sink : public Protocol
 
 } // namespace evio
 
-#endif // EVIO_SINK_H
+#include "InputDevice.h"
+
+namespace evio {
+
+// decode needs access to these.
+void Sink::start_input_device() { m_input_device->start_input_device(); }
+void Sink::stop_input_device() { m_input_device->stop_input_device(); }
+void Sink::close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
+
+void Sink::change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const
+{
+  m_input_device->m_ibuffer->change_specs(minimum_block_size, buffer_full_watermark, max_allocated_block_size);
+}
+
+void Sink::switch_protocol_decoder(Sink& new_decoder, size_t buffer_full_watermark, size_t max_alloc)
+{
+  DoutEntering(dc::evio, "Sink::switch_protocol_decoder(new_decoder, " << buffer_full_watermark << ", " << max_alloc << ")");
+  change_specs(new_decoder.minimum_block_size(), buffer_full_watermark, max_alloc);
+  new_decoder.m_input_device = m_input_device;
+  m_input_device->switch_protocol_decoder(new_decoder);
+  m_input_device = nullptr;
+}
+
+} // namespace evio

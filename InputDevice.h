@@ -36,10 +36,13 @@
 
 namespace evio {
 
-class InputDecoder;
 class InputBuffer;
 class LinkBufferPlus;
 class Sink;
+
+namespace protocol {
+class Decoder;
+} // namespace protocol
 
 class InputDevice : public virtual FileDescriptor
 {
@@ -47,14 +50,16 @@ class InputDevice : public virtual FileDescriptor
   // Event: 'fd' is readable.
   //
   // This default implementation reads data from the fd into the buffer until
-  // 1) read(2) reads less than the available buffer space, or
-  // 2) read(2) returns 0.
-  // 3) The buffer is full and max_alloc was reached.
+  // 1) is_stream_oriented() returns true and read(2) reads less than the available buffer space, or
+  // 2) is_stream_oriented() returns false and read(2) returns EAGAIN.
+  // 3) read(2) returns 0.
+  // 4) The buffer is full and max_alloc was reached.
   // When the buffer is full stop_input_device is called.
   // When read(2) returns 0 the virtual function read_returned_zero is called, this MUST call stop_input_device()!
-  // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE), EAGAIN or EWOULDBLOCK
+  // When read(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE, EAGAIN or EWOULDBLOCK)
   // it calls the virtual function read_error, see below.
   void read_from_fd(int& allow_deletion_count, int fd) override;
+  virtual bool is_stream_oriented() { return true; }
 
   // The default behaviour is to close() the filedescriptor.
   virtual void read_returned_zero(int& allow_deletion_count) { close_input_device(allow_deletion_count); }
@@ -142,7 +147,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments);
+  void set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments);
 
   void close_input_device(int& allow_deletion_count) override final;
 
@@ -156,6 +161,8 @@ class InputDevice : public virtual FileDescriptor
  private:
   // This function is called by OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
   inline void set_sink(LinkBufferPlus* link_buffer);
+  // This function is called by Sink::switch_protocol_decoder. Never call it from anywhere else.
+  void switch_protocol_decoder(Sink& new_decoder) { m_sink = &new_decoder; }
   // Give access to the above function.
   template<typename INPUT_DEVICE>
   friend void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc);
@@ -166,23 +173,27 @@ class InputDevice : public virtual FileDescriptor
 
 } // namespace evio
 
-#include "InputDecoder.h"
+#include "protocol/Decoder.h"
 
 namespace evio {
 
 template<typename... Args>
-void InputDevice::set_sink(InputDecoder& input_decoder, Args... input_create_buffer_arguments)
+void InputDevice::set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments)
 {
 #ifdef CWDEBUG
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
-  LibcwDoutStream << "Entering InputDevice::set_sink<";
+  LibcwDoutStream << "Entering InputDevice::set_protocol_decoder<";
   LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
-    (void*)&input_decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
+    (void*)&decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
   LibcwDoutScopeEnd;
   NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
 #endif
-  m_ibuffer = static_cast<Sink&>(input_decoder).create_buffer(this, input_create_buffer_arguments...);
-  m_sink = &input_decoder;
+  // Only call set_protocol_decoder once.
+  // Use Decoder::switch_protocol_decoder from the decode() of the current decoder to change protocol decoder.
+  ASSERT(!m_ibuffer);
+  // The cast is needed to make use of the friend declaration in Sink.
+  m_ibuffer = static_cast<Sink&>(decoder).create_buffer(this, input_create_buffer_arguments...);
+  m_sink = &decoder;
 }
 
 // Device-device link declarations.
@@ -210,11 +221,11 @@ class LinkBufferPlus : public LinkBuffer, public Sink, public Source
 void InputDevice::set_sink(LinkBufferPlus* link_buffer)
 {
   // You can't pass an InputDevice to a OutputDevice::set_source() when the InputDevice
-  // already has a buffer (ie, you called already InputDevice::set_sink(InputDecoder&, ...)).
+  // already has a buffer (ie, you called already InputDevice::set_protocol_decoder(Decoder&, ...)).
   //
   // If you *really* need to do this then it is possible to replace the buffer by
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and
-  // then calling from the derived intput device:
+  // then calling from the derived input device:
   //     if (m_ibuffer->release(CWDEBUG_ONLY(this)))
   //       m_ibuffer = nullptr;
   // before passing it to OutputDevice::set_source().

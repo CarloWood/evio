@@ -41,7 +41,7 @@
 
 namespace evio {
 
-class INotifyDecoder : public InputDecoder
+class INotifyDecoder : public protocol::Decoder
 {
  private:
   size_t m_len_so_far;
@@ -87,7 +87,7 @@ class INotifyDevice : public InputDevice, public virtual FileDescriptor
 
  public:
   // INotifyDevice is a singleton. But it's safe to declare the constructor public since this is a .cxx file.
-  INotifyDevice() { set_sink(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1 + block_overhead_c) - block_overhead_c); }
+  INotifyDevice() { set_protocol_decoder(m_decoder, utils::nearest_power_of_two(sizeof(struct inotify_event) + NAME_MAX + 1 + block_overhead_c) - block_overhead_c); }
 
   int add_watch(char const* pathname, uint32_t mask, INotify* obj);
   void rm_watch(int wd);
@@ -177,6 +177,7 @@ void INotifyDevice::rm_watch(int wd)
 // BRT.
 size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
 {
+  size_t const old_len = m_len_so_far;
   m_len_so_far += rlen;
   // Fast track first.
   if (AI_LIKELY(m_len_so_far >= sizeof(int) + 12) && m_name_len == -1)
@@ -184,7 +185,6 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
   else
   {
     // Now the slower cases.
-    size_t old_len = m_len_so_far - rlen;
     if (old_len < sizeof(int) + 12)                       // Did not have name_len complete before already?
     {
       if (m_len_so_far <= sizeof(int) + 8)                // Still not any name_len bytes now?
@@ -200,6 +200,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
       // Read the additional number of bytes.
       for (int i = 0; i < n_new - n_old; ++i)
         m_buf[i + n_old] = new_data[i];
+      std::memmove(&m_name_len, m_buf, sizeof(m_buf));    // Change active union member to m_name_len.
       if (n_new < 4)                                      // Still don't have name_len completely?
         return 0;
     }
@@ -209,7 +210,7 @@ size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
     return 0;
   m_len_so_far = 0;
   m_name_len = -1;
-  return msg_len;
+  return msg_len - old_len;
 }
 
 void INotifyDecoder::decode(int& UNUSED_ARG(allow_deletion_count), MsgBlock&& msg)

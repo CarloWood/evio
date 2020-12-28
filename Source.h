@@ -25,9 +25,6 @@
  * along with evio.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// OutputDevice.h must be included first.
-#include "OutputDevice.h"
-
 #ifndef EVIO_SOURCE_H
 #define EVIO_SOURCE_H
 
@@ -36,6 +33,8 @@
 #include <limits>
 
 namespace evio {
+
+class OutputDevice;
 
 // Protocol
 //   |
@@ -49,13 +48,7 @@ class Source : public Protocol
  protected:
   OutputDevice* m_output_device;
 
-  void start_output_device()
-  {
-    DoutEntering(dc::evio, "Source::start_output_device() [" << m_output_device << ']');
-    FileDescriptor::state_t::wat state_w(m_output_device->m_state);
-    if (!state_w->m_flags.is_active_output_device())
-      m_output_device->start_output_device(state_w);
-  }
+  void start_output_device();
 
   friend class OutputDevice;
   OutputBuffer* create_buffer(OutputDevice* output_device)

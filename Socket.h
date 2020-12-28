@@ -68,7 +68,7 @@ class Socket : public InputDevice, public OutputDevice
   // The address of the remote socket; either what we connected to or the peer address of an accepted connection.
   SocketAddress m_remote_address;
 
-  // Called, if onConnected() was called, as soon as the socket becomes writable for the first time
+  // Called, if on_connected() was called, as soon as the socket becomes writable for the first time
   // (in the case of TLSSocket when the TLS handshake completed) or when such permanently failed.
   std::function<void(int&, bool)> m_connected;
   // Called when a connection is terminated and onDisconnected() was called.
@@ -112,9 +112,9 @@ class Socket : public InputDevice, public OutputDevice
   // Call this to set a call back for the connected event.
   // The first argument is `allow_deletion_count` (should be passed to functions that need it, if any are called).
   // The second argument is `success` and signals whether or not the connect was successful or failed.
-  void onConnected(std::function<void(int&, bool)>&& connected_cb)
+  void on_connected(std::function<void(int&, bool)>&& connected_cb)
   {
-    // Call onConnected before calling init / connect.
+    // Call on_connected before calling init / connect.
     ASSERT(!get_flags().is_open());
     m_connected = std::move(connected_cb);
   }
