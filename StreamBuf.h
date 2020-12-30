@@ -39,7 +39,11 @@
 #include "threadsafe/aithreadsafe.h"
 #include <atomic>
 #include <mutex>
+#include <string_view>
 
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 #ifdef DEBUGEVENTRECORDING
 #include "utils/NodeMemoryPool.h"
 #include <vector>
@@ -168,6 +172,22 @@ class MemoryBlock
 
   // Returns the current size of the allocated memory block.
   size_t get_size() const { return m_block_size; }
+
+  // See AIRefCount::unique
+  utils::FuzzyBool unique() const { return std::atomic_load_explicit(&m_count, std::memory_order_relaxed) == 1 ? fuzzy::True : fuzzy::WasFalse; }
+
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const
+  {
+    os << "{m_count:" << m_count << ", m_block_size:" << m_block_size << ", m_next: " << m_next << "} [" << this << "]";
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, MemoryBlock const& memory_block)
+  {
+    memory_block.print_on(os);
+    return os;
+  }
+#endif
 };
 
 // m_block_size should be the last member in the object, so that
@@ -187,31 +207,31 @@ static constexpr size_t block_overhead_c = sizeof(MemoryBlock) + malloc_overhead
 class MsgBlock
 {
  private:
-  char const* m_start;
-  size_t m_size;
+  std::string_view m_string;
   MemoryBlock const* m_memory_block;
 
  public:
-  MsgBlock(char const* start, size_t size) : m_start(start), m_size(size), m_memory_block(nullptr)
-  {
-  }
+  // Allow to pass a non-MemoryBlock string view to a function that takes a MsgBlock.
+  MsgBlock(char const* start, size_t len) : m_string(start, len), m_memory_block(nullptr) { }
+  MsgBlock(std::string_view view) : m_string(view), m_memory_block(nullptr) { }
 
-  MsgBlock(char const* start, size_t size, MemoryBlock const* memory_block) : m_start(start), m_size(size), m_memory_block(memory_block)
+  MsgBlock(char const* start, size_t len, MemoryBlock const* memory_block) : m_string(start, len), m_memory_block(memory_block)
   {
-    ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
+    // The string view must point entirely inside the MemoryBlock.
+    ASSERT(m_string.data() >= m_memory_block->block_start() && m_string.data() + m_string.size() <= m_memory_block->block_start() + m_memory_block->get_size());
     m_memory_block->add_reference();
   }
 
   ~MsgBlock() { if (m_memory_block) m_memory_block->release(); }
 
-  MsgBlock(MsgBlock const& msg_block) : m_start(msg_block.m_start), m_size(msg_block.m_size), m_memory_block(msg_block.m_memory_block)
+  MsgBlock(MsgBlock const& msg_block) : m_string(msg_block.m_string), m_memory_block(msg_block.m_memory_block)
   {
-    // Do not copy a MsgBlock that was constructed with the first constructor (or the result of a move of such an object).
+    // Do not copy a MsgBlock that is not associated with a MemoryBlock.
     ASSERT(m_memory_block);
     m_memory_block->add_reference();
   }
 
-  MsgBlock(MsgBlock&& msg_block) : m_start(msg_block.m_start), m_size(msg_block.m_size), m_memory_block(msg_block.m_memory_block)
+  MsgBlock(MsgBlock&& msg_block) : m_string(msg_block.m_string), m_memory_block(msg_block.m_memory_block)
   {
     msg_block.m_memory_block = nullptr;
   }
@@ -220,28 +240,35 @@ class MsgBlock
   {
     if (this == &msg_block)
       return *this;
-    // Do not assign to/from a MsgBlock that was constructed with the first constructor (or the result of a move of such an object).
-    ASSERT(m_memory_block && msg_block.m_memory_block);
-    m_memory_block->release();
-    m_start = msg_block.m_start;
-    m_size = msg_block.m_size;
+    if (m_memory_block)
+      m_memory_block->release();
+    m_string = msg_block.m_string;
     m_memory_block = msg_block.m_memory_block;
-    ASSERT(m_start >= m_memory_block->block_start() && m_start + m_size <= m_memory_block->block_start() + m_memory_block->get_size());
-    m_memory_block->add_reference();
+    if (m_memory_block)
+      m_memory_block->add_reference();
     return *this;
   }
 
   MsgBlock& operator=(MsgBlock&& msg_block)
   {
-    m_start = msg_block.m_start;
-    m_size = msg_block.m_size;
+    if (this == &msg_block)
+      return *this;
+    if (m_memory_block)
+      m_memory_block->release();
+    m_string = msg_block.m_string;
     m_memory_block = msg_block.m_memory_block;
     msg_block.m_memory_block = nullptr;
     return *this;
   }
 
-  char const* get_start() const { return m_start; }
-  size_t get_size() const { return m_size; }
+  char const* get_start() const { return m_string.data(); }
+  char const* get_end() const { return m_string.data() + m_string.size(); }
+  size_t get_size() const { return m_string.size(); }
+
+  std::string_view const& view() const { return m_string; }
+
+  void remove_prefix(size_t n) { m_string.remove_prefix(n); }
+  void remove_suffix(size_t n) { m_string.remove_suffix(n); }
 };
 
 #ifdef DEBUGEVENTRECORDING
@@ -1295,7 +1322,8 @@ inline bool StreamBufConsumer::is_contiguous(size_t len) const
 #ifdef CWDEBUG
 inline std::ostream& operator<<(std::ostream& os, evio::MsgBlock const& msg_block)
 {
-  os.write(msg_block.get_start(), msg_block.get_size()); return os;
+  os << '"' << libcwd::buf2str(msg_block.get_start(), msg_block.get_size()) << '"';
+  return os;
 }
 #endif
 

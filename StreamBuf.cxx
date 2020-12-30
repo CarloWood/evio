@@ -756,7 +756,12 @@ std::streamsize StreamBuf::xsputn(char const* s, std::streamsize n)
 
 void StreamBuf::reduce_buffer()
 {
-  DoutEntering(dc::notice, "StreamBuf::reduce_buffer");
+  DoutEntering(dc::notice, "StreamBuf::reduce_buffer " << *m_get_area_block_node);
+  // If the block is possibly referenced by others then we can't overwrite the data
+  // in this block - aka, we can't reset it.
+  if (!m_get_area_block_node->unique().is_true())
+    return;
+
   // The buffer if empty, so there is only one block (get_area_block_node == put_area_block_node).
   // Reduce get_area_block_node if it is larger than the minimum. If it is less than the minimum,
   // which can happen when m_minimum_block_size was increased by a call to change_specs, then
