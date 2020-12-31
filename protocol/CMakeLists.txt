@@ -13,6 +13,8 @@ target_sources(evio_protocol_ObjLib
   PRIVATE
     TLS.cxx
     TLS.h
+    http.cxx
+    http.h
     MessageLengthInterface.cxx
     MessageLengthInterface.h
     Decoder.cxx

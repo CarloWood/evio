@@ -1317,10 +1317,8 @@ inline bool StreamBufConsumer::is_contiguous(size_t len) const
   return gptr() + len <= get_area_block_node_end();
 }
 
-} // namespace evio
-
 #ifdef CWDEBUG
-inline std::ostream& operator<<(std::ostream& os, evio::MsgBlock const& msg_block)
+inline std::ostream& operator<<(std::ostream& os, MsgBlock const& msg_block)
 {
   os << '"' << libcwd::buf2str(msg_block.get_start(), msg_block.get_size()) << '"';
   return os;
@@ -1328,9 +1326,11 @@ inline std::ostream& operator<<(std::ostream& os, evio::MsgBlock const& msg_bloc
 #endif
 
 #ifdef DEBUGDBSTREAMBUF
-inline std::ostream& operator<<(std::ostream& os, evio::StreamBuf const& db)
+inline std::ostream& operator<<(std::ostream& os, StreamBuf const& db)
 {
   db.printOn(os);
   return os;
 }
 #endif
+
+} // namespace evio
