@@ -30,18 +30,27 @@ class MessageDecoder : public evio::protocol::Decoder
 
  private:
   state_st m_state;
-  std::vector<std::pair<std::string, evio::protocol::Decoder&>> m_content_type_to_decoder_map;
+  std::vector<std::pair<std::string, evio::Sink&>> m_content_type_to_decoder_map;
   evio::MsgBlock m_current_header_field;
   std::vector<std::pair<evio::MsgBlock, evio::MsgBlock>> m_headers;   // Field, Value pairs.
   int m_content_length;
   int m_content_type_to_decoder_index;
 
  public:
-  MessageDecoder(std::vector<std::pair<std::string, evio::protocol::Decoder&>> content_type_to_decode_map) :
-    m_content_type_to_decoder_map(content_type_to_decode_map), m_content_type_to_decoder_index(-1), m_state(start_line), m_current_header_field(nullptr, 0), m_content_length(-1) { }
+  MessageDecoder(std::vector<std::pair<std::string, evio::Sink&>> content_type_to_decoder_map = {}) :
+    m_content_type_to_decoder_map(std::move(content_type_to_decoder_map)),
+    m_content_type_to_decoder_index(-1), m_state(start_line), m_current_header_field(nullptr, 0), m_content_length(-1) { }
+
+  void add(std::pair<std::string, evio::protocol::Decoder&> content_type_decoder_pair)
+  {
+    m_content_type_to_decoder_map.push_back(content_type_decoder_pair);
+  }
+
+  // This is called by m_content_type_to_decoder_map[m_content_type_to_decoder_index].second.
+  int content_length() const { return m_content_length; }
 
  protected:
-   size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
+  std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) override;
    void decode(int& allow_deletion_count, evio::MsgBlock&& msg) override;
    void process_header_field_name(evio::MsgBlock&& msg);
    void process_header_value_name(evio::MsgBlock&& msg);
@@ -79,7 +88,7 @@ class ResponseHeadersDecoder : public MessageDecoder
  public:
   // Until the server tells us otherwise, we have to speak verion 1.0.
   // m_http_minor is updated at the moment that m_state != start_line.
-  ResponseHeadersDecoder(std::vector<std::pair<std::string, evio::protocol::Decoder&>> args) :
+  ResponseHeadersDecoder(std::vector<std::pair<std::string, evio::Sink&>> args) :
     MessageDecoder(args), m_http_minor(0), m_protocol_error(false), m_status_code(0) { }
 
   // Most HTML header lines are very short (in the order of 32 bytes or less),

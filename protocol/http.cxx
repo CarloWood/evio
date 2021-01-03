@@ -9,7 +9,7 @@ namespace evio {
 namespace protocol {
 namespace http {
 
-size_t MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
+std::streamsize MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
 {
   DoutEntering(dc::io, "http::MessageDecoder::end_of_msg_finder(..., " << rlen << ")");
   // Even when m_state == message_header_field_name we still have to detect empty lines.
@@ -108,13 +108,13 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 
 void MessageDecoder::process_header_field_name(evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "http::MessageDecoder::process_header_field_name(\"" << msg << "\")");
+  DoutEntering(dc::notice, "http::MessageDecoder::process_header_field_name(" << msg << ")");
   m_current_header_field = std::move(msg);
 }
 
 void MessageDecoder::process_header_value_name(evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "http::MessageDecoder::process_header_value_name(\"" << msg << "\")");
+  DoutEntering(dc::notice, "http::MessageDecoder::process_header_value_name(" << msg << ")");
   if (m_current_header_field.view() == "Content-Length")
   {
     auto result = std::from_chars(msg.get_start(), msg.get_end(), m_content_length);

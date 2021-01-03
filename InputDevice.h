@@ -147,7 +147,7 @@ class InputDevice : public virtual FileDescriptor
   //
 
   template<typename... Args>
-  void set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments);
+  void set_protocol_decoder(Sink& decoder, Args... input_create_buffer_arguments);
 
   void close_input_device(int& allow_deletion_count) override final;
 
@@ -174,11 +174,12 @@ class InputDevice : public virtual FileDescriptor
 } // namespace evio
 
 #include "protocol/Decoder.h"
+#include "protocol/DecoderStream.h"
 
 namespace evio {
 
 template<typename... Args>
-void InputDevice::set_protocol_decoder(protocol::Decoder& decoder, Args... input_create_buffer_arguments)
+void InputDevice::set_protocol_decoder(Sink& decoder, Args... input_create_buffer_arguments)
 {
 #ifdef CWDEBUG
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
@@ -192,7 +193,7 @@ void InputDevice::set_protocol_decoder(protocol::Decoder& decoder, Args... input
   // Use Decoder::switch_protocol_decoder from the decode() of the current decoder to change protocol decoder.
   ASSERT(!m_ibuffer);
   // The cast is needed to make use of the friend declaration in Sink.
-  m_ibuffer = static_cast<Sink&>(decoder).create_buffer(this, input_create_buffer_arguments...);
+  m_ibuffer = decoder.create_buffer(this, input_create_buffer_arguments...);
   m_sink = &decoder;
 }
 
@@ -215,7 +216,8 @@ class LinkBufferPlus : public LinkBuffer, public Sink, public Source
     LinkBuffer(input_device, output_device, minimum_block_size, buffer_full_watermark, max_alloc) { m_input_device = input_device; m_output_device = output_device; }
 
  protected:
-  size_t end_of_msg_finder(char const* new_data, size_t rlen) override;
+  // Must return 0 --> this is a Sink.
+  std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) override;
 };
 
 void InputDevice::set_sink(LinkBufferPlus* link_buffer)

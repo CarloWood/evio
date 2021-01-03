@@ -69,8 +69,7 @@ class Sink : public protocol::MessageLengthInterface
       { return create_buffer(input_device,
                              buffer_full_watermark,
                              /*max_alloc*/ std::numeric_limits<size_t>::max()); }
-  virtual InputBuffer* create_buffer(InputDevice*, size_t, size_t)
-      { /*This should never be used*/ ASSERT(false); return nullptr; }
+  InputBuffer* create_buffer(InputDevice* input_device, size_t buffer_full_watermark, size_t max_alloc);
 
  protected:
   // decode is only called from InputDevice::data_received, which is both consumer
@@ -89,9 +88,13 @@ class Sink : public protocol::MessageLengthInterface
   }
 
  public:
-  // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
+  // Returns plus or minus the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // Should only be called by InputDevice::data_received() or classes that override that.
-  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen) = 0;
+  // Return value,
+  //   > 0 : Derived class is a Decoder
+  //   = 0 : Undecided
+  //   < 0 : Derived class is a DecoderStream
+  virtual std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) = 0;
 };
 
 } // namespace evio
@@ -117,6 +120,9 @@ void Sink::switch_protocol_decoder(Sink& new_decoder, size_t buffer_full_waterma
   new_decoder.m_input_device = m_input_device;
   m_input_device->switch_protocol_decoder(new_decoder);
   m_input_device = nullptr;
+  std::istream* istr = dynamic_cast<std::istream*>(&new_decoder);
+  if (istr)
+    istr->rdbuf(new_decoder.m_input_device->m_ibuffer);
 }
 
 } // namespace evio

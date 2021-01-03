@@ -724,7 +724,9 @@ class StreamBufConsumer
   [[gnu::always_inline]] inline char* gptr() const;
   [[gnu::always_inline]] inline char* egptr() const;
   [[gnu::always_inline]] inline void gbump(int n);
+  [[gnu::always_inline]] inline void bump_total_read(int n);
   [[gnu::always_inline]] inline void setg(char* eb, char* g, char* eg);
+  [[gnu::always_inline]] inline std::streambuf* rdbuf() const;
 
   [[gnu::always_inline]] void store_last_gptr(char* p)
   {
@@ -1147,6 +1149,11 @@ char* StreamBufConsumer::egptr() const
 void StreamBufConsumer::gbump(int n)
 {
   m_input_streambuf->std::streambuf::gbump(n);
+}
+
+// This must be called every time the streambuf was bumped.
+void StreamBufConsumer::bump_total_read(int n)
+{
   // Update m_total_read, avoiding an expensive RMW operation. This is safe because only the consumer thread ever updates m_total_read.
   auto new_total_read = common().m_total_read.load(std::memory_order_relaxed);
   new_total_read += n;
@@ -1228,6 +1235,7 @@ class Buf2Dev : public StreamBuf
   void buf2dev_bump(int n)                                      // Bump pointer `n' bytes.
   {
     StreamBufConsumer::gbump(n);
+    StreamBufConsumer::bump_total_read(n);
   }
 };
 
@@ -1249,7 +1257,7 @@ class LinkBuffer : public Dev2Buf
   size_t buf2dev_contiguous() const { return as_Buf2Dev()->next_contiguous_number_of_bytes(); }
   size_t buf2dev_contiguous_forced() { return as_Buf2Dev()->force_next_contiguous_number_of_bytes(); }
   char* buf2dev_ptr() const { return as_Buf2Dev()->StreamBufConsumer::gptr(); }
-  void buf2dev_bump(int n) { as_Buf2Dev()->StreamBufConsumer::gbump(n); }
+  void buf2dev_bump(int n) { as_Buf2Dev()->StreamBufConsumer::gbump(n); as_Buf2Dev()->StreamBufConsumer::bump_total_read(n); }
   //-----------------------------------------------------------
 
   // Because this class has the same interface as Buf2Dev, it is safe to provide these casting operators:
@@ -1282,7 +1290,8 @@ class InputBuffer : public Dev2Buf
 
   // Raw binary access (instead of using istream):
   char* raw_gptr() const { return StreamBufConsumer::gptr(); }          // Get pointer to get area.
-  void raw_gbump(int n) { StreamBufConsumer::gbump(n); }                // Bump pointer `n' bytes.
+  void raw_gbump(int n) { StreamBufConsumer::gbump(n); StreamBufConsumer::bump_total_read(n); } // Bump pointer `n' bytes.
+  void raw_bump_total_read(int n) { StreamBufConsumer::bump_total_read(n); } // Update total_read.
   size_t raw_sgetn(char* s, size_t n) { return xsgetn_a(s, n); }        // Read `n' bytes and copy them to `s'.
 
   // Administration:

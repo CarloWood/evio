@@ -2,7 +2,7 @@
  * evio -- A cwm4 git submodule for adding support for buffered, iostream oriented, epoll based I/O.
  *
  * @file
- * @brief Definition of class Decoder.
+ * @brief Definition of class DecoderStream.
  *
  * @Copyright (C) 2019  Carlo Wood.
  *
@@ -27,17 +27,18 @@
 
 #include "sys.h"
 #include "evio/InputDevice.h"
-#include "Decoder.h"
+#include "DecoderStream.h"
 #include "debug.h"
 
 namespace evio {
 namespace protocol {
 
-std::streamsize Decoder::end_of_msg_finder(char const* new_data, size_t rlen)
+std::streamsize DecoderStream::end_of_msg_finder(char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "Decoder::end_of_msg_finder(..., " << rlen << ")");
+  DoutEntering(dc::io, "DecoderStream::end_of_msg_finder(..., " << rlen << ")");
   char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
-  return newline ? newline - new_data + 1 : 0;
+  // Return a negative value, because this is a DecoderStream.
+  return newline ? new_data - newline - 1 : 0;
 }
 
 } // namespace protocol

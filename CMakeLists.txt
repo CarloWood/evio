@@ -56,6 +56,7 @@ target_sources(evio_ObjLib
     "Pipe.cxx"
     "Protocol.cxx"
     "RefCountReleaser.cxx"
+    "Sink.cxx"
     "SocketAddress.cxx"
     "SocketAddressList.cxx"
     "Socket.cxx"
