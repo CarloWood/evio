@@ -621,8 +621,10 @@ class StreamBufProducer : public StreamBufCommon
 
   char* update_put_area(std::streamsize& available);
 
+#if 0
   // Allow using this streambuf for an istream or ostream class.
   std::streambuf* rdbuf() { return this; }
+#endif
 
  public:
   [[gnu::always_inline]] inline utils::FuzzyBool nothing_to_get() const;
@@ -726,7 +728,7 @@ class StreamBufConsumer
   [[gnu::always_inline]] inline void gbump(int n);
   [[gnu::always_inline]] inline void bump_total_read(int n);
   [[gnu::always_inline]] inline void setg(char* eb, char* g, char* eg);
-  [[gnu::always_inline]] inline std::streambuf* rdbuf() const;
+//  [[gnu::always_inline]] inline std::streambuf* rdbuf() const;
 
   [[gnu::always_inline]] void store_last_gptr(char* p)
   {
