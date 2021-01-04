@@ -348,15 +348,16 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
 
   bool single_block_left = false;
   std::streamsize len;
-  while ((len = m_sink->end_of_msg_finder(new_data, rlen)) != 0)
+  EndOfMsgFinderResult end_of_message_finder_result;
+  while ((len = m_sink->end_of_msg_finder(new_data, rlen, end_of_message_finder_result)) > 0)
   {
     // We seem to have a complete new message and need to call `decode'.
 
-    if (len < 0)
+    // Call the right decode.
+    if (end_of_message_finder_result.m_sink_type == decoder_stream_sink)
     {
       // If end_of_msg_finder returns a value less than 0 then m_sink must be (derived from) a DecoderStream.
       protocol::DecoderStream* decoder = static_cast<protocol::DecoderStream*>(m_sink);
-      len = -len;
 
       char* start = m_ibuffer->raw_gptr();
       size_t msg_len = (size_t)(new_data - start) + len;
@@ -410,13 +411,17 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
     if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
       return;
     rlen -= len;
-    if (rlen == 0)
+    if (AI_UNLIKELY(end_of_message_finder_result.m_new_decoder))
+      m_sink->switch_protocol_decoder(*end_of_message_finder_result.m_new_decoder);     // FIXME: pass a buffer_full_watermark and max_alloc.
+    else if (rlen == 0)
       return;   // Buffer is precisely empty anyway.
     new_data += len;
+
+    end_of_message_finder_result.reset();
   }
 }
 
-std::streamsize LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen))
+size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen), EndOfMsgFinderResult& UNUSED_ARG(result))
 {
   DoutEntering(dc::io, "LinkBufferPlus::end_of_msg_finder");
   // We're just hijacking InputDevice::data_received here. We're both, get and put thread.

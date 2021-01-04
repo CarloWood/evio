@@ -52,7 +52,7 @@ class INotifyDecoder : public protocol::Decoder
 
  protected:
   // Must return value >= 0 --> this is a protocol::Decoder.
-  std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) override;
+  size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override;
   void decode(int& allow_deletion_count, MsgBlock&& msg) override;
 };
 
@@ -176,7 +176,7 @@ void INotifyDevice::rm_watch(int wd)
 }
 
 // BRT.
-std::streamsize INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
+size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
 {
   size_t const old_len = m_len_so_far;
   m_len_so_far += rlen;

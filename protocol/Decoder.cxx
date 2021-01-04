@@ -33,7 +33,7 @@
 namespace evio {
 namespace protocol {
 
-std::streamsize Decoder::end_of_msg_finder(char const* new_data, size_t rlen)
+size_t Decoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
 {
   DoutEntering(dc::io, "Decoder::end_of_msg_finder(..., " << rlen << ")");
   char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));

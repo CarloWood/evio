@@ -154,87 +154,11 @@ StreamBufProducer::int_type StreamBufProducer::overflow_a(int_type c)
       if (get_allocated_upper_bound() > m_max_allocated_block_size ||   // This is possible when m_max_allocated_block_size was reduced (by a call to change_specs).
           (block_size = utils::max_malloc_size(m_max_allocated_block_size - get_allocated_upper_bound() + sizeof(MemoryBlock)) - sizeof(MemoryBlock)) < m_minimum_block_size)
       {
-        // Ever since the introduction of change_specs the history of a previous protocol
-        // (with its own buffer sizes) can cause a deadlock in the current protocol
-        // because that considers the buffer "full" (we get here) while there is only
-        // one, incomplete, message in the buffer, aka there is nothing to decode or read
-        // from the buffer, but also nothing new is written to it.
-        //
-        // Such a deadlock looks as follows:                                __ this message is incomplete.
-        //                                                                 |
-        //                                                                 v
-        // [...data of old protocol that was all read and decoded...|new protocol]
-        //                                                          ^
-        //                                                          |__ after decoding up till here,
-        //                                                              we switched protocol.
-        //
-        // So, because this is only an issue when switching protocol (that uses a
-        // smaller max_allocated_block_size) all of the old protocol must have been
-        // read (and decoded, or we wouldn't switch protocol). Also the block must
-        // be large because it was used for the previous protocol; hence that the
-        // above image is the only possible situation where we can run into this.
-        //
-        // The deadlock then occurs because we are not allowed to allocate more
-        // memory, but the 'new protocol' message is incomplete and can not be
-        // processed.
-        //
-        // With just one protocol involved, the minimum block size of the buffer
-        // should already be enough to fit several messages. It should never happen
-        // that we get here and deadlock (having nothing left in the buffer that
-        // can be decoded) while using a single block that is nearly the size of
-        // m_max_allocated_block_size, because the latter must be *guaranteed* to
-        // fit the maximum possible message size several times (I'd reverse that:
-        // IF we'd get here and deadlock then the given max_allocated_block_size was
-        // simply too small and the program is illformed.
-        //
-        // I think that the most sensible thing to do in the case of a deadlock
-        // is to wave the max alloc restriction and simply allocate a new block
-        // of size m_minimum_block_size. That decision therefore has to be made
-        // here; which means we need -here- be able to detect if the buffer
-        // ends on an incomplete message that was already passed to end_of_msg_finder,
-        // which subsequently returned 0.
-        //
-        // Note that to be able to distinguish between this situation and others
-        // (or at least avoid extra complications), we must assure that end_of_msg_finder
-        // is only called with an rlen > 0. Since end_of_msg_finder is only called
-        // by InputDevice::data_received that translates into that data_received
-        // should only be called with rlen > 0, which is the case given that rlen
-        // is the return value of a call to read(2): if that returned 0 then we
-        // have an error and, not more data.
-        //
-        // We get here BEFORE calling read(2) though: when looking for a new
-        // contiguous piece of memory that we can read into.
-        //
-        // So we have to detect that a *previous* call to InputDevice::read_from_fd
-        // did read(2) into the buffer, filling it up entirely, and then wasn't
-        // able to decode all of it.
-        //
-        // The very fact that we are here means that the buffer *is* full
-        // (epptr() == pptr()): the variable 'space' in InputDevice::read_from_fd
-        // is zero after all, causing it to call m_ibuffer->dev2buf_contiguous_forced(),
-        // leading to a call to this function. And if we return EOF then
-        // dev2buf_contiguous_forced will return 0 (which is again assigned to
-        // space) causing this input device to be stopped.
-        //
-        // This means that the last call to
-        //
-        //   rlen = ::read(fd, new_data, space)
-        //
-        // returned a value rlen == space > 0, with which subsequently
-        // data_received() has been called. That function tries to decode all
-        // messages by default; it won't return unless it processed all
-        // data that was passed to it. Hence, unless the buffer is empty
-        // (in which case we wouldn't be here) our conditions for a deadlock
-        // are always met, except when we have more than one block.
-        //
-        // Unfortunately, we can't call has_multiple_blocks() from here: this
-        // is StreamBufProducer. Therefore we have to pass the responsibility
-        // for all this to the caller that -hopefully- is both producer and
-        // consumer thread. You see this reflected too in the fact that we
-        // used get_allocated_upper_bound() which might have returned a
-        // value that is too large, causing a seemingly full buffer while
-        // that isn't really the case (anymore).
-
+        // We are not allowed to allocate a new memory block if this are already more than one.
+        // If there is only a single block we MUST allocate more memory in order to avoid
+        // a possible dead lock where there is an undecodable message at the end of the
+        // block (in that case it is best to just allocate more memory so we can decode it).
+        // It is the responsibility of the caller to test this.
         return static_cast<int_type>(EOF);
       }
     }

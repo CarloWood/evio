@@ -34,6 +34,28 @@ namespace evio {
 
 class InputDevice;
 
+enum sink_type {
+  decoder_sink,
+  decoder_stream_sink
+};
+
+struct EndOfMsgFinderResult
+{
+  sink_type m_sink_type;
+  Sink* m_new_decoder;
+
+  void reset()
+  {
+    m_sink_type = decoder_sink;
+    m_new_decoder = nullptr;
+  }
+
+  EndOfMsgFinderResult()
+  {
+    reset();
+  }
+};
+
 // MessageLengthInterface
 //  |
 //  v                  ::set_sink()
@@ -88,13 +110,12 @@ class Sink : public protocol::MessageLengthInterface
   }
 
  public:
-  // Returns plus or minus the size of the first message (including end of msg sequence), or 0 if there is no complete message.
+  // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
   // Should only be called by InputDevice::data_received() or classes that override that.
   // Return value,
-  //   > 0 : Derived class is a Decoder
+  //   > 0 : Derived class is a Decoder or DecoderStream (see result.m_sink_type).
   //   = 0 : Undecided
-  //   < 0 : Derived class is a DecoderStream
-  virtual std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) = 0;
+  virtual size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) = 0;
 };
 
 } // namespace evio

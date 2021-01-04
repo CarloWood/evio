@@ -33,12 +33,12 @@
 namespace evio {
 namespace protocol {
 
-std::streamsize DecoderStream::end_of_msg_finder(char const* new_data, size_t rlen)
+size_t DecoderStream::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
 {
   DoutEntering(dc::io, "DecoderStream::end_of_msg_finder(..., " << rlen << ")");
   char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
-  // Return a negative value, because this is a DecoderStream.
-  return newline ? new_data - newline - 1 : 0;
+  result.m_sink_type = decoder_stream_sink;
+  return newline ? newline - new_data + 1 : 0;
 }
 
 } // namespace protocol

@@ -9,11 +9,11 @@ namespace evio {
 namespace protocol {
 namespace http {
 
-std::streamsize MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen)
+size_t MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
 {
   DoutEntering(dc::io, "http::MessageDecoder::end_of_msg_finder(..., " << rlen << ")");
   // Even when m_state == message_header_field_name we still have to detect empty lines.
-  if (m_state == message_header_field_name && AI_UNLIKELY(*new_data == '\r'))
+  if (m_state == message_header_field_name && rlen > 0 && AI_UNLIKELY(*new_data == '\r'))
   {
     m_state = empty_line;
     return (rlen > 1 && new_data[1] == '\n') ? 2 : 0;

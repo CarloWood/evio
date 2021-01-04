@@ -63,7 +63,7 @@ struct TLSSource : public Source
 
 struct TLSSink : public Decoder
 {
-  std::streamsize end_of_msg_finder(const char*, size_t) override
+  size_t end_of_msg_finder(const char*, size_t, EndOfMsgFinderResult&) override
   {
     DoutEntering(dc::evio, "TLSSink::end_of_msg_finder()");
     return 0;

@@ -217,7 +217,7 @@ class LinkBufferPlus : public LinkBuffer, public Sink, public Source
 
  protected:
   // Must return 0 --> this is a Sink.
-  std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) override;
+  size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override;
 };
 
 void InputDevice::set_sink(LinkBufferPlus* link_buffer)

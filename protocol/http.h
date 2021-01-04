@@ -50,13 +50,13 @@ class MessageDecoder : public evio::protocol::Decoder
   int content_length() const { return m_content_length; }
 
  protected:
-  std::streamsize end_of_msg_finder(char const* new_data, size_t rlen) override;
-   void decode(int& allow_deletion_count, evio::MsgBlock&& msg) override;
-   void process_header_field_name(evio::MsgBlock&& msg);
-   void process_header_value_name(evio::MsgBlock&& msg);
+  size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override;
+  void decode(int& allow_deletion_count, evio::MsgBlock&& msg) override;
+  void process_header_field_name(evio::MsgBlock&& msg);
+  void process_header_value_name(evio::MsgBlock&& msg);
 
-   // Throws upon failure.
-   virtual void decode_start_line(evio::MsgBlock const& msg) = 0;
+  // Throws upon failure.
+  virtual void decode_start_line(evio::MsgBlock const& msg) = 0;
 };
 
 // Accept HTTP Response input of the form:
