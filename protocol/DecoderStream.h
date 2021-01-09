@@ -16,9 +16,8 @@ namespace protocol {
 
 class DecoderStream : public std::istream, public Sink
 {
- public: // Should only be called by InputDevice::data_received or classes that override that.
-  // Given the char array new_data of size rlen, returns the negative value of length of the string
-  // (starting at new_data) up to and including the first newline char, if any. Otherwise returns 0.
+ public:
+  // See comment for end_of_msg_finder in evio::Decoder.
   size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override;
 
   friend class InputDevice;

@@ -176,7 +176,7 @@ void INotifyDevice::rm_watch(int wd)
 }
 
 // BRT.
-size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
+size_t INotifyDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& UNUSED_ARG(result))
 {
   size_t const old_len = m_len_so_far;
   m_len_so_far += rlen;

@@ -14,7 +14,7 @@ class EOFDecoder : public Sink
   static EOFDecoder& instance() { return s_instance; }
 
  protected:
-  size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override
+  size_t end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen), EndOfMsgFinderResult& UNUSED_ARG(result)) override
   {
     m_input_device->close_input_device();
     return 0;

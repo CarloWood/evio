@@ -110,11 +110,17 @@ class Sink : public protocol::MessageLengthInterface
   }
 
  public:
-  // Returns the size of the first message (including end of msg sequence), or 0 if there is no complete message.
+  // Returns the length (starting at new_data) up till and including the last end of msg sequence,
+  // or 0 if there is no complete message. Note that in order to detect end of message sequences
+  // that cross a boundary, internal state might be needed.
+  //
   // Should only be called by InputDevice::data_received() or classes that override that.
-  // Return value,
-  //   > 0 : Derived class is a Decoder or DecoderStream (see result.m_sink_type).
-  //   = 0 : Undecided
+  //
+  // IMPORTANT: If an end_of_msg_finder is overridden for a class derived from DecoderStream then
+  // one must do `result.m_sink_type = decoder_stream_sink` before returning from that function.
+  //
+  // It is possible to switch protocol/decoder by settting result.m_new_decoder. The new decoder
+  // will be used for subsequent data (the length returned is still decoded by the current decoder).
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) = 0;
 };
 
