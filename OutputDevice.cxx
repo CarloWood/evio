@@ -251,7 +251,13 @@ void OutputDevice::close_output_device(int& allow_deletion_count)
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
 #endif
-      remove_output_device(allow_deletion_count, state_w);
+      if (!state_w->m_flags.is_regular_file())
+        remove_output_device(allow_deletion_count, state_w);
+      else
+      {
+        state_w->m_flags.unset_w_flushing();
+        stop_not_flushing_output_device(state_w);
+      }
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //

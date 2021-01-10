@@ -191,7 +191,10 @@ void InputDevice::close_input_device(int& allow_deletion_count)
       if (!is_valid(m_fd))
         Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << m_fd << ".");
 #endif
-      remove_input_device(allow_deletion_count, state_w);
+      if (!state_w->m_flags.is_regular_file())
+        remove_input_device(allow_deletion_count, state_w);
+      else
+        stop_input_device(state_w);
       // FDS_SAME is set when this is both, an input device and an output device and is
       // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
       //
