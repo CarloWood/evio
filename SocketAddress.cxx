@@ -349,6 +349,7 @@ void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
     THROW_FALERTC(SocketAddress_make_sockaddr_un_path_too_long, "\"[SOCKADDR_TEXT]\": UNIX socket path is too long");
   std::memcpy(m_sockaddr_un_ptr->sun_path, sockaddr_text.data(), len);
   m_sockaddr_un_ptr->sun_path[len] = '\0';
+  m_sockaddr_un_ptr->sun_path[sizeof(m_sockaddr_un_ptr->sun_path) - 1] = '\0';
   m_sockaddr_un_ptr->sun_family = AF_UNIX;
 }
 
