@@ -519,6 +519,9 @@ void SocketAddress::init(struct sockaddr const* sa_addr)
     case AF_UNIX:
     {
       struct sockaddr_un const* sun(reinterpret_cast<struct sockaddr_un const*>(sa_addr));
+      // At ALL times make sure this byte is 0. If it isn't, then sun_path is most likely
+      // uninitialized and calling strlen would be UB.
+      ASSERT(sun->sun_path[sizeof(sun->sun_path) - 1] == '\0');
       make_sockaddr_un(std::string_view(sun->sun_path, strlen(sun->sun_path)));
       break;
     }

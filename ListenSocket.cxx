@@ -117,7 +117,8 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog, size_t r
 void ListenSocketDevice::read_from_fd(int& UNUSED_ARG(allow_deletion_count), int fd)
 {
   int sock_fd;
-  char accept_addr_buf[sizeof(struct sockaddr_un)];
+  alignas(struct sockaddr_un) char accept_addr_buf[sizeof(struct sockaddr_un)];
+  std::memset(accept_addr_buf, 0, sizeof(accept_addr_buf));
   struct sockaddr* accept_addr_ptr =reinterpret_cast<struct sockaddr*>(accept_addr_buf);
   socklen_t addrlen = sizeof(accept_addr_buf);
 
@@ -138,7 +139,13 @@ void ListenSocketDevice::read_from_fd(int& UNUSED_ARG(allow_deletion_count), int
   }
   SocketAddress accept_addr(accept_addr_ptr);
   Dout(dc::finish, '{' << accept_addr << "}, " << '{' << addrlen << "}, SOCK_NONBLOCK | SOCK_CLOEXEC) = " << sock_fd);
-  Dout(dc::notice, "accepted a new client on fd " << sock_fd << " from " << accept_addr);
+#ifdef CWDEBUG
+  Dout(dc::notice|continued_cf, "accepted a new client on fd " << sock_fd);
+  std::string from = accept_addr.to_string();
+  if (!from.empty())
+    Dout(dc::continued, " from " << from);
+  Dout(dc::finish, ".");
+#endif
 
   spawn_accepted(sock_fd, accept_addr);
 }

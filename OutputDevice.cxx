@@ -424,7 +424,9 @@ int OutputDevice::sync()
   PutThread type;
   if (AI_UNLIKELY(!state_t::rat(m_state)->m_flags.is_writable()))
   {
-    Dout(dc::warning, "The device is not writable!");
+    // If this happens for a socket that is connect()-ing, call flush_output_device()
+    // from the on_connected call back instead of immediately.
+    Dout(dc::warning, "The device is not writable! A subsequent flush_output_device() will close_output_device() the device instead of flushing the data in the buffer!");
     return -1;
   }
   // Advance m_last_pptr, if necessary; making any data written so far available to the consumer thread.
