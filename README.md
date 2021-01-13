@@ -51,10 +51,12 @@ unix_socket_source << "Hello World" << std::endl;
 ```
 
 where respectively `listen(endpoint)` and `connect(endpoint)` created new file descriptors and called `FileDescriptor::init` with them.
+The full example can be found [here](https://github.com/CarloWood/ai-evio-testsuite/blob/master/src/unix_socket.cxx).
 
-The filedescriptor of such a device is closed upon destruction of the device or when the user explicitly calls
-the member function `close()`. In both cases the virtual function `closed()` is called (and,
-in the case of calling `close()`, `is_open()` will return false afterwards).
+The filedescriptor of such a device is closed immediately prior to destruction of the device
+or when the user explicitly calls the member function `close()`. In both cases the virtual
+function `closed()` is called (and, in the case of calling `close()`, `is_open()` will return
+false afterwards).
 
 There are three reasons why a Device is not immediately destroyed once the last `boost::intrusive_ptr`
 is destructed:
