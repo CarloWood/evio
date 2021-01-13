@@ -77,6 +77,7 @@ class InputDevice : public virtual FileDescriptor
 
   Sink* m_sink;                                         // The sink object that this device writes to.
   InputBuffer* m_ibuffer;                               // A pointer to the input buffer.
+  size_t m_msg_len;                                     // Cumulation of received data passed to end_of_message_finder that did not contain a decodable message yet.
 #ifdef DEBUGDEVICESTATS
   size_t m_received_bytes;
 #endif
@@ -195,6 +196,7 @@ void InputDevice::set_protocol_decoder(Sink& decoder, Args... input_create_buffe
   // The cast is needed to make use of the friend declaration in Sink.
   m_ibuffer = decoder.create_buffer(this, input_create_buffer_arguments...);
   m_sink = &decoder;
+  m_msg_len = 0;
 }
 
 // Device-device link declarations.
@@ -235,6 +237,7 @@ void InputDevice::set_sink(LinkBufferPlus* link_buffer)
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
   m_sink = link_buffer;
+  m_msg_len = 0;
 }
 
 // This can be thrown from read_returned_zero when you want read_from_fd to continue reading anyway.

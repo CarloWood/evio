@@ -456,6 +456,10 @@ class StreamBufCommon : public std::streambuf
  public: // Please do not use this (for internal use only).
   [[gnu::always_inline]] char* last_pptr_consumer_read_access() const { return m_last_pptr.load(std::memory_order_acquire); }
   [[gnu::always_inline]] bool resetting_consumer_read_access() const { return m_resetting.load(std::memory_order_acquire); }
+
+#ifdef CWDEBUG
+  std::streamsize total_read() const { return m_total_read.load(std::memory_order_relaxed); }
+#endif
 };
 
 //=============================================================================
@@ -979,6 +983,19 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
     return m_total_allocated - unused_in_last_block() + m_total_reset - m_total_read.load(std::memory_order_relaxed);
   }
 
+  // Correct the value of m_total_read, knowing the amount of data that should be in the buffer right now.
+  void update_total_read(size_t data_size)
+  {
+    DoutEntering(dc::io, "update_total_read(" << data_size << ")");
+#ifdef CWDEBUG
+    std::streamsize prev_total_read = m_total_read.load(std::memory_order_relaxed);
+#endif
+    std::streamsize new_total_read = m_total_allocated - unused_in_last_block() + m_total_reset - data_size;
+    m_total_read.store(new_total_read, std::memory_order_relaxed);
+    Dout(dc::io, "m_total_read incremented by " << (new_total_read - prev_total_read));
+    ASSERT(new_total_read >= prev_total_read);
+  }
+
   // Returns `true' when this buffer currently has more then one block allocated.
   // This can be used to speed up read/write access methods.
   // The returned value only makes sense when this is both the consumer thread and the producer thread at the same time.
@@ -1287,7 +1304,6 @@ class InputBuffer : public Dev2Buf
   // Raw binary access (instead of using istream):
   char* raw_gptr() const { return StreamBufConsumer::gptr(); }          // Get pointer to get area.
   void raw_gbump(int n) { StreamBufConsumer::gbump(n); StreamBufConsumer::bump_total_read(n); } // Bump pointer `n' bytes.
-  void raw_bump_total_read(int n) { StreamBufConsumer::bump_total_read(n); } // Update total_read.
   size_t raw_sgetn(char* s, size_t n) { return xsgetn_a(s, n); }        // Read `n' bytes and copy them to `s'.
 
   // Administration:

@@ -35,9 +35,38 @@ namespace protocol {
 
 size_t DecoderStream::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result)
 {
-  DoutEntering(dc::io, "DecoderStream::end_of_msg_finder(..., " << rlen << ")");
+  DoutEntering(dc::io|continued_cf, "DecoderStream::end_of_msg_finder(..., " << rlen << ") = ");
+
+  if (AI_UNLIKELY(m_message_length == -1))        // Not initialized yet.
+  {
+    // The callback m_get_message_length must be set. You can set it by calling DecoderStream::set_next_decoder.
+    // If you do not HAVE a message length then it makes little sense to use this function.
+    // In that case you should override end_of_msg_finder with whatever is your end_of_msg_finder_stream now.
+    ASSERT(m_get_message_length);
+    m_message_length = m_get_message_length();
+  }
+
+  size_t found_len;
+
+  // Switch decoder if the total number of bytes received is m_message_length or greater.
+  if (AI_LIKELY((m_total_len += rlen) < m_message_length))
+    found_len = end_of_msg_finder_stream(new_data, rlen);
+  else
+  {
+    Dout(dc::io, "Received " << m_total_len << " bytes in total now (m_message_length = " << m_message_length << ")");
+    found_len = rlen - (m_total_len - m_message_length);
+    result.m_new_decoder = m_next_decoder;
+  }
+
+  result.m_sink_type = evio::decoder_stream_sink;
+  Dout(dc::finish, found_len << "[new_data = " << (void*)new_data << "; end = " << (void*)(new_data + found_len) << "(\"" << libcwd::buf2str(new_data + found_len, rlen - found_len) << "\")]");
+  return found_len;
+}
+
+size_t DecoderStream::end_of_msg_finder_stream(char const* new_data, size_t rlen)
+{
+  DoutEntering(dc::io, "DecoderStream::end_of_msg_finder_stream(..., " << rlen << ")");
   char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
-  result.m_sink_type = decoder_stream_sink;
   return newline ? newline - new_data + 1 : 0;
 }
 

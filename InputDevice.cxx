@@ -53,12 +53,10 @@ InputDevice::~InputDevice()
     ASSERT(!state_w->m_flags.is_active_input_device());
     is_r_open = state_w->m_flags.is_r_open();
   }
-  if (is_r_open)
-  {
-    int allow_deletion_count = 0;
-    close_input_device(allow_deletion_count);       // This will not delete the object (again) because it isn't active.
-    ASSERT(allow_deletion_count == 0);
-  }
+  // An input device must be closed (by calling close_input_device, or close) before
+  // it is destructed. We can not call close_input_device here, from the destructor,
+  // because that calls a virtual function (closed).
+  ASSERT(!is_r_open);
   if (m_ibuffer)
   {
     // Delete the input buffer if it is no longer needed.
@@ -350,42 +348,50 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   // it while we're here, or the program is ill-formed.
 
   bool single_block_left = false;
-  std::streamsize len;
+  size_t len;
   EndOfMsgFinderResult end_of_message_finder_result;
   while ((len = m_sink->end_of_msg_finder(new_data, rlen, end_of_message_finder_result)) > 0)
   {
     // We seem to have a complete new message and need to call `decode'.
 
+    // Calculate the size of the decodable chunk.
+    size_t msg_len = m_msg_len + len;
+    m_msg_len = 0;
+
     // Call the right decode.
     if (end_of_message_finder_result.m_sink_type == decoder_stream_sink)
     {
-      // If end_of_msg_finder returns a value less than 0 then m_sink must be (derived from) a DecoderStream.
+      // The decoder is a DecoderStream.
       protocol::DecoderStream* decoder = static_cast<protocol::DecoderStream*>(m_sink);
-
-      char* start = m_ibuffer->raw_gptr();
-      size_t msg_len = (size_t)(new_data - start) + len;
-      decoder->decode(allow_deletion_count);
-      m_ibuffer->raw_bump_total_read(msg_len);
+      Dout(dc::notice, "before: total_read = " << m_ibuffer->total_read() << "; gptr = " << (void*)m_ibuffer->raw_gptr());
+      decoder->decode(allow_deletion_count, msg_len);
+      Dout(dc::notice, "after:  total_read = " << m_ibuffer->total_read() << "; gptr = " << (void*)m_ibuffer->raw_gptr());
+      // This is what should be left in the buffer. From that we can deduce what has been read
+      // using the std::istream interface.
+      m_ibuffer->update_total_read(rlen - len);
     }
     else
     {
-      // If end_of_msg_finder returns a value larger than 0 then m_sink must be (derived from) a Decoder.
+      // The decoder is a Decoder.
       protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
 
       if (single_block_left ||    // Once we have only a single block left, that will continue to be the case.
           (single_block_left = !m_ibuffer->has_multiple_blocks()))
       {
         char* start = m_ibuffer->raw_gptr();
-        size_t msg_len = (size_t)(new_data - start) + len;
+        // This has worked before... so just a sanity check. If it fails there is a bug in the library.
+        ASSERT(msg_len == (size_t)(new_data - start) + len);
         decoder->decode(allow_deletion_count, MsgBlock(start, msg_len, m_ibuffer->get_get_area_block_node()));
         m_ibuffer->raw_gbump(msg_len);
       }
       else
       {
+        // This has worked before... so just a sanity check. If it fails there is a bug in the library.
+        //
         // The new message must start at gptr(), the beginning of the unread data in the buffer,
         // so the total length of the new message is the total size of the data in the buffer
         // minus any extra data that was already read beyond this message.
-        size_t msg_len = m_ibuffer->get_data_size() - (rlen - len);
+        ASSERT(msg_len == m_ibuffer->get_data_size() - (rlen - len));
 
         if (m_ibuffer->is_contiguous(msg_len))
         {
@@ -422,6 +428,8 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
 
     end_of_message_finder_result.reset();
   }
+  // Cumulate undecodable bytes.
+  m_msg_len += rlen;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen), EndOfMsgFinderResult& UNUSED_ARG(result))

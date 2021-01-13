@@ -166,7 +166,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void add_needs_deletion(FileDescriptor const* ptr);
 
  private:
-  std::atomic<FileDescriptor const*> m_needs_deletion_list;       // A singly linked list of FileDescriptor (derived) objects that need to be deleted.
+  std::atomic<FileDescriptor const*> m_needs_deletion_list;     // A singly linked list of FileDescriptor (derived) objects that need to be deleted.
 
   void flush_need_deletion();
 

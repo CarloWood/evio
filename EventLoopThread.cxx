@@ -352,7 +352,7 @@ void EventLoopThread::emain()
     // main loop (destructing evio::EventLoop) do one of the following:
     //
     // In the case of an OutputDevice (FDS_W_OPEN is set), either call close_output_device()
-    // (or close()) to forcefully close the device (ie, if it is in an error state),
+    // (or close()) to forcefully close the device (e.g. if it is in an error state),
     // or call flush_output_device() once you're done writing to it.
     // Alternatively call close_on_exit() after initialization; this will automatically
     // (forcefully) close the output device when the main loop is terminated. This can
@@ -814,6 +814,9 @@ void EventLoopThread::flush_need_deletion()
     FileDescriptor const* orphan = head;
     Dout(dc::evio, "Deleting orphan = " << orphan);
     head = orphan->m_next_needs_deletion;
+    int allow_deletion_count = 0;
+    const_cast<FileDescriptor*>(orphan)->close(allow_deletion_count);   // This will not delete the object (again) because it isn't active.
+    ASSERT(allow_deletion_count == 0);
     DEBUG_ONLY(orphan->mark_deleted());
     delete orphan;
 #ifdef CWDEBUG

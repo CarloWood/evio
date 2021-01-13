@@ -696,7 +696,7 @@ boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 #if CWDEBUG_LOCATION
   LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
   LibcwDoutStream << "Entering evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
-  (LibcwDoutStream << ... << (", " + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
+  (LibcwDoutStream << ... << (std::string(", ") + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
   LibcwDoutScopeEnd;
   ::NAMESPACE_DEBUG::Indent indentation(2);
 #else

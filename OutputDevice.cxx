@@ -65,12 +65,15 @@ OutputDevice::~OutputDevice()
     ASSERT(!state_r->m_flags.is_added());
     is_w_open = state_r->m_flags.is_w_open();
   }
-  if (is_w_open)
-  {
-    int allow_deletion_count = 0;
-    close_output_device(allow_deletion_count);    // This will not delete the object (again) because it isn't added.
-    ASSERT(allow_deletion_count == 0);
-  }
+  // An output device must be closed (by calling close_output_device, or close) before
+  // it is destructed. We can not call close_output_device here, from the destructor,
+  // because that calls a virtual function (closed).
+  //
+  // In most cases you want to call flush_output_device after the last byte was written
+  // to the output device (however, take care not to do that at the moment the device
+  // isn't writable yet; e.g. a socket that isn't connected yet. In that case call
+  // flush_output_device in the call back of the connected signal (by calling on_connected).
+  ASSERT(!is_w_open);
   if (m_obuffer)
   {
     // Delete the output buffer if it is no longer needed.
