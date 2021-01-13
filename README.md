@@ -33,21 +33,23 @@ For example,
 
 ```
 evio::SocketAddress endpoint("/tmp/unix_socket");
-evio::OutputStream unix_socket_source;
+evio::OutputStream socket_stream;
 
-// Create a UNIX listen socket.
-auto listen_socket = evio::create<MyUNIXListenSocket>();
+// Create a listen socket.
+auto listen_socket = evio::create<MyListenSocket>();
 listen_socket->listen(endpoint);
 ASSERT(listen_socket->get_flags().is_open());
 
-// Connect a UNIX socket to this listen socket.
-auto unix_socket = evio::create<MyUNIXSocket>();
-unix_socket->set_source(unix_socket_source);
-unix_socket->connect(endpoint);
-ASSERT(unix_socket->get_flags().is_open());
+// Create a UNIX socket and connect it to our listen socket.
+auto socket = evio::create<evio::Socket>();
 
-// Write some data over the connection.
-unix_socket_source << "Hello World" << std::endl;
+// Write data to the output buffer of the socket.
+socket->set_source(socket_stream);
+socket_stream << "Hello world!" << std::endl;
+
+// Connect it to the end point.
+socket->connect(endpoint);
+ASSERT(socket->get_flags().is_open());
 ```
 
 where respectively `listen(endpoint)` and `connect(endpoint)` created new file descriptors and called `FileDescriptor::init` with them.
