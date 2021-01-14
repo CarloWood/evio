@@ -14,6 +14,20 @@ class InputDevice;
 
 namespace protocol {
 
+// The DecoderStream provides access to an istream to read directly from
+// the buffer. It does, therefore, not guarantee contiguousness, but rather
+// leaves the data in the buffer whereever it is. Since this avoids any
+// copy of data (to make it contiguous) it is perfectly fine to accumulate
+// large amounts of data with end_of_msg_finder_stream before returning
+// a non-zero value. Even the whole document if that fits into memory.
+//
+// The default end_of_msg_finder_stream always returns 0. Therefore
+// decode is only called once the full size of the document is received.
+// This size must be provided through a callback function that is passed
+// to set_next_decoder. If this is the last piece of data that needs to
+// be decoded on this stream, you can use evio::protocol::EOFDecoder::instance()
+// as next_decoder, which just closes the input device.
+//
 class DecoderStream : public std::istream, public Sink
 {
  protected:

@@ -65,9 +65,7 @@ size_t DecoderStream::end_of_msg_finder(char const* new_data, size_t rlen, EndOf
 
 size_t DecoderStream::end_of_msg_finder_stream(char const* new_data, size_t rlen)
 {
-  DoutEntering(dc::io, "DecoderStream::end_of_msg_finder_stream(..., " << rlen << ")");
-  char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
-  return newline ? newline - new_data + 1 : 0;
+  return 0;
 }
 
 } // namespace protocol
