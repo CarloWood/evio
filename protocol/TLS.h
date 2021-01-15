@@ -65,7 +65,7 @@ struct TLSSink : public Decoder
 {
   size_t end_of_msg_finder(const char*, size_t, EndOfMsgFinderResult&) override
   {
-    DoutEntering(dc::evio, "TLSSink::end_of_msg_finder()");
+    DoutEntering(dc::evio, "TLSSink::end_of_msg_finder");
     return 0;
   }
 
