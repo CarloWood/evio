@@ -22,6 +22,8 @@ target_sources(evio_protocol_ObjLib
     DecoderStream.h
     EOFDecoder.cxx
     EOFDecoder.h
+    UTF8_SAX_Decoder.cxx
+    UTF8_SAX_Decoder.h
 )
 
 # Required include search-paths.
