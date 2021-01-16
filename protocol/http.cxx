@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "evio/protocol/EOFDecoder.h"
 #include "http.h"
 #include <charconv>
 #ifdef CWDEBUG
@@ -88,7 +89,10 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
         else
         {
           m_state = body;
-          switch_protocol_decoder(m_content_type_to_decoder_map[m_content_type_to_decoder_index].second);
+          Sink& new_decoder{m_content_type_to_decoder_map[m_content_type_to_decoder_index].second};
+          switch_protocol_decoder(new_decoder);
+          if (m_content_length != -1)
+            new_decoder.set_next_decoder(evio::protocol::EOFDecoder::instance(), [content_length = m_content_length](){ return content_length; });
         }
         break;
       case body:

@@ -39,6 +39,7 @@ class Decoder : public Sink
   size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) override;
 
   friend class InputDevice;
+  // This should return true iff it called set_next_decoder.
   virtual void decode(int& allow_deletion_count, MsgBlock&& msg) = 0;
 };
 

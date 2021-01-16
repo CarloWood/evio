@@ -350,8 +350,29 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
   bool single_block_left = false;
   size_t len;
   EndOfMsgFinderResult end_of_message_finder_result;
-  while ((len = m_sink->end_of_msg_finder(new_data, rlen, end_of_message_finder_result)) > 0)
+
+  // Cache m_content_length, if provided.
+  m_sink->initialize_content_length();
+
+  // The code below assumes this.
+  ASSERT(rlen > 0);
+
+  // Split all rlen bytes into messages and decode those.
+  for (;;)
   {
+    // Use this variable to detect a change of decoder.
+    Sink* current_decoder = m_sink;
+
+    // Do not pass more data to the current decoder than current_decoder.m_content_length.
+    size_t decoder_rlen = current_decoder->decoder_rlen(rlen);
+    len = current_decoder->end_of_msg_finder(new_data, decoder_rlen, end_of_message_finder_result);
+    if (len == 0)
+    {
+      // Cumulate undecodable bytes.
+      m_msg_len += decoder_rlen;
+      return;
+    }
+
     // We seem to have a complete new message and need to call `decode'.
 
     // Calculate the size of the decodable chunk.
@@ -362,7 +383,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
     if (end_of_message_finder_result.m_sink_type == decoder_stream_sink)
     {
       // The decoder is a DecoderStream.
-      protocol::DecoderStream* decoder = static_cast<protocol::DecoderStream*>(m_sink);
+      protocol::DecoderStream* decoder = static_cast<protocol::DecoderStream*>(current_decoder);
       Dout(dc::notice, "before: total_read = " << m_ibuffer->total_read() << "; gptr = " << (void*)m_ibuffer->raw_gptr());
       decoder->decode(allow_deletion_count, msg_len);
       Dout(dc::notice, "after:  total_read = " << m_ibuffer->total_read() << "; gptr = " << (void*)m_ibuffer->raw_gptr());
@@ -373,7 +394,7 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
     else
     {
       // The decoder is a Decoder.
-      protocol::Decoder* decoder = static_cast<protocol::Decoder*>(m_sink);
+      protocol::Decoder* decoder = static_cast<protocol::Decoder*>(current_decoder);
 
       if (single_block_left ||    // Once we have only a single block left, that will continue to be the case.
           (single_block_left = !m_ibuffer->has_multiple_blocks()))
@@ -416,20 +437,45 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
     // to the number of bytes that we read beyond that message.
     ASSERT(m_ibuffer->get_data_size() == rlen - len);
 
+    // Keep track of the total number of bytes received by this decoder.
+    current_decoder->m_total_len += msg_len;
+    // We should never pass more than m_content_length to the current decoder!
+    ASSERT(current_decoder->m_total_len <= current_decoder->m_content_length);
+
     m_ibuffer->raw_reduce_buffer_if_empty();
-    if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
-      return;
     rlen -= len;
-    if (AI_UNLIKELY(end_of_message_finder_result.m_new_decoder))
-      m_sink->switch_protocol_decoder(*end_of_message_finder_result.m_new_decoder);     // FIXME: pass a buffer_full_watermark and max_alloc.
-    else if (rlen == 0)
-      return;   // Buffer is precisely empty anyway.
     new_data += len;
+
+    for (;;)
+    {
+      // Handle a decoder switch.
+      if (current_decoder->m_total_len == current_decoder->m_content_length)
+      {
+        Dout(dc::notice, "Content length reached.");
+        // Notify the decoder.
+        current_decoder->end_of_content(allow_deletion_count);
+        // The next line (also) sets m_sink to current_decoder->m_next_decoder.
+        current_decoder->switch_protocol_decoder(*current_decoder->m_next_decoder);               // FIXME: pass a buffer_full_watermark and max_alloc.
+      }
+
+      if (!FileDescriptor::state_t::wat(m_state)->m_flags.is_readable())
+        return;
+
+      if (m_sink != current_decoder)                      // Did the call to decode switch protocol?
+      {
+        current_decoder = m_sink;                         // Really switch decoder.
+        current_decoder->initialize_content_length();     // Initialize the cached message length.
+        continue;                                         // Go to top in order to make EOFDecoder work.
+      }
+      else if (rlen == 0)
+        return;   // Buffer is precisely empty anyway.
+
+      // Not really a loop.
+      break;
+    }
 
     end_of_message_finder_result.reset();
   }
-  // Cumulate undecodable bytes.
-  m_msg_len += rlen;
 }
 
 size_t LinkBufferPlus::end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t UNUSED_ARG(rlen), EndOfMsgFinderResult& UNUSED_ARG(result))

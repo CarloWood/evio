@@ -19,7 +19,6 @@ target_sources(evio_protocol_ObjLib
     MessageLengthInterface.h
     Decoder.cxx
     Decoder.h
-    DecoderStream.cxx
     DecoderStream.h
     EOFDecoder.cxx
     EOFDecoder.h

@@ -42,12 +42,10 @@ enum sink_type {
 struct EndOfMsgFinderResult
 {
   sink_type m_sink_type;
-  Sink* m_new_decoder;
 
   void reset()
   {
     m_sink_type = decoder_sink;
-    m_new_decoder = nullptr;
   }
 
   EndOfMsgFinderResult()
@@ -75,14 +73,25 @@ struct EndOfMsgFinderResult
 
 class Sink : public protocol::MessageLengthInterface
 {
+ public:
+  static constexpr size_t c_undefined = std::numeric_limits<size_t>::max();
+
  protected:
   InputDevice* m_input_device;
+  std::function<int()> m_get_content_length;    // m_get_content_length() should return the total size of the input by the time end_of_msg_finder is called.
+  size_t m_content_length;                      // Cached value of m_get_content_length(), or std::numeric_limits<size_t>::max() when not given.
+  size_t m_total_len;                           // The total number of bytes that this decoder has received (by end_of_msg_finder).
+  Sink* m_next_decoder;                         // The decoder to switch to after having received m_content_length bytes.
+
+  // (Re)initialize the above member variables.
+  void initialize(InputDevice* input_device);
 
   [[gnu::always_inline]] inline void start_input_device();
   [[gnu::always_inline]] inline void stop_input_device();
   [[gnu::always_inline]] inline void close_input_device(int& allow_deletion_count);
 
   friend class InputDevice;
+  void initialize_content_length();
   InputBuffer* create_buffer(InputDevice* input_device)
       { return create_buffer(input_device,
                              /*buffer_full_watermark*/ 8 * StreamBuf::round_up_minimum_block_size(minimum_block_size()),
@@ -110,6 +119,19 @@ class Sink : public protocol::MessageLengthInterface
   }
 
  public:
+  // Switch to next_decoder after having received exactly get_content_length() bytes.
+  void set_next_decoder(Sink& next_decoder, std::function<int()> get_content_length)
+  {
+    m_next_decoder = &next_decoder;
+    m_get_content_length = get_content_length;
+  }
+
+  size_t decoder_rlen(size_t rlen) const
+  {
+    // Return the number of bytes of rlen that are still part of this decoders content.
+    return std::min(m_total_len + rlen, m_content_length) - m_total_len;
+  }
+
   // Returns the length (starting at new_data) up till and including the last end of msg sequence,
   // or 0 if there is no complete message. Note that in order to detect end of message sequences
   // that cross a boundary, internal state might be needed.
@@ -118,10 +140,11 @@ class Sink : public protocol::MessageLengthInterface
   //
   // IMPORTANT: If an end_of_msg_finder is overridden for a class derived from DecoderStream then
   // one must do `result.m_sink_type = decoder_stream_sink` before returning from that function.
-  //
-  // It is possible to switch protocol/decoder by settting result.m_new_decoder. The new decoder
-  // will be used for subsequent data (the length returned is still decoded by the current decoder).
   virtual size_t end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& result) = 0;
+
+  // This is called when content length bytes have been processed (so only when set_next_decoder was used).
+  // The default does nothing.
+  virtual void end_of_content(int& UNUSED_ARG(allow_deletion_count)) { }
 };
 
 } // namespace evio
@@ -144,7 +167,7 @@ void Sink::switch_protocol_decoder(Sink& new_decoder, size_t buffer_full_waterma
 {
   DoutEntering(dc::evio, "Sink::switch_protocol_decoder(new_decoder, " << buffer_full_watermark << ", " << max_alloc << ")");
   change_specs(new_decoder.minimum_block_size(), buffer_full_watermark, max_alloc);
-  new_decoder.m_input_device = m_input_device;
+  new_decoder.initialize(m_input_device);
   m_input_device->switch_protocol_decoder(new_decoder);
   m_input_device = nullptr;
   std::istream* istr = dynamic_cast<std::istream*>(&new_decoder);
