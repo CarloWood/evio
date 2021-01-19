@@ -12,14 +12,17 @@ namespace xml {
 
 class Element
 {
+ public:
+  using index_type = int;
+
  private:
-  int m_id;
+  index_type m_id;
   std::string m_name;
 
  public:
-  Element(int id, std::string&& name) : m_id(id), m_name(std::move(name)) { }
+  Element(index_type id, std::string&& name) : m_id(id), m_name(std::move(name)) { }
 
-  int id() const { return m_id; }
+  index_type id() const { return m_id; }
   std::string const& name() const { return m_name; }
 
   void print_on(std::ostream& os) const;
@@ -37,17 +40,16 @@ class Element
 //
 // It only supports UTF-8.
 //
-class UTF8_SAX_Decoder : public evio::protocol::Decoder
+class UTF8_SAX_Decoder : public Decoder
 {
  public:
-  using element_id_type = int;          // Index into m_unique_elements.
+  using element_id_type = xml::Element::index_type;
 
  private:
   bool m_document_begin;
-  std::deque<xml::Element> m_unique_elements;                           // This must be a deque, so that growing it won't invalidate references to its elements:
-  std::unordered_map<std::string_view, element_id_type> m_elements;     // namely, the string_view points to xml::Element::m_name of the elements in m_unique_elements.
 
-  int add_new_unique_element(std::string&& name);
+ protected:
+  utils::Dictionary<xml::Element> m_dictionary;
 
  public:
   UTF8_SAX_Decoder() : m_document_begin(true) { }
@@ -57,13 +59,12 @@ class UTF8_SAX_Decoder : public evio::protocol::Decoder
 
  protected:
   // Pre-register elements so that their id is known. Note that name must point persistent memory (for as long as the decoder is in use); for example, a string-literal.
-  void register_element_id(int id, std::string name);
   size_t end_of_msg_finder(char const* new_data, size_t rlen, evio::EndOfMsgFinderResult& result) final;
   void decode(int& allow_deletion_count, evio::MsgBlock&& msg) override;
   void end_of_content(int& allow_deletion_count) override;
 
 #ifdef CWDEBUG
-  xml::Element const& element(element_id_type element_id) const { return m_unique_elements[element_id]; }
+  xml::Element const& element(element_id_type element_id) const { return m_dictionary[element_id]; }
 #endif
 
  protected:
@@ -72,8 +73,8 @@ class UTF8_SAX_Decoder : public evio::protocol::Decoder
     DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_document(" << content_length << ", \"" << version << "\", \"" << encoding << "\")");
   }
   virtual void end_document() { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_document()"); }
-  virtual void start_element(element_id_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_element({" << m_unique_elements[element_id] << "})"); }
-  virtual void end_element(element_id_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_element({" << m_unique_elements[element_id] << "})"); }
+  virtual void start_element(element_id_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_element({" << m_dictionary[element_id] << "})"); }
+  virtual void end_element(element_id_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_element({" << m_dictionary[element_id] << "})"); }
   virtual void characters(std::string_view const& data) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::characters(\"" << libcwd::buf2str(data.data(), data.size()) << "\")"); }
 };
 
