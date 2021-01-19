@@ -71,7 +71,7 @@ struct TLSSink : public Decoder
 
   void decode(int& CWDEBUG_ONLY(allow_deletion_count), MsgBlock&& CWDEBUG_ONLY(msg)) override
   {
-    DoutEntering(dc::evio, "TLSSink::decode({" << allow_deletion_count << "}, " << msg << ")");
+    DoutEntering(dc::decoder, "TLSSink::decode({" << allow_deletion_count << "}, " << msg << ")");
   }
 };
 

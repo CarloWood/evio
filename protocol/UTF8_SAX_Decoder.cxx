@@ -9,13 +9,32 @@ namespace protocol {
 
 size_t UTF8_SAX_Decoder::end_of_msg_finder(char const* new_data, size_t rlen, evio::EndOfMsgFinderResult& UNUSED_ARG(result))
 {
-  DoutEntering(dc::io|continued_cf, "UTF8_SAX_Decoder::end_of_msg_finder(..., " << rlen << ") = ");
+  DoutEntering(dc::endofmsg|continued_cf, "UTF8_SAX_Decoder::end_of_msg_finder(..., " << rlen << ") = ");
   // ASCII bytes (< 128) do not occur when encoding non-ASCII code points into UTF-8 (all extension bytes are >= 128).
   // It is therefore safe to simply search byte for byte for a '>'.
   char const* right_angle_bracket = static_cast<char const*>(memchr(new_data, '>', rlen));
   size_t found_len = right_angle_bracket ? right_angle_bracket - new_data + 1 : 0;
   Dout(dc::finish, found_len);
   return found_len;
+}
+
+int UTF8_SAX_Decoder::add_new_unique_element(std::string&& name)
+{
+  int element_id = m_unique_elements.size();
+  m_unique_elements.emplace_back(element_id, std::move(name));
+  // The std::string const& returned by name() is not invalidated by a subsequent m_unique_elements.emplace_back because m_unique_elements is a std::deque.
+  m_elements.emplace(m_unique_elements[element_id].name(), element_id);
+  return element_id;
+}
+
+void UTF8_SAX_Decoder::register_element_id(int element_id, std::string name)
+{
+  DoutEntering(dc::decoder, "UTF8_SAX_Decoder::register_element_id(" << element_id << ", \"" << name << "\")");
+  // register_element_id must be called with increasing id's, starting at 0 and incrementing id with 1 for each call.
+  ASSERT(m_unique_elements.size() == element_id);
+  add_new_unique_element(std::move(name));
+  // This is the whole point of doing this.
+  ASSERT(m_unique_elements[element_id].id() == element_id);
 }
 
 UTF8_SAX_Decoder::element_id_type UTF8_SAX_Decoder::get_element_id(std::string_view name)
@@ -28,18 +47,15 @@ UTF8_SAX_Decoder::element_id_type UTF8_SAX_Decoder::get_element_id(std::string_v
       THROW_FALERT("Empty name");
   }
   auto iter = m_elements.find(name);
-  if (AI_UNLIKELY(iter != m_elements.end()))    // Unlikely because the whole idea is that we find previously used elements, often.
-    return iter->second.id();
+  if (AI_LIKELY(iter != m_elements.end()))      // Likely because the whole idea is that we find previously used elements, often.
+    return iter->second;
 
-  int element_id = m_unique_elements.size();
-  m_unique_elements.emplace_back(m_elements.size(), std::string(name));
-  m_elements.emplace(name, m_unique_elements.back());
-  return element_id;
+  return add_new_unique_element(std::string(name));
 }
 
 void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "UTF8_SAX_Decoder::decode({" << allow_deletion_count << "}, " <<  msg << ")");
+  DoutEntering(dc::decoder, "UTF8_SAX_Decoder::decode({" << allow_deletion_count << "}, " <<  msg << ")");
 
   char const* const data = msg.get_start();
   size_t const len = msg.get_size();
@@ -111,7 +127,7 @@ void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 
 void UTF8_SAX_Decoder::end_of_content(int& CWDEBUG_ONLY(allow_delection_count))
 {
-  DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_of_content({" << allow_delection_count << "})");
+  DoutEntering(dc::decoder, "UTF8_SAX_Decoder::end_of_content({" << allow_delection_count << "})");
   end_document();
 }
 

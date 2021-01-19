@@ -161,6 +161,7 @@ class InputDevice : public virtual FileDescriptor
 
  private:
   // This function is called by OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const&, ...).
+  // If you want to link two devices call set_source on the output device, not this function on the input device.
   inline void set_sink(LinkBufferPlus* link_buffer);
   // This function is called by Sink::switch_protocol_decoder. Never call it from anywhere else.
   void switch_protocol_decoder(Sink& new_decoder) { m_sink = &new_decoder; }

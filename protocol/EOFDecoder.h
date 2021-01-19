@@ -21,7 +21,7 @@ class EOFDecoder : public Sink
  protected:
   size_t end_of_msg_finder(char const* UNUSED_ARG(new_data), size_t CWDEBUG_ONLY(rlen), EndOfMsgFinderResult& UNUSED_ARG(result)) override
   {
-    DoutEntering(dc::io, "EOFDecoder::end_of_msg_finder({" << rlen << "}) = 0");
+    DoutEntering(dc::endofmsg, "EOFDecoder::end_of_msg_finder({" << rlen << "}) = 0");
     return 0;
   }
 

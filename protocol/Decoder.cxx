@@ -35,7 +35,7 @@ namespace protocol {
 
 size_t Decoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& UNUSED_ARG(result))
 {
-  DoutEntering(dc::io, "Decoder::end_of_msg_finder(..., " << rlen << ")");
+  DoutEntering(dc::endofmsg, "Decoder::end_of_msg_finder(..., " << rlen << ")");
   char const* newline = static_cast<char const*>(std::memchr(new_data, '\n', rlen));
   return newline ? newline - new_data + 1 : 0;
 }

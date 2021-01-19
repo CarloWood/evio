@@ -2,6 +2,13 @@
 #include "Sink.h"
 #include <limits>
 
+#ifdef CWDEBUG
+NAMESPACE_DEBUG_CHANNELS_START
+channel_ct endofmsg("ENDOFMSG");
+channel_ct decoder("DECODER");
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 namespace evio {
 
 void Sink::initialize(InputDevice* input_device)
@@ -14,7 +21,7 @@ void Sink::initialize(InputDevice* input_device)
 
 void Sink::initialize_content_length()
 {
-  DoutEntering(dc::notice, "Sink::initialize_content_length()");
+  DoutEntering(dc::decoder, "Sink::initialize_content_length()");
   if (m_content_length == Sink::c_undefined && m_get_content_length)
   {
     m_content_length = m_get_content_length();

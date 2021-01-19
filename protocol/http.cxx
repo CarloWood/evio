@@ -12,7 +12,7 @@ namespace http {
 
 size_t MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndOfMsgFinderResult& UNUSED_ARG(result))
 {
-  DoutEntering(dc::io, "http::MessageDecoder::end_of_msg_finder(..., " << rlen << ")");
+  DoutEntering(dc::endofmsg, "http::MessageDecoder::end_of_msg_finder(..., " << rlen << ")");
   // Even when m_state == message_header_field_name we still have to detect empty lines.
   if (m_state == message_header_field_name && rlen > 0 && AI_UNLIKELY(*new_data == '\r'))
   {
@@ -30,7 +30,7 @@ size_t MessageDecoder::end_of_msg_finder(char const* new_data, size_t rlen, EndO
 
 void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "http::MessageDecoder::decode({" << allow_deletion_count << "}, " << msg << ") [" << this << ']');
+  DoutEntering(dc::decoder, "http::MessageDecoder::decode({" << allow_deletion_count << "}, " << msg << ") [" << this << ']');
   try
   {
     switch (m_state)
@@ -78,7 +78,7 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
           close_input_device(allow_deletion_count);
           return;
         }
-        Dout(dc::notice, "Received empty line. Content-Length is " << m_content_length);
+        Dout(dc::decoder, "Received empty line. Content-Length is " << m_content_length);
         // Switch decoder.
         if (m_content_type_to_decoder_index == -1)
         {
@@ -97,7 +97,7 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
         break;
       case body:
         for (auto&& p : m_headers)
-          Dout(dc::notice, p.first << " : " << p.second);
+          Dout(dc::decoder, p.first << " : " << p.second);
         m_headers.clear();
         close_input_device(allow_deletion_count);
         break;
@@ -112,13 +112,13 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 
 void MessageDecoder::process_header_field_name(evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "http::MessageDecoder::process_header_field_name(" << msg << ")");
+  DoutEntering(dc::decoder, "http::MessageDecoder::process_header_field_name(" << msg << ")");
   m_current_header_field = std::move(msg);
 }
 
 void MessageDecoder::process_header_value_name(evio::MsgBlock&& msg)
 {
-  DoutEntering(dc::notice, "http::MessageDecoder::process_header_value_name(" << msg << ")");
+  DoutEntering(dc::decoder, "http::MessageDecoder::process_header_value_name(" << msg << ")");
   if (m_current_header_field.view() == "Content-Length")
   {
     auto result = std::from_chars(msg.get_start(), msg.get_end(), m_content_length);
@@ -133,7 +133,7 @@ void MessageDecoder::process_header_value_name(evio::MsgBlock&& msg)
     for (int i = 0; i < m_content_type_to_decoder_map.size(); ++i)
       if (m_content_type_to_decoder_map[i].first == msg.view())
       {
-        Dout(dc::notice, "Found match.");
+        Dout(dc::decoder, "Found match.");
         m_content_type_to_decoder_index = i;
         break;
       }
@@ -144,7 +144,7 @@ void MessageDecoder::process_header_value_name(evio::MsgBlock&& msg)
 void ResponseHeadersDecoder::decode_start_line(evio::MsgBlock const& msg)
 {
   // Just print what was received.
-  DoutEntering(dc::notice, "http::ResponseHeadersDecoder::decode_start_line(" << msg << ") [" << this << ']');
+  DoutEntering(dc::decoder, "http::ResponseHeadersDecoder::decode_start_line(" << msg << ") [" << this << ']');
 
   // This is the first line of a Response Message.
   //
