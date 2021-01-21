@@ -18,7 +18,7 @@ size_t UTF8_SAX_Decoder::end_of_msg_finder(char const* new_data, size_t rlen, ev
   return found_len;
 }
 
-UTF8_SAX_Decoder::element_id_type UTF8_SAX_Decoder::get_element_id(std::string_view name)
+UTF8_SAX_Decoder::index_type UTF8_SAX_Decoder::get_element_id(std::string_view name)
 {
   // The name passed might still end on zero or more spaces.
   while (name.back() == ' ')
@@ -72,7 +72,7 @@ void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
       {
         // <n> or <n/>.
         bool empty_tag = data[len - 2] == '/';
-        element_id_type element_id = get_element_id({&data[1], len - (empty_tag ? 3 : 2)});
+        index_type element_id = get_element_id({&data[1], len - (empty_tag ? 3 : 2)});
         start_element(element_id);
         if (empty_tag)
           end_element(element_id);
@@ -112,7 +112,7 @@ namespace xml {
 
 void Element::print_on(std::ostream& os) const
 {
-  os << m_name;
+  os << '{' << m_id << ", \"" << m_name << "\"}";
 }
 
 } // namespace xml
