@@ -32,8 +32,12 @@
 #include "INotify.h"
 #include "threadpool/AIThreadPool.h"
 #include "utils/cpu_relax.h"
+#include "utils/AIAlert.h"
 #include "debug.h"
 #include <chrono>
+#ifdef CWDEBUG
+#include "utils/debug_ostream_operators.h"
+#endif
 
 #ifndef DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS
 #define DEBUG_EPOLL_PWAIT_DELAY_MICROSECONDS 0
@@ -275,7 +279,15 @@ void EventLoopThread::emain()
               queue_access.move_in([device, epoll_fd = m_epoll_fd COMMA_CWDEBUG_ONLY(input_events)](){
                 Dout(dc::evio, "Beginning of handling event " << epoll_events_str(input_events) << " for " << device << ".");
                 int allow_deletion_count = 1;                     // Balance with the call to inhibit_deletion(false) above.
-                device->read_event(allow_deletion_count);
+                try
+                {
+                  device->read_event(allow_deletion_count);
+                }
+                catch (AIAlert::Error const& error)
+                {
+                  Dout(dc::warning, error);
+                  device->close(allow_deletion_count);
+                }
                 device->clear_pending_input_event(epoll_fd);
                 device->allow_deletion(allow_deletion_count);
                 return false;

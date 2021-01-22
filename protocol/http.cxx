@@ -105,7 +105,7 @@ void MessageDecoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
   }
   catch (AIAlert::Error const& error)
   {
-    Dout(dc::warning, error);
+    Dout(dc::warning, error << " caught in http.cxx");
     close_input_device(allow_deletion_count);
   }
 }

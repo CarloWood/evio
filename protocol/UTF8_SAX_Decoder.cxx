@@ -94,11 +94,11 @@ void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
   }
   catch (AIAlert::Error const& error)
   {
-    THROW_FALERT("Parse error decoding \"[DATA]\"", AIArgs("[DATA]", msg), error);
+    THROW_FALERT("Parse error decoding [DATA]", AIArgs("[DATA]", msg), error);
   }
   catch (ParseError const&)
   {
-    THROW_FALERT("Parse error decoding \"[DATA]\"", AIArgs("[DATA]", msg));
+    THROW_FALERT("Parse error decoding [DATA]", AIArgs("[DATA]", msg));
   }
 }
 
@@ -110,10 +110,12 @@ void UTF8_SAX_Decoder::end_of_content(int& CWDEBUG_ONLY(allow_delection_count))
 
 namespace xml {
 
-void Element::print_on(std::ostream& os) const
+#ifdef CWDEBUG
+void ElementType::print_on(std::ostream& os) const
 {
   os << '{' << m_id << ", \"" << m_name << "\"}";
 }
+#endif
 
 } // namespace xml
 

@@ -157,8 +157,18 @@ void Socket::read_from_fd(int& allow_deletion_count, int fd)
   // Otherwise it is only true at most once.
   if (AI_UNLIKELY(!(m_connected_flags & is_connected)) && !m_connected)
     m_connected_flags |= is_connected;
-  // Call base class implementation.
-  InputDevice::read_from_fd(allow_deletion_count, fd);
+  try
+  {
+    // Call base class implementation.
+    InputDevice::read_from_fd(allow_deletion_count, fd);
+  }
+  catch (AIAlert::Error const& error)
+  {
+    if (get_flags().is_open())
+      THROW_ALERT("While reading from [ADDRESS]", AIArgs("[ADDRESS]", address()), error);
+    else
+      throw;
+  }
 }
 
 // Read thread.
