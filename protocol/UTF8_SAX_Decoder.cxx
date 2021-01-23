@@ -108,16 +108,5 @@ void UTF8_SAX_Decoder::end_of_content(int& CWDEBUG_ONLY(allow_delection_count))
   end_document();
 }
 
-namespace xml {
-
-#ifdef CWDEBUG
-void ElementType::print_on(std::ostream& os) const
-{
-  os << '{' << m_id << ", \"" << m_name << "\"}";
-}
-#endif
-
-} // namespace xml
-
 } // namespace protocol
 } // namespace evio
