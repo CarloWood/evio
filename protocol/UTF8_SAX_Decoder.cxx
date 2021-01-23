@@ -94,11 +94,11 @@ void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
   }
   catch (AIAlert::Error const& error)
   {
-    THROW_FALERT("Parse error decoding [DATA]", AIArgs("[DATA]", msg), error);
+    THROW_FALERT("XML parse error decoding [DATA]", AIArgs("[DATA]", msg), error);
   }
   catch (ParseError const&)
   {
-    THROW_FALERT("Parse error decoding [DATA]", AIArgs("[DATA]", msg));
+    THROW_FALERT("XML parse error decoding [DATA]", AIArgs("[DATA]", msg));
   }
 }
 

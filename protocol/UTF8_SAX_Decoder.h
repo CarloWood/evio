@@ -25,7 +25,7 @@ class ElementType
 
  public:
   // This is a data_type of utils::Dictionary and therefore has mandatory arguments.
-  ElementType(index_type id, std::string&& CWDEBUG_ONLY(name)) : m_id(id) COMMA_CWDEBUG_ONLY(m_name(std::move(name))) { }
+  ElementType(index_type id COMMA_CWDEBUG_ONLY(std::string name)) : m_id(id) COMMA_CWDEBUG_ONLY(m_name(std::move(name))) { }
 
   index_type id() const { return m_id; }
 
@@ -70,6 +70,8 @@ class ElementBase
 
   virtual std::string name() const = 0;
   virtual bool has_allowed_parent() = 0;
+  virtual void characters(std::string_view const& data) = 0;
+  virtual void end_element() = 0;
 };
 
 } // namespace xml
@@ -86,7 +88,7 @@ class UTF8_SAX_Decoder : public Decoder
 
  private:
   bool m_document_begin;
-  utils::Dictionary<enum_type, std::vector<xml::ElementType>, index_type> m_dictionary;
+  utils::Dictionary<enum_type, index_type> m_dictionary;
 
  public:
   UTF8_SAX_Decoder() : m_document_begin(true) { }
@@ -97,7 +99,7 @@ class UTF8_SAX_Decoder : public Decoder
  protected:
   void add(enum_type element_id, std::string&& element_name)
   {
-    m_dictionary.add(element_id, element_name, xml::ElementType{static_cast<index_type>(element_id), std::move(element_name)});
+    m_dictionary.add(element_id, element_name);
   }
   size_t end_of_msg_finder(char const* new_data, size_t rlen, evio::EndOfMsgFinderResult& result) final;
   void decode(int& allow_deletion_count, evio::MsgBlock&& msg) override;
@@ -105,7 +107,7 @@ class UTF8_SAX_Decoder : public Decoder
 
   // And for enum_type, which implicitly converts to index_type anyway.
   //xml::ElementType& element(index_type element_id) { return m_dictionary[element_id]; }   // Commented out because this object is used for every element with the same name.
-  xml::ElementType const& element_type(index_type element_id) const { return m_dictionary[element_id]; }
+  xml::ElementType element_type(index_type element_id) const { return { element_id COMMA_CWDEBUG_ONLY(m_dictionary.word(element_id)) }; }
 
  protected:
   virtual void start_document(size_t content_length, std::string version, std::string encoding)
@@ -113,8 +115,8 @@ class UTF8_SAX_Decoder : public Decoder
     DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_document(" << content_length << ", \"" << version << "\", \"" << encoding << "\")");
   }
   virtual void end_document() { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_document()"); }
-  virtual void start_element(index_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_element({" << m_dictionary[element_id] << "})"); }
-  virtual void end_element(index_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_element({" << m_dictionary[element_id] << "})"); }
+  virtual void start_element(index_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::start_element({" << m_dictionary.word(element_id) << "})"); }
+  virtual void end_element(index_type element_id) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::end_element({" << m_dictionary.word(element_id) << "})"); }
   virtual void characters(std::string_view const& data) { DoutEntering(dc::notice, "UTF8_SAX_Decoder::characters(\"" << libcwd::buf2str(data.data(), data.size()) << "\")"); }
 };
 
