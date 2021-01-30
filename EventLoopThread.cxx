@@ -63,7 +63,6 @@ void EventLoopThread::init(AIQueueHandle handler)
 
 EventLoopThread::~EventLoopThread()
 {
-  DoutEntering(dc::evio, "EventLoopThread::~EventLoopThread()");
   // Call EventLoopThread::instance().terminate() before leaving main().
   ASSERT(!m_event_thread.joinable());
 
@@ -72,7 +71,7 @@ EventLoopThread::~EventLoopThread()
 //    if (m_terminate)
 //      ev_ref();
     if (::close(m_epoll_fd) == -1)
-      Dout(dc::warning|error_cf, "close(" << m_epoll_fd << ") = -1");
+      Dout(dc::warning|error_cf, "EventLoopThread::~EventLoopThread: close(" << m_epoll_fd << ") = -1");
   }
 }
 
