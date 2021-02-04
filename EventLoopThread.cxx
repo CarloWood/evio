@@ -550,7 +550,15 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
           queue_access.move_in([device](){
               Dout(dc::evio, "Beginning of handling read event for " << device << ".");
               int allow_deletion_count = 1;      // The balance the call to inhibit_deletion above.
-              device->read_event(allow_deletion_count);
+              try
+              {
+                device->read_event(allow_deletion_count);
+              }
+              catch (AIAlert::Error const& error)
+              {
+                Dout(dc::warning, error);
+                device->close(allow_deletion_count);
+              }
               device->allow_deletion(allow_deletion_count);
               return false;
           });
