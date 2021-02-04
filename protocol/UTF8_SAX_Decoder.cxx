@@ -34,7 +34,14 @@ void UTF8_SAX_Decoder::decode(int& allow_deletion_count, evio::MsgBlock&& msg)
 {
   DoutEntering(dc::decoder, "UTF8_SAX_Decoder::decode({" << allow_deletion_count << "}, " <<  msg << ")");
 
-  char const* const data = msg.get_start();
+  // Allow newlines and indentation...
+  size_t leading_number_of_WS = 0;
+  char const* data = msg.get_start();
+  while (std::isspace(data[leading_number_of_WS]))
+    ++leading_number_of_WS;
+  msg.remove_prefix(leading_number_of_WS);
+
+  data = msg.get_start();
   size_t const len = msg.get_size();
 
   // decode should never be called with an empty msg.
