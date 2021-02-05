@@ -113,21 +113,27 @@ void File::open(std::string const& filename, std::ios_base::openmode mode, int p
 
   // Success.
   init(fd, filename);
-  state_t::wat state_w(m_state);
-  if (m_ibuffer)
-    start_input_device(state_w);
-  if (m_obuffer)
   {
-    // This condition assumes we are the PutThread (no other thread is writing
-    // to this buffer). This is correct since we only started the input device
-    // and no other thread but the EventLoopThread even knows about this
-    // device/buffer yet, as we just initialized it.
-    utils::FuzzyCondition condition_not_empty([this]{
-          return !m_obuffer->StreamBufProducer::nothing_to_get();
-        });
-    if (condition_not_empty.is_momentary_true())
-      start_output_device(state_w, condition_not_empty);
+    state_t::wat state_w(m_state);
+    if (m_ibuffer)
+      start_input_device(state_w);
+    if (m_obuffer)
+    {
+      // This condition assumes we are the PutThread (no other thread is writing
+      // to this buffer). This is correct since we only started the input device
+      // and no other thread but the EventLoopThread even knows about this
+      // device/buffer yet, as we just initialized it.
+      utils::FuzzyCondition condition_not_empty([this]{
+            return !m_obuffer->StreamBufProducer::nothing_to_get();
+          });
+      if (condition_not_empty.is_momentary_true())
+        start_output_device(state_w, condition_not_empty);
+    }
   }
+  if (!m_ibuffer)
+    close_input_device();
+  if (!m_obuffer)
+    close_output_device();
 }
 
 } // namespace evio
