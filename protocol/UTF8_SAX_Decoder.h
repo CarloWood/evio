@@ -2,7 +2,6 @@
 
 #include "evio/protocol/Decoder.h"
 #include "utils/Dictionary.h"
-#include "utils/NodeMemoryPool.h"
 #include <unordered_map>
 #include <string_view>
 #include <iosfwd>
