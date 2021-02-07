@@ -69,7 +69,7 @@ void StreamBuf::dump()
   DoutEntering(dc::notice, "StreamBuf::dump()");
   for (auto&& mb : m_keep_v)
   {
-    Dout(dc::notice, "[" << (void*)mb->block_start() << ", " << (void*)(mb->block_start() + mb->get_size()) << "> \"" << libcwd::buf2str(mb->block_start(), mb->get_size()) << "\".");
+    Dout(dc::notice, "[" << (void*)mb->block_start() << ", " << (void*)(mb->block_start() + mb->get_size()) << "> \"" << buf2str(mb->block_start(), mb->get_size()) << "\".");
   }
 }
 #endif // DEBUGKEEPMEMORYBLOCKS
@@ -462,7 +462,7 @@ int StreamBufConsumer::underflow_a()
 // the (new) put area.
 StreamBuf::int_type StreamBufProducer::pbackfail(int_type c)
 {
-  DoutEntering(dc::notice, "pbackfail(" << libcwd::char2str(c) << ") [" << this << ']');
+  DoutEntering(dc::notice, "pbackfail(" << char2str(c) << ") [" << this << ']');
   if (c == static_cast<int_type>(EOF))
   {
 #ifdef DEBUGDBSTREAMBUF

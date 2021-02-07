@@ -49,7 +49,7 @@ class AcceptedSocket : public Socket
   AcceptedSocket()
   {
 #if CWDEBUG_LOCATION
-    DoutEntering(dc::evio, "AcceptedSocket<" << libcwd::type_info_of<INPUTDECODER>().demangled_name() << ", " << libcwd::type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">()");
+    DoutEntering(dc::evio, "AcceptedSocket<" << type_info_of<INPUTDECODER>().demangled_name() << ", " << type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">()");
 #else
     DoutEntering(dc::evio, "AcceptedSocket<>()");
 #endif
@@ -60,7 +60,7 @@ class AcceptedSocket : public Socket
   ~AcceptedSocket()
   {
 #if CWDEBUG_LOCATION
-    Dout(dc::evio, "~AcceptedSocket<" << libcwd::type_info_of<INPUTDECODER>().demangled_name() << ", " << libcwd::type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">()");
+    Dout(dc::evio, "~AcceptedSocket<" << type_info_of<INPUTDECODER>().demangled_name() << ", " << type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">()");
 #else
     Dout(dc::evio, "~AcceptedSocket<>()");
 #endif

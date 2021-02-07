@@ -286,7 +286,7 @@ void OutputDevice::set_source(Source& output_device_ptr, Args... output_create_b
 template<typename INPUT_DEVICE>
 void OutputDevice::set_source(boost::intrusive_ptr<INPUT_DEVICE> const& ptr, size_t requested_minimum_block_size, size_t buffer_full_watermark, size_t max_alloc)
 {
-  DoutEntering(dc::evio, "OutputDevice::set_source<" << libcwd::type_info_of<INPUT_DEVICE>().demangled_name() << ">([" << &*ptr << "], " << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::set_source<" << type_info_of<INPUT_DEVICE>().demangled_name() << ">([" << &*ptr << "], " << requested_minimum_block_size << ", " << buffer_full_watermark << ", " << max_alloc << ") [" << this << ']');
 
   // We need to create a link buffer and use it to link the following two devices.
   InputDevice* input_device = ptr.get();
