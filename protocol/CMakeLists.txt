@@ -11,19 +11,23 @@ add_library(evio_protocol_ObjLib OBJECT)
 # The list of source files.
 target_sources(evio_protocol_ObjLib
   PRIVATE
-    TLS.cxx
-    TLS.h
-    http.cxx
-    http.h
-    MessageLengthInterface.cxx
-    MessageLengthInterface.h
-    Decoder.cxx
-    Decoder.h
-    DecoderStream.h
-    EOFDecoder.cxx
-    EOFDecoder.h
-    UTF8_SAX_Decoder.cxx
-    UTF8_SAX_Decoder.h
+    "TLS.cxx"
+    "TLS.h"
+    "http.cxx"
+    "http.h"
+    "MessageLengthInterface.cxx"
+    "MessageLengthInterface.h"
+    "Decoder.cxx"
+    "Decoder.h"
+    "DecoderStream.h"
+    "EOFDecoder.cxx"
+    "EOFDecoder.h"
+    "UTF8_SAX_Decoder.cxx"
+    "UTF8_SAX_Decoder.h"
+    "XML_RPC_Decoder.cxx"
+    "XML_RPC_Decoder.h"
+    "XML_RPC_Encoder.cxx"
+    "XML_RPC_Encoder.h"
 )
 
 # Required include search-paths.
@@ -48,4 +52,6 @@ target_link_libraries(evio_protocol_ObjLib
 add_library(AICxx::evio_protocol ALIAS evio_protocol_ObjLib)
 
 # Prepend this object library to list.
-set(AICXX_OBJECTS_LIST AICxx::evio_protocol ${AICXX_OBJECTS_LIST} CACHE INTERNAL "List of OBJECT libaries that this project uses.")
+set(AICXX_OBJECTS_LIST AICxx::evio_protocol_xmlrpc AICxx::evio_protocol ${AICXX_OBJECTS_LIST} CACHE INTERNAL "List of OBJECT libaries that this project uses.")
+
+add_subdirectory(xmlrpc)
