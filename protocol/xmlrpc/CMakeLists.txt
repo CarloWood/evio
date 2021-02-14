@@ -7,6 +7,8 @@ project(xmlrpc
 
 include(AICxxProject)
 
+find_package(magic_enum REQUIRED)
+
 #==============================================================================
 # BUILD PROJECT
 #
@@ -27,7 +29,6 @@ target_sources(evio_protocol_xmlrpc_ObjLib
     "ElementDecoder.h"
     "IgnoreElement.cxx"
     "IgnoreElement.h"
-    "initialize.cxx"
     "initialize.h"
     "create_member_decoder.h"
     "ArrayOfStructDecoder.h"
@@ -58,7 +59,6 @@ target_compile_features(evio_protocol_xmlrpc_ObjLib
 target_link_libraries(evio_protocol_xmlrpc_ObjLib
   PRIVATE
     AICxx::utils
-    blaze::blaze
     magic_enum::magic_enum
 )
 

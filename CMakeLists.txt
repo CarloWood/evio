@@ -42,6 +42,8 @@ set_property(
 # The list of source files.
 target_sources(evio_ObjLib
   PRIVATE
+    "BinaryData.cxx"
+    "DateTime.cxx"
     "EventLoop.cxx"
     "EventLoopThread.cxx"
     "File.cxx"
@@ -65,6 +67,8 @@ target_sources(evio_ObjLib
     "TLSSocket.cxx"
 
     "AcceptedSocket.h"
+    "BinaryData.h"
+    "DateTime.h"
     "EventLoop.h"
     "EventLoopThread.h"
     "FileDescriptor.h"
