@@ -4,7 +4,7 @@
 #include "DecoderBase.h"
 #include "utils/AIAlert.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class StructDecoder : public StructDictionary<T>, public DecoderBase<T>
@@ -41,4 +41,4 @@ class StructDecoder : public StructDictionary<T>, public DecoderBase<T>
   StructDecoder(T& member, int flags) : DecoderBase<T>(member, flags) { }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

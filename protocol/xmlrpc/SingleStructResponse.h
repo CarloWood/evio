@@ -5,7 +5,7 @@
 #include "utils/AIAlert.h"
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class SingleStructResponse : public ElementDecoder
@@ -26,4 +26,4 @@ class SingleStructResponse : public ElementDecoder
   SingleStructResponse(T& response) : m_struct_decoder(response, 0), m_saw_struct(false) { }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

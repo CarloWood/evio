@@ -5,7 +5,7 @@
 #include <string>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class DecoderBase : public ElementDecoder
@@ -25,4 +25,4 @@ class DecoderBase : public ElementDecoder
   DecoderBase(T& member, int flags) : m_member(member), m_flags(flags) { }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

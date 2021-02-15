@@ -24,10 +24,6 @@ target_sources(evio_protocol_ObjLib
     "EOFDecoder.h"
     "UTF8_SAX_Decoder.cxx"
     "UTF8_SAX_Decoder.h"
-    "XML_RPC_Decoder.cxx"
-    "XML_RPC_Decoder.h"
-    "XML_RPC_Encoder.cxx"
-    "XML_RPC_Encoder.h"
 )
 
 # Required include search-paths.

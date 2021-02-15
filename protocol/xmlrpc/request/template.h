@@ -52,7 +52,7 @@ class XMLRPC_CLASSNAME_CREATE(ClassName)
 #endif
 };
 
-class ClassName : public XMLRPC_CLASSNAME_CREATE(ClassName), public Request, public RequestParam
+class ClassName : public XMLRPC_CLASSNAME_CREATE(ClassName), public evio::protocol::xmlrpc::Request, public evio::protocol::xmlrpc::RequestParam
 {
  private:
   void write_param(std::ostream& output) const override;

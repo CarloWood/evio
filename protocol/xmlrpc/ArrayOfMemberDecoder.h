@@ -5,7 +5,7 @@
 #include <vector>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class ArrayOfMemberDecoder : public DecoderBase<std::vector<T>>
@@ -39,4 +39,4 @@ class ArrayOfMemberDecoder : public DecoderBase<std::vector<T>>
   ArrayOfMemberDecoder(std::vector<T>& member, int flags) : DecoderBase<std::vector<T>>(member, flags), m_array_element(nullptr) { }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

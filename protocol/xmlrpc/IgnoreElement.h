@@ -4,7 +4,7 @@
 #include <libcwd/buf2str.h>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 class IgnoreElement : public ElementDecoder
 {
@@ -22,4 +22,4 @@ class IgnoreElement : public ElementDecoder
   static IgnoreElement s_ignore_element;
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

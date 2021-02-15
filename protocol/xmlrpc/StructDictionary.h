@@ -7,7 +7,7 @@
 #include <magic_enum.hpp>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class StructDictionary {
@@ -62,4 +62,4 @@ typename T::members StructDictionary<T>::get_member(std::string_view const& name
   return static_cast<typename T::members>(index);
 }
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

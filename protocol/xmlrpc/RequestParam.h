@@ -3,7 +3,7 @@
 #include <string>
 #include <iosfwd>
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 class RequestParam
 {
@@ -15,4 +15,4 @@ class RequestParam
   virtual void write_param(std::ostream& output) const;
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

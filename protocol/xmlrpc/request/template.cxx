@@ -9,15 +9,17 @@ constexpr std::array<char const*, XMLRPC_CLASSNAME_CREATE(ClassName)::s_number_o
 void ClassName::write_param(std::ostream& output) const
 {
   output << "<param>";
-  write_value(output, *this);
+  evio::protocol::xmlrpc::write_value(output, *this);
   output << "</param>";
 }
 
 #ifdef CWDEBUG
 void XMLRPC_CLASSNAME_CREATE(ClassName)::print_on(std::ostream& os) const
 {
+  os << '{';
   char const* prefix = "";
   XMLRPC_FOREACH_MEMBER(ClassName, XMLRPC_WRITE_TO_OS)
+  os << '}';
 }
 #endif
 

@@ -6,7 +6,7 @@
 #include <iosfwd>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 enum data_type
 {
@@ -53,4 +53,4 @@ class ElementDecoder
   static utils::NodeMemoryPool s_pool;
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

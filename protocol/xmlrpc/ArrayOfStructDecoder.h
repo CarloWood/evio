@@ -6,7 +6,7 @@
 #include "utils/AIAlert.h"
 #include <vector>
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class ArrayOfStructDecoder : public StructDictionary<T>, public DecoderBase<std::vector<T>>
@@ -52,4 +52,4 @@ class ArrayOfStructDecoder : public StructDictionary<T>, public DecoderBase<std:
   ArrayOfStructDecoder(std::vector<T>& member, int flags) : DecoderBase<std::vector<T>>(member, flags), m_array_element(nullptr) { }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

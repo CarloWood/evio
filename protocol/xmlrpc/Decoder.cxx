@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "XML_RPC_Decoder.h"
+#include "Decoder.h"
 #include "utils/print_using.h"
 #include "utils/c_escape.h"
 #include <charconv>
@@ -10,7 +10,7 @@ channel_ct xmlrpc("XMLRPC");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 // See https://en.wikipedia.org/wiki/XML-RPC
 
@@ -70,14 +70,14 @@ class ElementBase2 : public ElementBase
     return false;
   }
 
-  void characters(XML_RPC_Decoder const* UNUSED_ARG(decoder), std::string_view const& data) override
+  void characters(Decoder const* UNUSED_ARG(decoder), std::string_view const& data) override
   {
     THROW_ALERT("Element <[ELEMENT]> contains unexpected characters \"[DATA]\"",
         AIArgs("[ELEMENT]", name())("[DATA]", utils::print_using(data, utils::c_escape)));
   }
 
-  void start_element(XML_RPC_Decoder* UNUSED_ARG(decoder)) override { }
-  void end_element(XML_RPC_Decoder* UNUSED_ARG(decoder)) override { }
+  void start_element(Decoder* UNUSED_ARG(decoder)) override { }
+  void end_element(Decoder* UNUSED_ARG(decoder)) override { }
 };
 
 class UnknownElement : public ElementBase2
@@ -138,7 +138,7 @@ class Element<element_member> : public ElementBase2
     return m_parent && m_parent->id() == element_struct;
   }
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     if (!m_have_name)
       THROW_ALERT("<member> without <name>");
@@ -178,7 +178,7 @@ class Element<element_data> : public ElementBase2
     return m_parent && m_parent->id() == element_array;
   }
 
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     decoder->got_data();
   }
@@ -201,7 +201,7 @@ class Element<element_value> : public ElementBase2
  public:
   data_type m_data_type;
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     if (m_parent->id() == element_member)
     {
@@ -222,7 +222,7 @@ class Element<element_struct> : public ElementBase2
     return m_parent && m_parent->id() == element_value;
   }
 
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
 #ifdef CWDEBUG
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
@@ -231,7 +231,7 @@ class Element<element_struct> : public ElementBase2
     decoder->start_struct();
   }
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     decoder->end_struct();
   }
@@ -248,7 +248,7 @@ class Element<element_name> : public ElementBase2
   }
 
   std::string m_name;
-  void characters(XML_RPC_Decoder const* decoder, std::string_view const& data) override
+  void characters(Decoder const* decoder, std::string_view const& data) override
   {
     if (data.size() > 256)
       THROW_ALERT("Refusing to allocate a <name> of more than 256 characters (\"[DATA]\")",
@@ -256,7 +256,7 @@ class Element<element_name> : public ElementBase2
     m_name = data;
   }
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     if (m_name.empty())
       THROW_ALERT("Empty element <name>");
@@ -274,13 +274,13 @@ class ElementVariable : public ElementBase2
     return m_parent && m_parent->id() == element_value;
   }
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     if (!m_received_characters)
       characters(decoder, {});
   }
 
-  void characters(XML_RPC_Decoder const* decoder, std::string_view const& data) override
+  void characters(Decoder const* decoder, std::string_view const& data) override
   {
     m_received_characters = true;
     decoder->got_characters(data);
@@ -298,7 +298,7 @@ class Element<element_array> : public ElementVariable
 {
   using ElementVariable::ElementVariable;
 
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
 #ifdef CWDEBUG
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
@@ -307,14 +307,14 @@ class Element<element_array> : public ElementVariable
     decoder->start_array();
   }
 
-  void characters(XML_RPC_Decoder const* decoder, std::string_view const& data) override
+  void characters(Decoder const* decoder, std::string_view const& data) override
   {
     // <array> is not allowed to contain characters.
     THROW_ALERT("Element <array> contains unexpected characters \"[DATA]\"",
         AIArgs("[DATA]", utils::print_using(data, utils::c_escape)));
   }
 
-  void end_element(XML_RPC_Decoder* decoder) override
+  void end_element(Decoder* decoder) override
   {
     // <array> is not allowed to contain characters.
     decoder->end_array();
@@ -327,7 +327,7 @@ class Element<element_base64> : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_base64;
@@ -341,7 +341,7 @@ class Element<element_boolean> : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_boolean;
@@ -355,7 +355,7 @@ class Element<element_dateTime_iso8601> : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_datetime;
@@ -369,7 +369,7 @@ class Element<element_double> : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_double;
@@ -383,7 +383,7 @@ class ElementInt : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_int;
@@ -409,7 +409,7 @@ class Element<element_string> : public ElementVariable
   using ElementVariable::ElementVariable;
 
 #ifdef CWDEBUG
-  void start_element(XML_RPC_Decoder* decoder) override
+  void start_element(Decoder* decoder) override
   {
     Element<element_value>* parent = static_cast<Element<element_value>*>(m_parent);
     parent->m_data_type = data_type_string;
@@ -427,7 +427,7 @@ utils::NodeMemoryPool pool(128, largest_size);
   case element_##el: \
     return new(pool) Element<element_##el>(element_##el, parent);
 
-ElementBase* create_element(XML_RPC_Decoder::index_type element, ElementBase* parent)
+ElementBase* create_element(Decoder::index_type element, ElementBase* parent)
 {
   switch (element)
   {
@@ -444,11 +444,9 @@ ElementBase* destroy_element(ElementBase* current_element)
   return parent;
 }
 
-} // namespace xmlrpc
-
-void XML_RPC_Decoder::start_document(size_t content_length, std::string version, std::string encoding)
+void Decoder::start_document(size_t content_length, std::string version, std::string encoding)
 {
-  DoutEntering(dc::xmlrpc, "XML_RPC_Decoder::start_document(" << content_length << ", " << version << ", " << encoding << ")");
+  DoutEntering(dc::xmlrpc, "Decoder::start_document(" << content_length << ", " << version << ", " << encoding << ")");
 
   for (size_t i = 0; i < xmlrpc::number_of_elements; ++i)
   {
@@ -459,14 +457,14 @@ void XML_RPC_Decoder::start_document(size_t content_length, std::string version,
   m_current_element = nullptr;
 }
 
-void XML_RPC_Decoder::end_document()
+void Decoder::end_document()
 {
-  DoutEntering(dc::xmlrpc, "XML_RPC_Decoder::end_document()");
+  DoutEntering(dc::xmlrpc, "Decoder::end_document()");
 }
 
-void XML_RPC_Decoder::start_element(index_type element_id)
+void Decoder::start_element(index_type element_id)
 {
-  DoutEntering(dc::xmlrpc, "XML_RPC_Decoder::start_element(" << element_id << " [" << name_of(element_id) << "])");
+  DoutEntering(dc::xmlrpc, "Decoder::start_element(" << element_id << " [" << name_of(element_id) << "])");
 
   xmlrpc::ElementBase* parent = m_current_element;
   m_current_element = create_element(element_id, parent);
@@ -476,15 +474,17 @@ void XML_RPC_Decoder::start_element(index_type element_id)
   m_current_element->start_element(this);
 }
 
-void XML_RPC_Decoder::end_element(index_type element_id)
+void Decoder::end_element(index_type element_id)
 {
-  DoutEntering(dc::xmlrpc, "XML_RPC_Decoder::end_element(" << element_id << " [" << name_of(element_id) << "])");
+  DoutEntering(dc::xmlrpc, "Decoder::end_element(" << element_id << " [" << name_of(element_id) << "])");
   m_current_element->end_element(this);
   m_current_element = destroy_element(m_current_element);
 }
 
-void XML_RPC_Decoder::characters(std::string_view const& data)
+void Decoder::characters(std::string_view const& data)
 {
-  DoutEntering(dc::xmlrpc, "XML_RPC_Decoder::characters(\"" << buf2str(data.data(), data.size()) << "\")");
+  DoutEntering(dc::xmlrpc, "Decoder::characters(\"" << buf2str(data.data(), data.size()) << "\")");
   m_current_element->characters(this, data);
 }
+
+} // namespace evio::protocol::xmlrpc

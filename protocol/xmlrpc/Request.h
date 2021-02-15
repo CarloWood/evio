@@ -6,7 +6,7 @@
 #include <vector>
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 class Request
 {
@@ -42,4 +42,4 @@ class Request
   }
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

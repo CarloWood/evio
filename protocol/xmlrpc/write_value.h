@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <string>
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 void write_value(std::ostream& os, bool val)
 {
@@ -87,4 +87,4 @@ write_value(std::ostream& os, T const& val)
   os << "</struct></value>";
 }
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

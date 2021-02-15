@@ -41,6 +41,10 @@ target_sources(evio_protocol_xmlrpc_ObjLib
     "StructDecoder.h"
     "SingleStructResponse.h"
     "StructDictionary.h"
+    "Decoder.cxx"
+    "Decoder.h"
+    "Encoder.cxx"
+    "Encoder.h"
 )
 
 # Required include search-paths.

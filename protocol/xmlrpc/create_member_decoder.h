@@ -6,7 +6,7 @@
 #include "ArrayOfMemberDecoder.h"
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 namespace {
 
@@ -36,4 +36,4 @@ ElementDecoder* create_member_decoder(std::vector<T>& member)
     return new (ElementDecoder::s_pool) ArrayOfMemberDecoder<T>{member, 2};
 }
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

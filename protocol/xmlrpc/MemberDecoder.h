@@ -4,7 +4,7 @@
 #include "initialize.h"
 #include "debug.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 template<typename T>
 class MemberDecoder : public DecoderBase<T>
@@ -20,4 +20,4 @@ class MemberDecoder : public DecoderBase<T>
   using DecoderBase<T>::DecoderBase;
 };
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

@@ -1,22 +1,12 @@
 #include "sys.h"
-#include "XML_RPC_Encoder.h"
-#include "xmlrpc/Request.h"
+#include "Encoder.h"
+#include "Request.h"
 #include "debug.h"
 
-XML_RPC_Encoder& operator<<(XML_RPC_Encoder& encoder, xmlrpc::Request const& request)
-{
-#if 0
-  // Write HTTP header.
-  encoder.m_output <<
-    "POST / HTTP/1.1\r\n"
-    "Host: " << << "\r\n"
-    "Accept: */*\r\n"
-    "Connection: close\r\n"
-    "Content-Type: text/xml\r\n"
-    "Content-Length: 2072\r\n"
-    "\r\n"
-#endif
+namespace evio::protocol::xmlrpc {
 
+Encoder& operator<<(Encoder& encoder, Request const& request)
+{
   // Write XML RPC header.
   encoder.m_output <<
     "<?xml version=\"1.0\"?>"
@@ -34,3 +24,5 @@ XML_RPC_Encoder& operator<<(XML_RPC_Encoder& encoder, xmlrpc::Request const& req
 
   return encoder;
 }
+
+} // namespace evio::protocol::xmlrpc

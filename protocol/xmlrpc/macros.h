@@ -9,7 +9,7 @@
 #define XMLRPC_INITIALIZER_LIST_FROM_PARAMS(type, el, ...) , m_##el(params.m_##el)
 
 // Generate code inside a switch on members enumerator to call create_member_decoder with the right member variable.
-#define XMLRPC_CASE_RETURN_MEMBER_DECODER(type, el, ...) case member_##el: return xmlrpc::create_member_decoder(m_##el);
+#define XMLRPC_CASE_RETURN_MEMBER_DECODER(type, el, ...) case member_##el: return evio::protocol::xmlrpc::create_member_decoder(m_##el);
 
 // Generate code inside the serialize template function.
 #define XMLRPC_BOOST_SERIALIZE(type, el, ...) ar & m_##el;
@@ -32,6 +32,6 @@
 #define XMLRPC_CLASSNAME_CREATE(cn) BOOST_PP_CAT(cn, Create)
 #define XMLRPC_FOREACH_MEMBER(cn, m) BOOST_PP_CAT(xmlrpc_, BOOST_PP_CAT(cn, _FOREACH_MEMBER))(m)
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 class ElementDecoder;
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc

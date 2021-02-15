@@ -1,8 +1,8 @@
 #include "sys.h"
 #include "IgnoreElement.h"
 
-namespace xmlrpc {
+namespace evio::protocol::xmlrpc {
 
 IgnoreElement IgnoreElement::s_ignore_element;
 
-} // namespace xmlrpc
+} // namespace evio::protocol::xmlrpc
