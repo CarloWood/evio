@@ -43,7 +43,7 @@ class ElementDecoder
   // The opposite of create_member_decoder.
   void destroy_member_decoder();
 
- protected:
+ public:
   // All derived classes must be constructed using new (s_pool) Derived(...);
   virtual ~ElementDecoder() { }
   void operator delete(void* ptr) { s_pool.free(ptr); }

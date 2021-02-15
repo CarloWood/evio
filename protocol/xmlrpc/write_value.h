@@ -1,7 +1,7 @@
 #pragma once
 
-#include "data_types/DateTime.h"
-#include "data_types/BinaryData.h"
+#include "evio/DateTime.h"
+#include "evio/BinaryData.h"
 #include "has_xmlrpc_names.h"
 #include <vector>
 #include <iostream>
@@ -30,12 +30,12 @@ void write_value(std::ostream& os, std::string const& val)
   os << "<value><string>" << val << "</string></value>";
 }
 
-void write_value(std::ostream& os, DateTime const& val)
+void write_value(std::ostream& os, evio::DateTime const& val)
 {
   os << "<value><dateTime.iso8601>" << val.to_iso8601_string() << "</dateTime.iso8601></value";
 }
 
-void write_value(std::ostream& os, BinaryData const& val)
+void write_value(std::ostream& os, evio::BinaryData const& val)
 {
   os << "<value><base64>" << val.to_base64_string() << "</base64></value";
 }

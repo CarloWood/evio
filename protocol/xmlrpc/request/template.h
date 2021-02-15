@@ -5,8 +5,8 @@
 #error Define MethodName before including template.h
 #endif
 
-#include "protocols/xmlrpc/macros.h"
-#include "protocols/xmlrpc/Request.h"
+#include "evio/protocol/xmlrpc/macros.h"
+#include "evio/protocol/xmlrpc/Request.h"
 #include "utils/REMOVE_TRAILING_COMMA.h"
 #include <boost/serialization/access.hpp>
 #include <boost/serialization/string.hpp>
@@ -47,7 +47,9 @@ class XMLRPC_CLASSNAME_CREATE(ClassName)
     XMLRPC_FOREACH_MEMBER(ClassName, XMLRPC_BOOST_SERIALIZE);
   }
 
+#ifdef CWDEBUG
   void print_on(std::ostream& os) const;
+#endif
 };
 
 class ClassName : public XMLRPC_CLASSNAME_CREATE(ClassName), public Request, public RequestParam

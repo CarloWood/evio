@@ -62,10 +62,20 @@ class XML_RPC_Decoder : public evio::protocol::UTF8_SAX_Decoder
   void characters(std::string_view const& data) final;
 
  public:
+  XML_RPC_Decoder() : m_current_xml_rpc_element_decoder{nullptr, false} { }
   XML_RPC_Decoder(xmlrpc::ElementDecoder& xml_rpc_element_decoder) : m_current_xml_rpc_element_decoder{&xml_rpc_element_decoder, false} { }
+
+  void init(xmlrpc::ElementDecoder* xml_rpc_element_decoder_ptr)
+  {
+    // Only call init once after using the default constructor.
+    ASSERT(m_current_xml_rpc_element_decoder.ptr == nullptr);
+    m_current_xml_rpc_element_decoder.ptr = xml_rpc_element_decoder_ptr;
+  }
 
   void start_struct()
   {
+    // Call init after using the default constructor.
+    ASSERT(m_current_xml_rpc_element_decoder.ptr != nullptr);
     m_xml_rpc_response_stack.push(m_current_xml_rpc_element_decoder);
     m_current_xml_rpc_element_decoder = { m_current_xml_rpc_element_decoder.ptr->get_struct_decoder(), false };
   }
