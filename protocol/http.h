@@ -98,6 +98,9 @@ class ResponseHeadersDecoder : public MessageDecoder
   // in the allocated buffer that will be 6 times as large, or 1536 bytes.
   size_t average_message_length() const override { return 256; }
 
+  // Accessor for m_status_code. Should be 200 when successful.
+  int get_status_code() const { return m_status_code; }
+
  protected:
   void decode_start_line(evio::MsgBlock const& msg) override;
 };

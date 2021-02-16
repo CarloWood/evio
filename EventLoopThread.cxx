@@ -374,18 +374,28 @@ void EventLoopThread::emain()
     // (or close()) once you have read everything you need to read.
     // Calling stop_input_device() is not sufficient.
     bool open_files = false;
-    utils::InstanceTracker<FileDescriptor>::for_each([&open_files](FileDescriptor const* p){
+    bool unopened_file = false;
+    utils::InstanceTracker<FileDescriptor>::for_each([&open_files, &unopened_file](FileDescriptor const* p){
       if (!p->get_flags().is_dead())
       {
         if (!open_files)
         {
-          Dout(dc::warning, "Leaving EventLoopThread main loop while not all devices were closed! See comments in EventLoopThread.cxx for more information.");
-          open_files = true;
+          if (p->get_fd() != -1)
+          {
+            Dout(dc::warning, "Leaving EventLoopThread main loop while not all devices were closed! See comments in EventLoopThread.cxx for more information.");
+            open_files = true;
+          }
+          else
+            unopened_file = true;
         }
         Dout(dc::warning, p << ": " << p->get_fd() << ", " << p->get_flags());
       }
     });
     ASSERT(!open_files);
+    if (unopened_file)
+    {
+      Dout(dc::warning, "One or more of the devices has fd -1. This probably means that init was never called (File::open, Socket::connect, ListenSocket::listen, etc)!");
+    }
   }
 #endif
 

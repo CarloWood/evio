@@ -203,10 +203,12 @@ void Socket::write_to_fd(int& allow_deletion_count, int fd)
   OutputDevice::write_to_fd(allow_deletion_count, fd);
 }
 
-void Socket::read_returned_zero(int& allow_deletion_count)
+// Overridden to detect closed connections (by us).
+void Socket::closed(int& allow_deletion_count)
 {
-  DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << this << "]");
-  close(allow_deletion_count);
+  // Called from Socket::read_error? Then that will handle the callbacks.
+  if ((m_connected_flags & is_read_error))
+    return;
   if ((m_connected_flags & (is_connected|is_disconnected)) == is_connected)
   {
     m_connected_flags |= is_disconnected;
@@ -217,9 +219,16 @@ void Socket::read_returned_zero(int& allow_deletion_count)
     m_connected(allow_deletion_count, false); // Signal connect failure.
 }
 
+void Socket::read_returned_zero(int& allow_deletion_count)
+{
+  DoutEntering(dc::evio, "Socket::read_returned_zero({" << allow_deletion_count << "}) [" << this << "]");
+  close(allow_deletion_count);
+}
+
 void Socket::read_error(int& allow_deletion_count, int CWDEBUG_ONLY(err))
 {
   DoutEntering(dc::evio, "Socket::read_error({" << allow_deletion_count << "}, " << err << ") [" << this << "]");
+  m_connected_flags |= is_read_error;
   close(allow_deletion_count);
   if ((m_connected_flags & (is_connected|is_disconnected)) == is_connected)
   {

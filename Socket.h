@@ -53,12 +53,14 @@ class Socket : public InputDevice, public OutputDevice
  public:
   // Overridden to detect successful connections.
   void read_from_fd(int& allow_deletion_count, int fd) override;
-  // Overridden to detect connection termination.
+  // Overridden to detect connection termination (closed by peer).
   void read_returned_zero(int& allow_deletion_count) override;
   // Overridden to detect connect failures and connection abortions.
   void read_error(int& allow_deletion_count, int err) override;
   // Overridden to detect connects.
   void write_to_fd(int& allow_deletion_count, int fd) override;
+  // Overridden to detect closed connections (by us).
+  void closed(int& allow_deletion_count) override;
 
  protected:
   //---------------------------------------------------------------------------
@@ -77,6 +79,7 @@ class Socket : public InputDevice, public OutputDevice
   uint8_t m_connected_flags;
   static constexpr uint8_t is_connected = 1;
   static constexpr uint8_t is_disconnected = 2;
+  static constexpr uint8_t is_read_error = 4;
 
  public:
   //---------------------------------------------------------------------------
