@@ -10,7 +10,7 @@ Encoder& operator<<(Encoder& encoder, Request const& request)
   // Write XML RPC header.
   encoder.m_output <<
     "<?xml version=\"1.0\"?>"
-    "<methodcall>"
+    "<methodCall>"
       "<methodName>" << request.method_name() << "</methodName>"
       "<params>";
 
