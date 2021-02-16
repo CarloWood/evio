@@ -227,7 +227,8 @@ void ResponseHeadersDecoder::decode_start_line(evio::MsgBlock const& msg)
   {
     if (m_protocol_error)
       THROW_ALERT("Invalid HTTP status-line");
-    THROW_ALERT("Received status code [STATUS_CODE] [REASON_PHRASE]", AIArgs("[STATUS_CODE]", m_status_code)("[REASON_PHRASE]", m_reason_phrase));
+    THROW_ALERT("Received status code [STATUS_CODE]" CWDEBUG_ONLY("[REASON_PHRASE]"),
+        AIArgs("[STATUS_CODE]", m_status_code)CWDEBUG_ONLY(("[REASON_PHRASE]", m_reason_phrase)));
   }
 }
 

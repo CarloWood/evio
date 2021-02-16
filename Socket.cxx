@@ -164,7 +164,7 @@ void Socket::read_from_fd(int& allow_deletion_count, int fd)
   }
   catch (AIAlert::Error const& error)
   {
-    if (get_flags().is_open())
+    if (state_t::crat(m_state)->m_flags.is_open())
       THROW_ALERT("While reading from [ADDRESS]", AIArgs("[ADDRESS]", address()), error);
     else
       throw;

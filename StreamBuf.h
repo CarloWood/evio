@@ -36,6 +36,7 @@
 #include "utils/nearest_power_of_two.h"
 #include "utils/FuzzyBool.h"
 #include "utils/AIAlert.h"
+#include "utils/c_escape.h"
 #include "threadsafe/aithreadsafe.h"
 #include <atomic>
 #include <mutex>
@@ -1338,13 +1339,13 @@ inline bool StreamBufConsumer::is_contiguous(size_t len) const
   return gptr() + len <= get_area_block_node_end();
 }
 
-#ifdef CWDEBUG
 inline std::ostream& operator<<(std::ostream& os, MsgBlock const& msg_block)
 {
-  os << '"' << libcwd::buf2str(msg_block.get_start(), msg_block.get_size()) << '"';
+  os << '"';
+  utils::c_escape(os, msg_block.view());
+  os << '"';
   return os;
 }
-#endif
 
 #ifdef DEBUGDBSTREAMBUF
 inline std::ostream& operator<<(std::ostream& os, StreamBuf const& db)

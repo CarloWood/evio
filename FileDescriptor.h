@@ -569,17 +569,6 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   void hup_event(int& allow_deletion_count) { hup(allow_deletion_count, m_fd); }
   void err_event(int& allow_deletion_count) { err(allow_deletion_count, m_fd); }
 
-#if 0
-  // Returns the events that were not busy before.
-  uint32_t test_and_set_busy(uint32_t events)
-  {
-    return state_t::wat(m_state)->m_flags.test_and_set_busy(events);
-  }
-  void clear_busy(uint32_t event)
-  {
-    state_t::wat(m_state)->m_flags.clear_busy(event);
-  }
-#endif
  public:
   // Used by the testsuite.
   bool is_busy() const

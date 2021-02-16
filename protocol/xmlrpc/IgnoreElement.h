@@ -1,7 +1,9 @@
 #pragma once
 
 #include "ElementDecoder.h"
+#ifdef CWDEBUG
 #include <libcwd/buf2str.h>
+#endif
 #include "debug.h"
 
 namespace evio::protocol::xmlrpc {
