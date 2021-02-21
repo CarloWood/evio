@@ -36,7 +36,7 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_sink(nullptr), m_ibuffer(nullptr)
+InputDevice::InputDevice() : m_sink(nullptr), m_ibuffer(nullptr), m_is_link_buffer(false)
 {
   DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
@@ -174,16 +174,17 @@ void InputDevice::enable_input_device()
 
 void InputDevice::close_input_device(int& allow_deletion_count)
 {
-  DoutEntering(dc::evio, "InputDevice::close_input_device({" << allow_deletion_count << "})"
-#ifdef DEBUGDEVICESTATS
-      " [received_bytes = " << m_received_bytes << "]"
-#endif
-      " [" << this << ']');
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
     if (AI_LIKELY(state_w->m_flags.is_r_open()))
     {
+      // Only print debug output when this function actually does something.
+      DoutEntering(dc::evio, "InputDevice::close_input_device({" << allow_deletion_count << "})"
+#ifdef DEBUGDEVICESTATS
+          " [received_bytes = " << m_received_bytes << "]"
+#endif
+          " [" << this << ']');
       state_w->m_flags.unset_r_open();
 #ifdef CWDEBUG
       if (!is_valid(m_fd))
@@ -213,6 +214,22 @@ void InputDevice::close_input_device(int& allow_deletion_count)
         need_call_to_closed = true;
       }
     }
+    else
+      // Bug in library: it should not be possible that this device is closed
+      // and m_is_link_buffer is still set. The only reason for this test
+      // is to make sure we didn't print no debug output but will still call
+      // flush_output_device() below. If this assert ever fires, then print
+      // the DoutEntering above also when m_is_link_buffer is set.
+      ASSERT(!m_is_link_buffer);
+  }
+  if (m_is_link_buffer)
+  {
+    // Only do this one time.
+    m_is_link_buffer = false;
+    // Bug in library.
+    ASSERT(dynamic_cast<LinkBufferPlus*>(static_cast<StreamBuf*>(m_ibuffer)) != nullptr);
+    LinkBufferPlus* link_buffer = static_cast<LinkBufferPlus*>(static_cast<StreamBuf*>(m_ibuffer));
+    link_buffer->flush_output_device();
   }
   if (need_call_to_closed)
     closed(allow_deletion_count);

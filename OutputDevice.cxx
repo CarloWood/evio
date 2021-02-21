@@ -36,7 +36,7 @@
 
 namespace evio {
 
-OutputDevice::OutputDevice() : m_source(nullptr), m_obuffer(nullptr)
+OutputDevice::OutputDevice() : m_source(nullptr), m_obuffer(nullptr), m_is_link_buffer(false)
 {
   DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
@@ -129,16 +129,21 @@ void OutputDevice::remove_output_device(int& allow_deletion_count, state_t::wat 
 
 RefCountReleaser OutputDevice::flush_output_device()
 {
-  DoutEntering(dc::evio, "OutputDevice::flush_output_device() [" << this << ']');
+  bool is_open;
   bool need_close;
   {
     state_t::wat state_w(m_state);
     need_close = !state_w->m_flags.is_active_output_device();
+    is_open = state_w->m_flags.is_w_open();     // Not already closed?
     if (!need_close)
       state_w->m_flags.set_w_flushing();
   }
+  // Only print debug output when the device wasn't already closed before anyway.
+  DoutEntering(dc::evio(is_open), "OutputDevice::flush_output_device() [" << this << ']');
+  // It should not be possible that this device is not open, but is still active.
+  ASSERT(is_open || need_close);
   int allow_deletion_count = 0;
-  if (need_close)
+  if (need_close && is_open)
     close_output_device(allow_deletion_count);
   return {this, allow_deletion_count};
 }
@@ -287,6 +292,15 @@ void OutputDevice::close_output_device(int& allow_deletion_count)
         need_call_to_closed = true;
       }
     }
+  }
+  if (m_is_link_buffer)
+  {
+    // Only do this one time.
+    m_is_link_buffer = false;
+    // Bug in library.
+    ASSERT(dynamic_cast<LinkBufferPlus*>(static_cast<StreamBuf*>(m_obuffer)) != nullptr);
+    LinkBufferPlus* link_buffer = static_cast<LinkBufferPlus*>(static_cast<StreamBuf*>(m_obuffer));
+    link_buffer->close_input_device();
   }
   if (need_call_to_closed)
     closed(allow_deletion_count);

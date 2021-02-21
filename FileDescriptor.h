@@ -64,7 +64,7 @@ class FileDescriptorFlags
   // .-FDS_SAME
   // | .-FDS_REGULAR_FILE
   // | |.-FDS_W_CLOSE
-  // | ||.-FDS_FLUSHING
+  // | ||.-FDS_W_FLUSHING
   // | |||.-FDS_DEAD
   // | ||||.-INTERNAL_FDS_DONT_CLOSE
   // | |||||.-FDS_DEBUG                       inferior_shft

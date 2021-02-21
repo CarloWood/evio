@@ -28,6 +28,7 @@
 #pragma once
 
 #include "protocol/MessageLengthInterface.h"
+#include "evio/RefCountReleaser.h"
 #include <limits>
 
 #ifdef CWDEBUG
@@ -40,6 +41,7 @@ NAMESPACE_DEBUG_CHANNELS_END
 namespace evio {
 
 class InputDevice;
+class OutputDevice;
 
 enum sink_type {
   decoder_sink,
@@ -96,6 +98,8 @@ class Sink : public protocol::MessageLengthInterface
   [[gnu::always_inline]] inline void start_input_device();
   [[gnu::always_inline]] inline void stop_input_device();
   [[gnu::always_inline]] inline void close_input_device(int& allow_deletion_count);
+  friend class OutputDevice;
+  [[gnu::always_inline]] inline RefCountReleaser close_input_device();
 
   friend class InputDevice;
   void initialize_content_length();
@@ -164,6 +168,7 @@ namespace evio {
 void Sink::start_input_device() { m_input_device->start_input_device(); }
 void Sink::stop_input_device() { m_input_device->stop_input_device(); }
 void Sink::close_input_device(int& allow_deletion_count) { m_input_device->close_input_device(allow_deletion_count); }
+RefCountReleaser Sink::close_input_device() { return m_input_device->close_input_device(); }
 
 void Sink::change_specs(size_t minimum_block_size, size_t buffer_full_watermark, size_t max_allocated_block_size) const
 {
