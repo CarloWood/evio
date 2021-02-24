@@ -589,7 +589,66 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
 
 void EventLoopThread::start(FileDescriptor::state_t::wat const& state_w, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device)
 {
+  // The EventLoop needs a threadpool, the threadpool needs a memory pool.
+  // You might also want to set up the resolver to use a low priority handler from the thread pool.
+  // Printing AIAlert::Error objects is a quick start for debug purposes and requires
+  // utils/debug_ostream_operators.h to be included.
+  //
+  // The typical way to use statefultask is therefore:
+  //
+#ifdef EXAMPLE_CODE
+#include "sys.h"                                        // From cwds
+#include "statefultask/DefaultMemoryPagePool.h"
+#include "threadpool/AIThreadPool.h"
+#include "evio/EventLoop.h"
+#include "resolver-task/DnsResolver.h"
+#include "utils/debug_ostream_operators.h"
+#include "debug.h"                                      // From cwds
+
+int main(int argc, char* argv[])
+{
+  Debug(debug::init());
+  Dout(dc::notice, "Entering main()");
+
+  // Create a AIMemoryPagePool object (must be created before thread_pool).
+  [[maybe_unused]] AIMemoryPagePool mpp;
+
+  // Set up the thread pool for the application.
+  int const number_of_threads = 8;                      // Use a thread pool of 8 threads.
+  int const max_number_of_threads = 16;                 // This can later dynamically increased to 16 if needed.
+  int const queue_capacity = number_of_threads;
+  int const reserved_threads = 1;                       // Reserve 1 thread for each priority.
+  // Create the thread pool.
+  AIThreadPool thread_pool(number_of_threads, max_number_of_threads);
+  // And the thread pool queues.
+  [[maybe_unused]] AIQueueHandle high_priority_queue   = thread_pool.new_queue(queue_capacity, reserved_threads);
+  [[maybe_unused]] AIQueueHandle medium_priority_queue = thread_pool.new_queue(queue_capacity, reserved_threads);
+                   AIQueueHandle low_priority_queue    = thread_pool.new_queue(queue_capacity);
+
+  // Main application begin.
+  try
+  {
+    // Set up the I/O event loop.
+    evio::EventLoop event_loop(low_priority_queue);
+    resolver::Scope resolver_scope(low_priority_queue, false);
+
+    //===============================================
+    // Put your application code here.
+    //===============================================
+
+    // Application terminated cleanly.
+    event_loop.join();
+  }
+  catch (AIAlert::Error const& error)
+  {
+    Dout(dc::warning, error << " caught in application.cxx");
+  }
+
+  Dout(dc::notice, "Leaving main()");
+}
+#endif
   // Create an evio::EventLoop object at the start of main.
+  // See the comment and example code above this.
   ASSERT(m_epoll_fd != -1);
 
   // Don't start a device that is disabled.

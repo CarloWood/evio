@@ -107,10 +107,6 @@ class Socket : public InputDevice, public OutputDevice
   //
 
   Socket() { DoutEntering(dc::evio, "Socket::Socket() [" << this << "]"); }
-  ~Socket();
-
-  // Set the socket buffer sizes.
-  static void set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
 
   // Call this to set a call back for the connected event.
   // The first argument is `allow_deletion_count` (should be passed to functions that need it, if any are called).

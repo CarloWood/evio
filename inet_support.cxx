@@ -27,6 +27,7 @@
 
 #include "sys.h"
 #include "inet_support.h"
+#include "SocketAddress.h"
 #include "utils/nearest_power_of_two.h"
 #include "utils/is_power_of_two.h"
 #include "utils/AIAlert.h"
@@ -171,6 +172,75 @@ void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size)
   }
   Dout(dc::warning(optin < std::max(sndbuf_limit, (int)minimum_block_size)),
       "Requested SO_SNDBUF is less than " << ((optin < sndbuf_limit) ? std::to_string(sndbuf_limit).c_str() : "the minimum block size") << "; you better know what you are doing.");
+}
+
+void set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size, size_t sndbuf_size)
+{
+  try
+  {
+    set_rcvsockbuf(fd, rcvbuf_size, input_minimum_block_size);
+    set_sndsockbuf(fd, sndbuf_size, output_minimum_block_size);
+  }
+  catch (AIAlert::Error const& error)
+  {
+    Dout(dc::system|continued_cf, "close(" << fd << ") = ");
+    CWDEBUG_ONLY(int ret =) ::close(fd);
+    Dout(dc::finish|cond_error_cf(ret == -1), ret);
+    THROW_ALERT("Socket::set_sock_buffers([FD], [INMINBLOCKSZ], [OUTMINBLOCKSZ], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
+        AIArgs("[FD]", fd)("INMINBLOCKSZ", input_minimum_block_size)("OUTMINBLOCKSZ", output_minimum_block_size)
+              ("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
+        error);
+  }
+}
+
+// On success, returns the file descriptor of a new socket, with socket buffers
+// rcvbuf_size and sndbuf_size, that was bound to if_address and connected to remote_address.
+// On failure -1 is returned.
+int create_tcp_connection(SocketAddress const& remote_address, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress const& if_address)
+{
+  // The address to connect needs to make sense.
+  ASSERT(!remote_address.is_unspecified());
+
+  Dout(dc::system|continued_cf, "socket(" << remote_address.family() << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
+  int fd = ::socket(remote_address.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  Dout(dc::finish|cond_error_cf(fd < 0), fd);
+  if (fd < 0)
+    return -1;
+
+  // Send and receive buffer sizes must be set before calling connect().
+  if (remote_address.is_ip())
+  {
+    set_sock_buffers(fd, input_minimum_block_size, output_minimum_block_size, rcvbuf_size, sndbuf_size);
+  }
+
+  if (!if_address.is_unspecified())
+  {
+    Dout(dc::system|continued_cf, "bind(" << fd << ", " << if_address << ", " << size_of_addr(if_address) << ") = ");
+    int ret = ::bind(fd, if_address, size_of_addr(if_address));
+    if (ret < 0)
+    {
+      Dout(dc::finish|error_cf, ret);
+      Dout(dc::warning|error_cf, "bind: " << if_address);
+      Dout(dc::system|continued_cf, "close(" << fd << ") = ");
+      CWDEBUG_ONLY(ret =) ::close(fd);
+      Dout(dc::finish|cond_error_cf(ret < 0), ret);
+      return -1;
+    }
+    Dout(dc::finish|cond_error_cf(ret < 0), ret);
+  }
+
+  Dout(dc::system|continued_cf, "connect(" << fd << ", " << remote_address << ", " << size_of_addr(remote_address) << ") = ");
+  int ret = ::connect(fd, remote_address, size_of_addr(remote_address));
+  if (ret < 0 && errno != EINPROGRESS)
+  {
+    Dout(dc::finish|error_cf, ret);
+    Dout(dc::system|continued_cf, "close(" << fd << ") = ");
+    CWDEBUG_ONLY(ret =) ::close(fd);
+    Dout(dc::finish|cond_error_cf(ret < 0), ret);
+    return -1;
+  }
+  Dout(dc::finish|cond_error_cf(ret < 0), ret);
+  return fd;
 }
 
 size_t size_of_addr(struct sockaddr const* addr)

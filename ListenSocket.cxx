@@ -90,8 +90,8 @@ void ListenSocketDevice::listen(SocketAddress&& bind_addr, int backlog, size_t r
   m_bind_addr = std::move(bind_addr);   // m_bind_addr should only be set after a successful bind(2).
 
   // Socket buffer sizes must be set before calling listen().
-  // The values set here will be inheritted by the accepted sockets.
-  Socket::set_sock_buffers(fd, input_minimum_block_size(), output_minimum_block_size(), rcvbuf_size, sndbuf_size);
+  // The values set here will be inherited by the accepted sockets.
+  set_sock_buffers(fd, input_minimum_block_size(), output_minimum_block_size(), rcvbuf_size, sndbuf_size);
 
   int res = ::listen(fd, backlog);
   if (res == -1)

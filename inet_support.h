@@ -37,9 +37,14 @@ struct in6_addr;
 
 namespace evio {
 
+class SocketAddress;
+
 int print_hostent_on(struct hostent const* h, std::ostream& o);                         // Testsuite: test_print_hostent_on.h
 void set_sndsockbuf(int sock_fd, size_t sndbuf_size, size_t minimum_block_size);        // Testsuite: test_set_XXXsockbuf.h
 void set_rcvsockbuf(int sock_fd, size_t rcvbuf_size, size_t minimum_block_size);        // Testsuite: test_set_XXXsockbuf.h
+void set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size = 0, size_t sndbuf_size = 0);
+int create_tcp_connection(SocketAddress const& remote_address, size_t input_minimum_block_size, size_t output_minimum_block_size,
+    size_t rcvbuf_size, size_t sndbuf_size, SocketAddress const& if_address);
 size_t size_of_addr(struct sockaddr const* addr);                                       // Testsuite: test_size_of_addr.h
 
 } // namespace evio

@@ -37,26 +37,6 @@
 
 namespace evio {
 
-//static
-void Socket::set_sock_buffers(int fd, size_t input_minimum_block_size, size_t output_minimum_block_size, size_t rcvbuf_size, size_t sndbuf_size)
-{
-  try
-  {
-    set_rcvsockbuf(fd, rcvbuf_size, input_minimum_block_size);
-    set_sndsockbuf(fd, sndbuf_size, output_minimum_block_size);
-  }
-  catch (AIAlert::Error const& error)
-  {
-    Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-    CWDEBUG_ONLY(int ret =) ::close(fd);
-    Dout(dc::finish|cond_error_cf(ret == -1), ret);
-    THROW_ALERT("Socket::set_sock_buffers([FD], [INMINBLOCKSZ], [OUTMINBLOCKSZ], [RCVBUF_SIZE], [SNDBUF_SIZE]):",
-        AIArgs("[FD]", fd)("INMINBLOCKSZ", input_minimum_block_size)("OUTMINBLOCKSZ", output_minimum_block_size)
-              ("[RCVBUF_SIZE]", rcvbuf_size)("[SNDBUF_SIZE]", sndbuf_size),
-        error);
-  }
-}
-
 bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, size_t sndbuf_size, SocketAddress const& if_addr)
 {
   DoutEntering(dc::evio, "Socket::connect(" << remote_address << ", " << rcvbuf_size << ", " << sndbuf_size << ", " << if_addr << ") [" << this << "]");
@@ -64,49 +44,14 @@ bool Socket::connect(SocketAddress const& remote_address, size_t rcvbuf_size, si
   if (state_t::rat(m_state)->m_flags.is_open())
     return false;
 
-  // The address to connect needs to make sense.
-  ASSERT(!remote_address.is_unspecified());
+  // If m_ibuffer/m_obuffer is nullptr then the socket isn't going to be used in that direction,
+  // so set a "random" value, but non-zero because that causes an assert.
+  size_t input_minimum_block_size = m_ibuffer ? m_ibuffer->m_minimum_block_size : 1;
+  size_t output_minimum_block_size = m_obuffer ? m_obuffer->m_minimum_block_size : 1;
 
-  Dout(dc::system|continued_cf, "socket(" << remote_address.family() << ", SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0) = ");
-  int fd = socket(remote_address.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  Dout(dc::finish|cond_error_cf(fd < 0), fd);
-  if (fd < 0)
+  int fd = create_tcp_connection(remote_address, input_minimum_block_size, output_minimum_block_size, rcvbuf_size, sndbuf_size, if_addr);
+  if (fd == -1)
     return false;
-
-  // Send and receive buffer sizes must be set before calling connect().
-  if (remote_address.is_ip())
-  {
-    // If m_ibuffer/m_obuffer is nullptr then the socket isn't going to be used in that direction,
-    // so set a "random" value, but non-zero because that causes an assert.
-    set_sock_buffers(fd, m_ibuffer ? m_ibuffer->m_minimum_block_size : 1, m_obuffer ? m_obuffer->m_minimum_block_size : 1, rcvbuf_size, sndbuf_size);
-  }
-
-  if (!if_addr.is_unspecified())
-  {
-    if (bind(fd, if_addr, size_of_addr(if_addr)) == -1)
-    {
-      Dout(dc::warning|error_cf, "bind: " << if_addr);
-      return false;
-    }
-  }
-
-  Dout(dc::system|continued_cf, "connect(" << fd << ", " << remote_address << ", " << size_of_addr(remote_address) << ") = ");
-  int ret = ::connect(fd, remote_address, size_of_addr(remote_address));
-  if (ret < 0 && errno != EINPROGRESS)
-  {
-    Dout(dc::finish|error_cf, ret);
-    Dout(dc::system|continued_cf, "close(" << fd << ") = ");
-    CWDEBUG_ONLY(ret =) ::close(fd);
-    Dout(dc::finish|cond_error_cf(ret < 0), ret);
-    return false;
-  }
-  Dout(dc::finish|cond_error_cf(ret < 0), ret);
-
-  // Either call set_protocol_decoder to give the socket an input buffer, or
-  // call set_source AND fill the buffer with something (including a std::flush), or
-  // call on_connected on the socket, before calling connect().
-  // Otherwise the socket is not monitored (nothing to read or write) and will just sit there.
-  ASSERT(m_ibuffer || (m_obuffer && m_obuffer->StreamBufConsumer::nothing_to_get().is_false()) || m_connected);
 
   init(fd, remote_address);
 
@@ -123,9 +68,11 @@ void Socket::init(int fd, SocketAddress const& remote_address)
   if (!m_remote_address.is_unspecified())
     Dout(dc::warning, "Socket::init: Already connected to " << m_remote_address << " ?!");
 
-  // Call Socket::set_source and/or Socket::set_protocol_decoder before calling Socket::init.
-  // If you don't call either - then this socket is not usable for input/output respectively!
-  ASSERT(m_ibuffer || m_obuffer);
+  // Either call set_protocol_decoder to give the socket an input buffer, or
+  // call set_source AND fill the buffer with something (including a std::flush), or
+  // call on_connected on the socket, before calling connect().
+  // Otherwise the socket is not monitored (nothing to read or write) and will just sit there.
+  ASSERT(m_ibuffer || (m_obuffer && m_obuffer->StreamBufConsumer::nothing_to_get().is_false()) || m_connected);
 
   m_remote_address = remote_address;
   m_connected_flags = 0;
@@ -256,10 +203,6 @@ SocketAddress Socket::local_address() const
   }
 
   return result;
-}
-
-Socket::~Socket()
-{
 }
 
 } // namespace evio
