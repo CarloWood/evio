@@ -30,11 +30,13 @@
 
 #include "StreamBuf.h"
 #include "Protocol.h"
+#include "RefCountReleaser.h"
 #include <limits>
 
 namespace evio {
 
 class OutputDevice;
+class InputDevice;
 
 // Protocol
 //   |
@@ -50,6 +52,10 @@ class Source : public Protocol
 
   void start_output_device();
 
+  // Called for linked devices when the linked input device was closed.
+  friend class InputDevice;
+  [[gnu::always_inline]] inline RefCountReleaser flush_output_device();
+
   friend class OutputDevice;
   OutputBuffer* create_buffer(OutputDevice* output_device)
       { return create_buffer(output_device, 8 * StreamBuf::round_up_minimum_block_size(minimum_block_size()), std::numeric_limits<size_t>::max()); }
@@ -62,6 +68,14 @@ class Source : public Protocol
         return nullptr;
       }
 };
+
+} // namespace evio
+
+#include "OutputDevice.h"
+
+namespace evio {
+
+RefCountReleaser Source::flush_output_device() { return m_output_device->flush_output_device(); }
 
 } // namespace evio
 

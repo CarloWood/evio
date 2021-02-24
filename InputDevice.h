@@ -81,6 +81,7 @@ class InputDevice : public virtual FileDescriptor
 #ifdef DEBUGDEVICESTATS
   size_t m_received_bytes;
 #endif
+  bool m_is_link_buffer;                                // True when m_ibuffer is a LinkBufferPlus*.
 
  protected:
   friend class Sink;
@@ -198,6 +199,7 @@ void InputDevice::set_protocol_decoder(Sink& decoder, Args... input_create_buffe
   m_ibuffer = decoder.create_buffer(this, input_create_buffer_arguments...);
   m_sink = &decoder;
   m_msg_len = 0;
+  m_is_link_buffer = false;
 }
 
 // Device-device link declarations.
@@ -232,13 +234,17 @@ void InputDevice::set_sink(LinkBufferPlus* link_buffer)
   // deriving from InputDevice (so you get access to the protected m_ibuffer) and
   // then calling from the derived input device:
   //     if (m_ibuffer->release(CWDEBUG_ONLY(this)))
+  //     {
   //       m_ibuffer = nullptr;
+  //       m_is_link_buffer = false;
+  //     }
   // before passing it to OutputDevice::set_source().
   //
   ASSERT(!m_ibuffer);
   m_ibuffer = static_cast<InputBuffer*>(static_cast<Dev2Buf*>(link_buffer));
   m_sink = link_buffer;
   m_msg_len = 0;
+  m_is_link_buffer = true;
 }
 
 // This can be thrown from read_returned_zero when you want read_from_fd to continue reading anyway.

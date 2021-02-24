@@ -84,6 +84,7 @@ class OutputDevice : public virtual FileDescriptor
 #endif
   Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
   OutputBuffer* m_obuffer;              // A pointer to the output buffer.
+  bool m_is_link_buffer;                // True if m_obuffer is a LinkBufferPlus*.
 #ifdef DEBUGDEVICESTATS
   size_t m_sent_bytes;
 #endif
@@ -266,6 +267,7 @@ void OutputDevice::set_source(LinkBufferPlus* link_buffer)
 {
   m_obuffer = static_cast<OutputBuffer*>(link_buffer->as_Buf2Dev());
   m_source = link_buffer;
+  m_is_link_buffer = true;
 }
 
 template<typename... Args>
@@ -281,6 +283,7 @@ void OutputDevice::set_source(Source& output_device_ptr, Args... output_create_b
 #endif
   m_source = &output_device_ptr;
   m_obuffer = m_source->create_buffer(this, output_create_buffer_arguments...);
+  m_is_link_buffer = false;
 }
 
 template<typename INPUT_DEVICE>
