@@ -31,7 +31,7 @@
 #ifndef EVIO_INPUT_DEVICE_H
 #define EVIO_INPUT_DEVICE_H
 
-#include "FileDescriptor.h"
+#include "RawInputDevice.h"
 #include "StreamBuf.h"
 
 namespace evio {
@@ -43,71 +43,6 @@ class Sink;
 namespace protocol {
 class Decoder;
 } // namespace protocol
-
-class RawInputDevice : public virtual FileDescriptor
-{
- protected:
-  RawInputDevice();
-  ~RawInputDevice();
-
- public:
-  //---------------------------------------------------------------------------
-  // Public accessors:
-  //
-
-  // Returns true if the input device is registered with epoll.
-  template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType) const
-  {
-    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
-    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
-    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
-                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
-
-    bool is_active = state_t::crat(m_state)->m_flags.is_active_input_device();
-
-    // Basically we need the following table to hold:
-    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
-    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
-    //        no          False           WasFalse        False           WasFalse
-    //
-    return is_active ? fuzzy::WasTrue : (get_thread ? fuzzy::False : fuzzy::WasFalse);
-  }
-
- protected:
-  // Override base class virtual functions.
-  void init_input_device(state_t::wat const& state_w) override;
-
-  // Close input device. Return true if the device has now completely closed (dead).
-  bool close_input_device(int& allow_deletion_count, state_t::wat const& state_w);
-
- protected:
-  friend class Sink;
-  bool start_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
-  void start_input_device(state_t::wat const& state_w);
-  bool stop_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
-  void stop_input_device(state_t::wat const& state_w);
-  bool disable_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition);
-  void disable_input_device(state_t::wat const& state_w);
-  void enable_input_device();
-  void remove_input_device(int& allow_deletion_count, state_t::wat const& state_w);
-
-  [[gnu::always_inline]] void stop_input_device() { stop_input_device(state_t::wat(m_state)); }
-  [[gnu::always_inline]] void disable_input_device() { disable_input_device(state_t::wat(m_state)); }
-  [[gnu::always_inline]] void remove_input_device(int& allow_deletion_count) { remove_input_device(allow_deletion_count, state_t::wat(m_state)); }
- public: // ONLY public because StreamBuf::do_restart_input_device_if_needed() needs to call this :/
-  [[gnu::always_inline]] void start_input_device() { start_input_device(state_t::wat(m_state)); }
-
- public:
-  void close_input_device(int& allow_deletion_count) override;
-
-  RefCountReleaser close_input_device()
-  {
-    int allow_deletion_count = 0;
-    close_input_device(allow_deletion_count);
-    return {this, allow_deletion_count};
-  }
-};
 
 class InputDevice : public RawInputDevice
 {
