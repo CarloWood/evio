@@ -53,13 +53,13 @@ class RawOutputDevice : public virtual FileDescriptor
   using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_is_flushing_t m_disable_is_flushing;
 
+ protected:
   // The remote peer closed the connection.
   void hup(int& allow_deletion_count, int UNUSED_ARG(fd)) override { close_output_device(allow_deletion_count); }
 
   // Initialize output device.
   void init_output_device(state_t::wat const& state_w) override;
 
- protected:
   // Close output device. Return true if the device has now completely closed (dead).
   bool close_output_device(int& allow_deletion_count, state_t::wat const& state_w);
 
@@ -188,7 +188,7 @@ class RawOutputDevice : public virtual FileDescriptor
 
 class OutputDevice : public RawOutputDevice
 {
- public:
+ protected:
   // Event: fd is writable.
   //
   // This default implementation writes data from the buffer to the fd until
@@ -201,8 +201,7 @@ class OutputDevice : public RawOutputDevice
   // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
   void write_to_fd(int& allow_deletion_count, int fd) override;
 
-  // This default implementation `close's the object (which removes it).
-  virtual void write_error(int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
+  void close_output_device(int& allow_deletion_count) override final;
 
  protected:
   //---------------------------------------------------------------------------
@@ -228,6 +227,14 @@ class OutputDevice : public RawOutputDevice
 
   // Disallow copy constructing.
   OutputDevice(OutputDevice const&) = delete;
+
+ protected:
+  // Called from the streambuf associated with this device when pubsync() is called on it.
+  friend class StreamBufProducer;
+  virtual int sync();
+
+  // This default implementation `close's the object (which removes it).
+  virtual void write_error(int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
 
  public:
   //---------------------------------------------------------------------------
@@ -262,12 +269,6 @@ class OutputDevice : public RawOutputDevice
     set_source(ptr, requested_minimum_block_size, 8 * StreamBuf::round_up_minimum_block_size(requested_minimum_block_size));
   }
 
- protected:
-  // Called from the streambuf associated with this device when pubsync() is called on it.
-  friend class StreamBufProducer;
-  virtual int sync();
-
-  void close_output_device(int& allow_deletion_count) override final;
   using RawOutputDevice::close_output_device;
 
  private:
