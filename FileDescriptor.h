@@ -599,12 +599,14 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   virtual void read_from_fd(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
   {
     ASSERT(!is_destructed());
+    // A class derived directly from RawInputDevice must override this method.
     DoutFatal(dc::core, "Calling FileDescriptor::read_read_fd() on object [" << this << "] that isn't an InputDevice.");
   }
 
   virtual void write_to_fd(int& UNUSED_ARG(allow_deletion_count), int UNUSED_ARG(fd))
   {
     ASSERT(!is_destructed());
+    // A class derived directly from RawOutputDevice must override this method.
     DoutFatal(dc::core, "Calling FileDescriptor::write_to_fd() on object [" << this << "] that isn't an OutputDevice.");
   }
 

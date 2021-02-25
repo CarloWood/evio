@@ -41,53 +41,111 @@ class Source;
 class OutputBuffer;
 class LinkBufferPlus;
 
-class OutputDevice : public virtual FileDescriptor
+class RawOutputDevice : public virtual FileDescriptor
 {
- public:
-  // The remote peer closed the connection.
-  void hup(int& allow_deletion_count, int UNUSED_ARG(fd)) override { close_output_device(allow_deletion_count); }
-
-  // Event: fd is writable.
-  //
-  // This default implementation writes data from the buffer to the fd until
-  // 1) the buffer is empty, or
-  // 2) write(2) wrote less than the number of bytes passed to it, or
-  // 3) write(2) returned an error other than EAGAIN or EINTR, or
-  // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
-  // 5) write(2) returned EINTR caused by SIGPIPE.
-  // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
-  // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
-  void write_to_fd(int& allow_deletion_count, int fd) override;
-
-  // This default implementation `close's the object (which removes it).
-  virtual void write_error(int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
+ private:
+  // List of InputDevice objects that have FDS_R_CLOSE set.
+  // For this to work, ONLY set/unset FDS_R_CLOSE through calls to InputDevice::close_on_exit(bool)!
+  using w_close_list_t = aithreadsafe::Wrapper<std::vector<boost::intrusive_ptr<RawOutputDevice>>, aithreadsafe::policy::Primitive<std::mutex>>;
+  static w_close_list_t s_w_close_list;
 
  private:
   using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
   disable_is_flushing_t m_disable_is_flushing;
 
-  // List of InputDevice objects that have FDS_R_CLOSE set.
-  // For this to work, ONLY set/unset FDS_R_CLOSE through calls to InputDevice::close_on_exit(bool)!
-  using w_close_list_t = aithreadsafe::Wrapper<std::vector<boost::intrusive_ptr<OutputDevice>>, aithreadsafe::policy::Primitive<std::mutex>>;
-  static w_close_list_t s_w_close_list;
+  // The remote peer closed the connection.
+  void hup(int& allow_deletion_count, int UNUSED_ARG(fd)) override { close_output_device(allow_deletion_count); }
+
+  // Initialize output device.
+  void init_output_device(state_t::wat const& state_w) override;
 
  protected:
-  //---------------------------------------------------------------------------
-  // The output buffer
-  //
+  // Close output device. Return true if the device has now completely closed (dead).
+  bool close_output_device(int& allow_deletion_count, state_t::wat const& state_w);
 
-#if defined(__clang__) && __clang_major__ <= 6
-  // clang++ 6.x and lower erroneously assumes that this class is always aligned like FileDescriptor (64),
-  // but that is not true when this class is used in multiple inheritance. So, force the alignment that
-  // clang++ assumes.
-  alignas(16)
-#endif
-  Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
-  OutputBuffer* m_obuffer;              // A pointer to the output buffer.
-  bool m_is_link_buffer;                // True if m_obuffer is a LinkBufferPlus*.
-#ifdef DEBUGDEVICESTATS
-  size_t m_sent_bytes;
-#endif
+ public:
+  // Returns true if the output device is registered with epoll.
+  template<typename ThreadType>
+  utils::FuzzyBool is_active(ThreadType) const
+  {
+    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
+    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
+    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
+                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
+
+    bool is_active = state_t::crat(m_state)->m_flags.is_active_output_device();
+
+    // Basically we need the following table to hold:
+    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
+    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
+    //        no          False           WasFalse        WasFalse        False
+    //
+    return is_active ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
+  }
+
+  void restart_if_non_active()
+  {
+    // This function should be called only from Buf2Dev::flush and OutputDevice::enable_output_device, and therefore be an output device.
+    state_t::wat state_w(m_state);
+    ASSERT(state_w->m_flags.is_output_device());
+    if (state_w->m_flags.is_writable() && !state_w->m_flags.is_active_output_device())
+      start_output_device(state_w);
+  }
+
+  void close_output_device(int& allow_deletion_count) override;
+
+  RefCountReleaser close_output_device()
+  {
+    int allow_deletion_count = 0;
+    close_output_device(allow_deletion_count);
+    return {this, allow_deletion_count};
+  }
+
+  RefCountReleaser stop_output_device()
+  {
+    int allow_deletion_count = 0;
+    stop_output_device(allow_deletion_count);
+    return {this, allow_deletion_count};
+  }
+
+  RefCountReleaser flush_output_device();
+
+  void close_on_exit(bool auto_close = true)
+  {
+    Dout(dc::evio, "close_on_exit(" << std::boolalpha << auto_close << ") [" << this << "]");
+    w_close_list_t::wat w_close_list_w(s_w_close_list);
+    state_t::wat state_w(m_state);
+    // Only call this method with alternating values of `auto_close`, starting with `true`.
+    ASSERT(state_w->m_flags.is_w_close() != auto_close);
+    if (auto_close)
+    {
+      w_close_list_w->emplace_back(this);
+      state_w->m_flags.set_w_close();
+    }
+    else
+    {
+      for (auto iter = w_close_list_w->begin(); iter != w_close_list_w->end(); ++iter)
+        if (iter->get() == this)
+        {
+          w_close_list_w->erase(iter);
+          break;
+        }
+      state_w->m_flags.unset_w_close();
+    }
+  }
+
+  static void flush_close_on_exit()
+  {
+    DoutEntering(dc::evio, "flush_close_on_exit()");
+    w_close_list_t::wat w_close_list_w(s_w_close_list);
+    for (auto&& ptr : *w_close_list_w)
+      ptr->close_output_device();
+    w_close_list_w->clear();
+  }
+
+ protected:
+  RawOutputDevice();
+  ~RawOutputDevice();
 
  protected:
   // The default condition just checks if the output device is not already active.
@@ -126,6 +184,43 @@ class OutputDevice : public virtual FileDescriptor
       start_output_device(state_w);
   }
   [[gnu::always_inline]] void remove_output_device(int& allow_deletion_count) { remove_output_device(allow_deletion_count, state_t::wat(m_state)); }
+};
+
+class OutputDevice : public RawOutputDevice
+{
+ public:
+  // Event: fd is writable.
+  //
+  // This default implementation writes data from the buffer to the fd until
+  // 1) the buffer is empty, or
+  // 2) write(2) wrote less than the number of bytes passed to it, or
+  // 3) write(2) returned an error other than EAGAIN or EINTR, or
+  // 4) EAGAIN != EWOULDBLOCK and EAGAIN happens twice in a row, or
+  // 5) write(2) returned EINTR caused by SIGPIPE.
+  // When write(2) returns an error other then EINTR (or when EINTR was caused by SIGPIPE),
+  // EAGAIN or EWOULDBLOCK it calls the virtual function write_error, see below.
+  void write_to_fd(int& allow_deletion_count, int fd) override;
+
+  // This default implementation `close's the object (which removes it).
+  virtual void write_error(int& allow_deletion_count, int UNUSED_ARG(err)) { close(allow_deletion_count); }
+
+ protected:
+  //---------------------------------------------------------------------------
+  // The output buffer
+  //
+
+#if defined(__clang__) && __clang_major__ <= 6
+  // clang++ 6.x and lower erroneously assumes that this class is always aligned like RawOutputDevice (64),
+  // but that is not true when this class is used in multiple inheritance. So, force the alignment that
+  // clang++ assumes.
+  alignas(16)
+#endif
+  Source* m_source;                     // A pointer to the source object that creates the output buffer for us (has knowledge of the Protocol).
+  OutputBuffer* m_obuffer;              // A pointer to the output buffer.
+  bool m_is_link_buffer;                // True if m_obuffer is a LinkBufferPlus*.
+#ifdef DEBUGDEVICESTATS
+  size_t m_sent_bytes;
+#endif
 
  protected:
   OutputDevice();
@@ -148,34 +243,6 @@ class OutputDevice : public virtual FileDescriptor
   size_t sent_bytes() const { return m_sent_bytes; }
 #endif
 
-  // Returns true if the output device is registered with epoll.
-  template<typename ThreadType>
-  utils::FuzzyBool is_active(ThreadType) const
-  {
-    constexpr bool get_thread = std::is_base_of<GetThread, ThreadType>::value;
-    constexpr bool put_thread = std::is_base_of<PutThread, ThreadType>::value;
-    static_assert(get_thread || put_thread || std::is_same<AnyThread, ThreadType>::value,
-                  "May only be called with ThreadType is SingleThread, AnyThread, GetThread or PutThread.");
-
-    bool is_active = state_t::crat(m_state)->m_flags.is_active_output_device();
-
-    // Basically we need the following table to hold:
-    //  Currently active  SingleThread    AnyThread       GetThread       PutThread
-    //       yes          WasTrue         WasTrue         WasTrue         WasTrue
-    //        no          False           WasFalse        WasFalse        False
-    //
-    return is_active ? fuzzy::WasTrue : (put_thread ? fuzzy::False : fuzzy::WasFalse);
-  }
-
-  void restart_if_non_active()
-  {
-    // This function should be called only from Buf2Dev::flush and OutputDevice::enable_output_device, and therefore be an output device.
-    state_t::wat state_w(m_state);
-    ASSERT(state_w->m_flags.is_output_device());
-    if (state_w->m_flags.is_writable() && !state_w->m_flags.is_active_output_device())
-      start_output_device(state_w);
-  }
-
  public:
   //---------------------------------------------------------------------------
   // Public manipulators:
@@ -195,65 +262,22 @@ class OutputDevice : public virtual FileDescriptor
     set_source(ptr, requested_minimum_block_size, 8 * StreamBuf::round_up_minimum_block_size(requested_minimum_block_size));
   }
 
-  RefCountReleaser flush_output_device();
-  RefCountReleaser close_output_device()
-  {
-    int allow_deletion_count = 0;
-    close_output_device(allow_deletion_count);
-    return {this, allow_deletion_count};
-  }
-  RefCountReleaser stop_output_device()
-  {
-    int allow_deletion_count = 0;
-    stop_output_device(allow_deletion_count);
-    return {this, allow_deletion_count};
-  }
-
-  void close_on_exit(bool auto_close = true)
-  {
-    Dout(dc::evio, "close_on_exit(" << std::boolalpha << auto_close << ") [" << this << "]");
-    w_close_list_t::wat w_close_list_w(s_w_close_list);
-    state_t::wat state_w(m_state);
-    // Only call this method with alternating values of `auto_close`, starting with `true`.
-    ASSERT(state_w->m_flags.is_w_close() != auto_close);
-    if (auto_close)
-    {
-      w_close_list_w->emplace_back(this);
-      state_w->m_flags.set_w_close();
-    }
-    else
-    {
-      for (auto iter = w_close_list_w->begin(); iter != w_close_list_w->end(); ++iter)
-        if (iter->get() == this)
-        {
-          w_close_list_w->erase(iter);
-          break;
-        }
-      state_w->m_flags.unset_w_close();
-    }
-  }
-
-  static void flush_close_on_exit()
-  {
-    DoutEntering(dc::evio, "flush_close_on_exit()");
-    w_close_list_t::wat w_close_list_w(s_w_close_list);
-    for (auto&& ptr : *w_close_list_w)
-      ptr->close_output_device();
-    w_close_list_w->clear();
-  }
-
  protected:
   // Called from the streambuf associated with this device when pubsync() is called on it.
   friend class StreamBufProducer;
   virtual int sync();
+
+  void close_output_device(int& allow_deletion_count) override final;
+  using RawOutputDevice::close_output_device;
 
  private:
   // Called by the second set_source above.
   inline void set_source(LinkBufferPlus* link_buffer);
 
   // Override base class virtual functions.
+#ifdef DEBUGDEVICESTATS
   void init_output_device(state_t::wat const& state_w) override;
-  void close_output_device(int& allow_deletion_count) override final;
+#endif
 };
 
 } // namespace evio

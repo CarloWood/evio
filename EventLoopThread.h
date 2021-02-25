@@ -120,16 +120,16 @@ class EventLoopThread : public Singleton<EventLoopThread>
   bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, FileDescriptorFlags::mask_t active_flag, FileDescriptor* device);
 
  public:
-  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { start(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { start(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { stop(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { stop(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, InputDevice* input_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, OutputDevice* output_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
-  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, InputDevice* input_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
-  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, OutputDevice* output_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, RawInputDevice* input_device) { start(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] void start(FileDescriptor::state_t::wat const& state_w, RawOutputDevice* output_device) { start(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, RawInputDevice* input_device) { stop(state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] void stop(FileDescriptor::state_t::wat const& state_w, RawOutputDevice* output_device) { stop(state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, RawInputDevice* input_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] void remove(int& allow_deletion_count, FileDescriptor::state_t::wat const& state_w, RawOutputDevice* output_device) { remove(allow_deletion_count, state_w, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, RawInputDevice* input_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] bool start_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, RawOutputDevice* output_device) { return start_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
+  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, RawInputDevice* input_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_R_ACTIVE, input_device); }
+  [[gnu::always_inline]] bool stop_if(FileDescriptor::state_t::wat const& state_w, utils::FuzzyCondition const& condition, RawOutputDevice* output_device) { return stop_if(state_w, condition, FileDescriptorFlags::FDS_W_ACTIVE, output_device); }
 
 //  void invoke_pending();
   void stop_running();

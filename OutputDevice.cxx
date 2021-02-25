@@ -36,19 +36,24 @@
 
 namespace evio {
 
-OutputDevice::OutputDevice() : m_source(nullptr), m_obuffer(nullptr), m_is_link_buffer(false)
+RawOutputDevice::RawOutputDevice()
 {
-  DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
+  DoutEntering(dc::evio, "RawOutputDevice::RawOutputDevice() [" << this << ']');
   // Mark that OutputDevice is a derived class.
   state_t::wat(m_state)->m_flags.set_output_device();
   // Give m_output_watcher known values; cause is_active() to return false.
 //  ev_io_init(&m_output_watcher, ..., -1, EV_UNDEF);
 }
 
-// Destructor.
-OutputDevice::~OutputDevice()
+OutputDevice::OutputDevice() : m_source(nullptr), m_obuffer(nullptr), m_is_link_buffer(false)
 {
-  DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
+  DoutEntering(dc::evio, "OutputDevice::OutputDevice() [" << this << ']');
+}
+
+// Destructor.
+RawOutputDevice::~RawOutputDevice()
+{
+  DoutEntering(dc::evio, "RawOutputDevice::~RawOutputDevice() [" << this << ']');
   bool is_w_open;
   {
     state_t::rat state_r(m_state);
@@ -74,6 +79,11 @@ OutputDevice::~OutputDevice()
   // isn't writable yet; e.g. a socket that isn't connected yet. In that case call
   // flush_output_device in the call back of the connected signal (by calling on_connected).
   ASSERT(!is_w_open);
+}
+
+OutputDevice::~OutputDevice()
+{
+  DoutEntering(dc::evio, "OutputDevice::~OutputDevice() [" << this << ']');
   if (m_obuffer)
   {
     // Delete the output buffer if it is no longer needed.
@@ -81,21 +91,26 @@ OutputDevice::~OutputDevice()
   }
 }
 
-void OutputDevice::init_output_device(state_t::wat const& state_w)
+void RawOutputDevice::init_output_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::io, "OutputDevice::init_output_device() [" << this << ']');
+  DoutEntering(dc::io, "RawOutputDevice::init_output_device() [" << this << ']');
   // Don't call init() while the OutputDevice is already active.
   ASSERT(!state_w->m_flags.is_active_output_device());
   // Here we mark that the file descriptor, that corresponds with writing to this device, is open.
   state_w->m_flags.set_w_open();
-#ifdef DEBUGDEVICESTATS
-  m_sent_bytes = 0;
-#endif
 }
 
-void OutputDevice::start_output_device(state_t::wat const& state_w)
+#ifdef DEBUGDEVICESTATS
+void OutputDevice::init_output_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ") [" << this << ']');
+  RawOutputDevice::init_output_device(state_w);
+  m_sent_bytes = 0;
+}
+#endif
+
+void RawOutputDevice::start_output_device(state_t::wat const& state_w)
+{
+  DoutEntering(dc::evio, "RawOutputDevice::start_output_device(" << *state_w << ") [" << this << ']');
   // Test for state_w->m_flags.is_writable() before calling this function!
   ASSERT(!state_w->m_flags.is_dead());
   // Call OutputDevice::init before calling OutputDevice::start_output_device and
@@ -106,9 +121,9 @@ void OutputDevice::start_output_device(state_t::wat const& state_w)
   EventLoopThread::instance().start(state_w, this);
 }
 
-bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool RawOutputDevice::start_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::evio, "OutputDevice::start_output_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "RawOutputDevice::start_output_device(" << *state_w << ", " << condition << ") [" << this << ']');
   // Test for state_w->m_flags.is_writable() before calling this function!
   ASSERT(!state_w->m_flags.is_dead());
   // Call OutputDevice::init before calling OutputDevice::start_output_device.
@@ -120,14 +135,14 @@ bool OutputDevice::start_output_device(state_t::wat const& state_w, utils::Fuzzy
   return EventLoopThread::instance().start_if(state_w, condition, this);
 }
 
-void OutputDevice::remove_output_device(int& allow_deletion_count, state_t::wat const& state_w)
+void RawOutputDevice::remove_output_device(int& allow_deletion_count, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "OutputDevice::remove_output_device({" << allow_deletion_count << "}, " << *state_w << ") [" << this << ']');
+  DoutEntering(dc::evio, "RawOutputDevice::remove_output_device({" << allow_deletion_count << "}, " << *state_w << ") [" << this << ']');
   EventLoopThread::instance().remove(allow_deletion_count, state_w, this);
   state_w->m_flags.unset_w_flushing();
 }
 
-RefCountReleaser OutputDevice::flush_output_device()
+RefCountReleaser RawOutputDevice::flush_output_device()
 {
   bool is_open;
   bool need_close;
@@ -139,7 +154,7 @@ RefCountReleaser OutputDevice::flush_output_device()
       state_w->m_flags.set_w_flushing();
   }
   // Only print debug output when the device wasn't already closed before anyway.
-  DoutEntering(dc::evio(is_open), "OutputDevice::flush_output_device() [" << this << ']');
+  DoutEntering(dc::evio(is_open), "RawOutputDevice::flush_output_device() [" << this << ']');
   // It should not be possible that this device is not open, but is still active.
   ASSERT(is_open || need_close);
   int allow_deletion_count = 0;
@@ -149,7 +164,7 @@ RefCountReleaser OutputDevice::flush_output_device()
 }
 
 //inline
-bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool RawOutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
   // Don't call this function when the device is 'flushing', instead call stop_output_device(condition).
   ASSERT(!state_w->m_flags.is_w_flushing());
@@ -157,7 +172,7 @@ bool OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w, 
 }
 
 //inline
-void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
+void RawOutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 {
   // Don't call this function when the device is 'flushing', instead call close_output_device.
   ASSERT(!state_w->m_flags.is_w_flushing());
@@ -166,7 +181,7 @@ void OutputDevice::stop_not_flushing_output_device(state_t::wat const& state_w)
 
 // Read and write threads; possibly other threads.
 // This function is thread-safe.
-void OutputDevice::stop_output_device(int& allow_deletion_count)
+void RawOutputDevice::stop_output_device(int& allow_deletion_count)
 {
   DoutEntering(dc::evio, "OutputDevice::stop_output_device({" << allow_deletion_count << "}) [" << this << ']');
   bool need_close = false;
@@ -182,7 +197,7 @@ void OutputDevice::stop_output_device(int& allow_deletion_count)
 }
 
 // GetThread only.
-bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition)
+bool RawOutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCondition const& condition)
 {
   DoutEntering(dc::evio, "OutputDevice::stop_output_device({" << allow_deletion_count << "}, " << condition << ") [" << this << ']');
   bool success;
@@ -204,7 +219,7 @@ bool OutputDevice::stop_output_device(int& allow_deletion_count, utils::FuzzyCon
   return success;
 }
 
-void OutputDevice::disable_output_device()
+void RawOutputDevice::disable_output_device()
 {
   DoutEntering(dc::evio, "OutputDevice::disable_output_device()");
   bool is_flushing = false;
@@ -225,7 +240,7 @@ void OutputDevice::disable_output_device()
   }
 }
 
-void OutputDevice::enable_output_device()
+void RawOutputDevice::enable_output_device()
 {
   DoutEntering(dc::evio, "OutputDevice::enable_output_device()");
   bool was_disabled;
@@ -241,56 +256,78 @@ void OutputDevice::enable_output_device()
     restart_if_non_active();
 }
 
+bool RawOutputDevice::close_output_device(int& allow_deletion_count, state_t::wat const& state_w)
+{
+  // Only call this function when this is true.
+  ASSERT(AI_LIKELY(state_w->m_flags.is_w_open()));
+
+  state_w->m_flags.unset_w_open();
+#ifdef CWDEBUG
+  if (!is_valid(m_fd))
+    Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
+#endif
+  if (!state_w->m_flags.is_regular_file())
+    remove_output_device(allow_deletion_count, state_w);
+  else
+  {
+    state_w->m_flags.unset_w_flushing();
+    stop_not_flushing_output_device(state_w);
+  }
+  // FDS_SAME is set when this is both, an input device and an output device and is
+  // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
+  //
+  // Therefore, if FDS_R_OPEN is still set then we shouldn't close the fd yet.
+  if (!(state_w->m_flags.dont_close() || (state_w->m_flags.is_same() && state_w->m_flags.is_r_open())))
+  {
+    Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
+    CWDEBUG_ONLY(int err =) ::close(m_fd);
+    Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
+    Dout(dc::finish, err);
+  }
+  // Remove any pending disable, if any (see the code in enable_output_device).
+  if (state_w->m_flags.is_w_disabled())
+  {
+    state_w->m_flags.unset_w_disabled();
+    disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
+    if (*disable_is_flushing_w)
+      state_w->m_flags.set_w_flushing();
+  }
+  // Mark the device as dead when it has no longer an open file descriptor.
+  if (!state_w->m_flags.is_open())
+  {
+    state_w->m_flags.set_dead();
+    return true;
+  }
+  return false;
+}
+
+void RawOutputDevice::close_output_device(int& allow_deletion_count)
+{
+  bool need_call_to_closed = false;
+  state_t::wat state_w(m_state);
+  if (AI_LIKELY(state_w->m_flags.is_w_open()))
+  {
+    // Only print debug output when this function actually does something.
+    DoutEntering(dc::evio, "RawInputDevice::close_output_device({" << allow_deletion_count << "}) [" << this << ']');
+    need_call_to_closed = close_output_device(allow_deletion_count, state_w);
+  }
+  if (need_call_to_closed)
+    closed(allow_deletion_count);
+}
+
 void OutputDevice::close_output_device(int& allow_deletion_count)
 {
-  DoutEntering(dc::io, "OutputDevice::close_output_device({" << allow_deletion_count << "})"
-#ifdef DEBUGDEVICESTATS
-      " [sent_bytes = " << m_sent_bytes << "]"
-#endif
-      "[" << this << ']');
-
   bool need_call_to_closed = false;
   {
     state_t::wat state_w(m_state);
     if (AI_LIKELY(state_w->m_flags.is_w_open()))
     {
-      state_w->m_flags.unset_w_open();
-#ifdef CWDEBUG
-      if (!is_valid(m_fd))
-        Dout(dc::warning, "Calling OutputDevice::close_output_device on an output device with invalid fd = " << m_fd << ".");
+      DoutEntering(dc::io, "OutputDevice::close_output_device({" << allow_deletion_count << "})"
+#ifdef DEBUGDEVICESTATS
+          " [sent_bytes = " << m_sent_bytes << "]"
 #endif
-      if (!state_w->m_flags.is_regular_file())
-        remove_output_device(allow_deletion_count, state_w);
-      else
-      {
-        state_w->m_flags.unset_w_flushing();
-        stop_not_flushing_output_device(state_w);
-      }
-      // FDS_SAME is set when this is both, an input device and an output device and is
-      // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
-      //
-      // Therefore, if FDS_R_OPEN is still set then we shouldn't close the fd yet.
-      if (!(state_w->m_flags.dont_close() || (state_w->m_flags.is_same() && state_w->m_flags.is_r_open())))
-      {
-        Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
-        CWDEBUG_ONLY(int err =) ::close(m_fd);
-        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
-        Dout(dc::finish, err);
-      }
-      // Remove any pending disable, if any (see the code in enable_output_device).
-      if (state_w->m_flags.is_w_disabled())
-      {
-        state_w->m_flags.unset_w_disabled();
-        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
-        if (*disable_is_flushing_w)
-          state_w->m_flags.set_w_flushing();
-      }
-      // Mark the device as dead when it has no longer an open file descriptor.
-      if (!state_w->m_flags.is_open())
-      {
-        state_w->m_flags.set_dead();
-        need_call_to_closed = true;
-      }
+          "[" << this << ']');
+      need_call_to_closed = close_output_device(allow_deletion_count, state_w);
     }
   }
   if (m_is_link_buffer)
@@ -458,6 +495,6 @@ int OutputDevice::sync()
 }
 
 //static
-OutputDevice::w_close_list_t OutputDevice::s_w_close_list;
+RawOutputDevice::w_close_list_t RawOutputDevice::s_w_close_list;
 
 } // namespace evio

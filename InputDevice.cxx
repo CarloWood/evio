@@ -36,16 +36,21 @@
 
 namespace evio {
 
-InputDevice::InputDevice() : m_sink(nullptr), m_ibuffer(nullptr), m_is_link_buffer(false)
+RawInputDevice::RawInputDevice()
 {
-  DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::RawInputDevice() [" << this << ']');
   // Mark that InputDevice is a derived class.
   state_t::wat(m_state)->m_flags.set_input_device();
 }
 
-InputDevice::~InputDevice()
+InputDevice::InputDevice() : m_sink(nullptr), m_ibuffer(nullptr), m_is_link_buffer(false)
 {
-  DoutEntering(dc::evio, "InputDevice::~InputDevice() [" << this << ']');
+  DoutEntering(dc::evio, "InputDevice::InputDevice() [" << this << ']');
+}
+
+RawInputDevice::~RawInputDevice()
+{
+  DoutEntering(dc::evio, "RawInputDevice::~RawInputDevice() [" << this << ']');
   bool is_r_open;
   {
     state_t::wat state_w(m_state);
@@ -57,6 +62,10 @@ InputDevice::~InputDevice()
   // it is destructed. We can not call close_input_device here, from the destructor,
   // because that calls a virtual function (closed).
   ASSERT(!is_r_open);
+}
+
+InputDevice::~InputDevice()
+{
   if (m_ibuffer)
   {
     // Delete the input buffer if it is no longer needed.
@@ -64,23 +73,28 @@ InputDevice::~InputDevice()
   }
 }
 
-void InputDevice::init_input_device(state_t::wat const& state_w)
+void RawInputDevice::init_input_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::init_input_device() [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::init_input_device() [" << this << ']');
   // Don't call init() while the InputDevice is already active.
   ASSERT(!state_w->m_flags.is_active_input_device());
   // init() should be called immediately after opening a file descriptor.
   // In fact, init must be called with a valid, open file descriptor.
   // Here we mark that the file descriptor, that corresponds with reading from this device, is open.
   state_w->m_flags.set_r_open();
-#ifdef DEBUGDEVICESTATS
-  m_received_bytes = 0;
-#endif
 }
 
-bool InputDevice::start_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+#ifdef DEBUGDEVICESTATS
+void InputDevice::init_input_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::start_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  RawInputDevice::init_input_device(state_w);
+  m_received_bytes = 0;
+}
+#endif
+
+bool RawInputDevice::start_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+{
+  DoutEntering(dc::evio, "RawInputDevice::start_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
   // Call InputDevice::init before calling InputDevice::start_input_device.
   ASSERT(state_w->m_flags.is_r_open());
   // Don't call start_input_device with a condition that wasn't transitory_true in the first place.
@@ -90,9 +104,9 @@ bool InputDevice::start_input_device(state_t::wat const& state_w, utils::FuzzyCo
   return EventLoopThread::instance().start_if(state_w, condition, this);
 }
 
-void InputDevice::start_input_device(state_t::wat const& state_w)
+void RawInputDevice::start_input_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::start_input_device({" << *state_w << "}) [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::start_input_device({" << *state_w << "}) [" << this << ']');
   // Call InputDevice::init before calling InputDevice::start_input_device.
   ASSERT(state_w->m_flags.is_r_open());
   // Don't start a device after destructing the last boost::intrusive_ptr that points to it.
@@ -106,15 +120,15 @@ void InputDevice::start_input_device(state_t::wat const& state_w)
   EventLoopThread::instance().start(state_w, this);
 }
 
-void InputDevice::remove_input_device(int& allow_deletion_count, state_t::wat const& state_w)
+void RawInputDevice::remove_input_device(int& allow_deletion_count, state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::remove_input_device({" << allow_deletion_count << "}, {" << *state_w << "}) [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::remove_input_device({" << allow_deletion_count << "}, {" << *state_w << "}) [" << this << ']');
   EventLoopThread::instance().remove(allow_deletion_count, state_w, this);
 }
 
-bool InputDevice::stop_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool RawInputDevice::stop_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::evio, "InputDevice::stop_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::stop_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
   // Call InputDevice::init before calling InputDevice::stop_input_device.
   ASSERT(state_w->m_flags.is_r_open());
   // Don't call stop_input_device with a condition that wasn't transitory_true in the first place.
@@ -124,21 +138,21 @@ bool InputDevice::stop_input_device(state_t::wat const& state_w, utils::FuzzyCon
   return EventLoopThread::instance().stop_if(state_w, condition, this);
 }
 
-void InputDevice::stop_input_device(state_t::wat const& state_w)
+void RawInputDevice::stop_input_device(state_t::wat const& state_w)
 {
   // It is normal to call stop_input_device() when we are already stopped (ie, from close()),
   // therefore only print that we enter this function when we're actually still active.
   bool currently_active = state_w->m_flags.is_active_input_device();
-  DoutEntering(dc::evio(currently_active), "InputDevice::stop_input_device({" << *state_w << "}) [" << this << ']');
+  DoutEntering(dc::evio(currently_active), "RawInputDevice::stop_input_device({" << *state_w << "}) [" << this << ']');
   if (currently_active)
     EventLoopThread::instance().stop(state_w, this);
   // The filedescriptor, when open, is still considered to be open.
   // A subsequent call to start_input_device() will resume handling it.
 }
 
-bool InputDevice::disable_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
+bool RawInputDevice::disable_input_device(state_t::wat const& state_w, utils::FuzzyCondition const& condition)
 {
-  DoutEntering(dc::evio, "InputDevice::disable_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::disable_input_device(" << *state_w << ", " << condition << ") [" << this << ']');
   if (!state_w->m_flags.is_r_disabled())
   {
     state_w->m_flags.set_r_disabled();
@@ -148,9 +162,9 @@ bool InputDevice::disable_input_device(state_t::wat const& state_w, utils::Fuzzy
   return true;
 }
 
-void InputDevice::disable_input_device(state_t::wat const& state_w)
+void RawInputDevice::disable_input_device(state_t::wat const& state_w)
 {
-  DoutEntering(dc::evio, "InputDevice::disable_input_device(" << *state_w << ") [" << this << ']');
+  DoutEntering(dc::evio, "RawInputDevice::disable_input_device(" << *state_w << ") [" << this << ']');
   if (!state_w->m_flags.is_r_disabled())
   {
     state_w->m_flags.set_r_disabled();
@@ -158,9 +172,9 @@ void InputDevice::disable_input_device(state_t::wat const& state_w)
   }
 }
 
-void InputDevice::enable_input_device()
+void RawInputDevice::enable_input_device()
 {
-  DoutEntering(dc::evio, "InputDevice::enable_input_device()");
+  DoutEntering(dc::evio, "RawInputDevice::enable_input_device()");
   state_t::wat state_w(m_state);
   bool was_disabled = state_w->m_flags.is_r_disabled();
   state_w->m_flags.unset_r_disabled();
@@ -170,6 +184,56 @@ void InputDevice::enable_input_device()
     if (state_w->m_flags.is_readable())
       start_input_device(state_w);
   }
+}
+
+bool RawInputDevice::close_input_device(int& allow_deletion_count, state_t::wat const& state_w)
+{
+  // Only call this function when this is true.
+  ASSERT(AI_LIKELY(state_w->m_flags.is_r_open()));
+
+  state_w->m_flags.unset_r_open();
+#ifdef CWDEBUG
+  if (!is_valid(m_fd))
+    Dout(dc::warning, "Calling RawInputDevice::close_input_device on input device with invalid fd = " << m_fd << ".");
+#endif
+  if (!state_w->m_flags.is_regular_file())
+    remove_input_device(allow_deletion_count, state_w);
+  else
+    stop_input_device(state_w);
+  // FDS_SAME is set when this is both, an input device and an output device and is
+  // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
+  //
+  // Therefore, if FDS_W_OPEN is still set then we shouldn't close the fd yet.
+  if (!(state_w->m_flags.dont_close() || (state_w->m_flags.is_same() && state_w->m_flags.is_w_open())))
+  {
+    Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
+    CWDEBUG_ONLY(int err =) ::close(m_fd);
+    Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
+    Dout(dc::finish, err);
+  }
+  // Remove any pending disable, if any (see the code in enable_input_device).
+  state_w->m_flags.unset_r_disabled();
+  // Mark the device as dead when it has no longer an open file descriptor.
+  if (!state_w->m_flags.is_open())
+  {
+    state_w->m_flags.set_dead();
+    return true;
+  }
+  return false;
+}
+
+void RawInputDevice::close_input_device(int& allow_deletion_count)
+{
+  bool need_call_to_closed = false;
+  state_t::wat state_w(m_state);
+  if (AI_LIKELY(state_w->m_flags.is_r_open()))
+  {
+    // Only print debug output when this function actually does something.
+    DoutEntering(dc::evio, "RawInputDevice::close_input_device({" << allow_deletion_count << "}) [" << this << ']');
+    need_call_to_closed = RawInputDevice::close_input_device(allow_deletion_count, state_w);
+  }
+  if (need_call_to_closed)
+    closed(allow_deletion_count);
 }
 
 void InputDevice::close_input_device(int& allow_deletion_count)
@@ -185,34 +249,7 @@ void InputDevice::close_input_device(int& allow_deletion_count)
           " [received_bytes = " << m_received_bytes << "]"
 #endif
           " [" << this << ']');
-      state_w->m_flags.unset_r_open();
-#ifdef CWDEBUG
-      if (!is_valid(m_fd))
-        Dout(dc::warning, "Calling InputDevice::close on input device with invalid fd = " << m_fd << ".");
-#endif
-      if (!state_w->m_flags.is_regular_file())
-        remove_input_device(allow_deletion_count, state_w);
-      else
-        stop_input_device(state_w);
-      // FDS_SAME is set when this is both, an input device and an output device and is
-      // only set after both FDS_R_OPEN and FDS_W_OPEN are set.
-      //
-      // Therefore, if FDS_W_OPEN is still set then we shouldn't close the fd yet.
-      if (!(state_w->m_flags.dont_close() || (state_w->m_flags.is_same() && state_w->m_flags.is_w_open())))
-      {
-        Dout(dc::system|continued_cf, "close(" << m_fd << ") = ");
-        CWDEBUG_ONLY(int err =) ::close(m_fd);
-        Dout(dc::warning(err)|error_cf, "Failed to close filedescriptor " << m_fd);
-        Dout(dc::finish, err);
-      }
-      // Remove any pending disable, if any (see the code in enable_input_device).
-      state_w->m_flags.unset_r_disabled();
-      // Mark the device as dead when it has no longer an open file descriptor.
-      if (!state_w->m_flags.is_open())
-      {
-        state_w->m_flags.set_dead();
-        need_call_to_closed = true;
-      }
+      need_call_to_closed = RawInputDevice::close_input_device(allow_deletion_count, state_w);
     }
     else
       // Bug in library: it should not be possible that this device is closed
