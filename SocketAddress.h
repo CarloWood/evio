@@ -46,6 +46,14 @@ namespace evio {
 
 class SocketAddress             // TestSuite: test_SocketAddress.h
 {
+ public:
+  enum error_codes
+  {
+    decode_sockaddr_parse_error = -1,
+    make_sockaddr_un_path_too_long = 1
+  };
+
+ private:
   union {
     struct {
       struct sockaddr m_sockaddr;               // The type (sa_family) of socket address.
@@ -126,19 +134,13 @@ class SocketAddress             // TestSuite: test_SocketAddress.h
   bool compare_with(SocketAddress const& sa, int val) const;
 };
 
-enum error_codes
-{
-  SocketAddress_decode_sockaddr_parse_error = -1,
-  SocketAddress_make_sockaddr_un_path_too_long = 1
-};
-
-std::error_code make_error_code(error_codes);
+std::error_code make_error_code(SocketAddress::error_codes);
 
 } // namespace evio
 
-// Register evio::error_codes as valid error code.
+// Register evio::SocketAddress::error_codes as valid error code.
 namespace std {
 
-template<> struct is_error_code_enum<evio::error_codes> : true_type { };
+template<> struct is_error_code_enum<evio::SocketAddress::error_codes> : true_type { };
 
 } // namespace std

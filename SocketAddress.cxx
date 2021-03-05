@@ -346,7 +346,7 @@ void SocketAddress::make_sockaddr_un(std::string_view sockaddr_text)
   // so that all other code can rely on this.
   size_t len = sockaddr_text.size();
   if (AI_UNLIKELY(len >= sizeof(m_sockaddr_un_ptr->sun_path)))
-    THROW_FALERTC(SocketAddress_make_sockaddr_un_path_too_long, "\"[SOCKADDR_TEXT]\": UNIX socket path is too long");
+    THROW_FALERTC(make_sockaddr_un_path_too_long, "\"[SOCKADDR_TEXT]\": UNIX socket path is too long");
   std::memcpy(m_sockaddr_un_ptr->sun_path, sockaddr_text.data(), len);
   m_sockaddr_un_ptr->sun_path[len] = '\0';
   m_sockaddr_un_ptr->sun_path[sizeof(m_sockaddr_un_ptr->sun_path) - 1] = '\0';
@@ -381,7 +381,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     // Don't pass a port or a family other than AF_UNIX with a unix socket.
     if ((sa_family != AF_UNIX && sa_family != AF_UNSPEC) || port_h != -1)
     {
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": is a UNIX socket, but IP address expected because sa_family = [FAMILY] and port_h = [PORT]",
           AIArgs("[SOCKADDR_TEXT]", sockaddr_text)("FAMILY]", sa_family)("[PORT]", port_h));
     }
@@ -402,7 +402,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
   }
   catch (AIAlert::Error const& error)
   {
-    THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+    THROW_ALERTC(decode_sockaddr_parse_error,
         "\"[SOCKADDR_TEXT]\": ",
         AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text),
         error);
@@ -412,7 +412,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     // The matching closing bracket must be present.
     if (AI_UNLIKELY(len == sockaddr_text.size() || sockaddr_text[len] != ']'))
     {
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": missing ']'",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
     }
@@ -424,13 +424,13 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     // The port number must be separated by a colon.
     if (AI_UNLIKELY(len == sockaddr_text.size()))
     {
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": missing trailing \":port\"",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
     }
     else if (AI_UNLIKELY(sockaddr_text[len] != ':'))
     {
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": IPv4 extra characters",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text)("[REST]", sockaddr_text));
     }
@@ -441,7 +441,7 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
     }
     catch (AIAlert::Error const& error)
     {
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": ",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text),
           error);
@@ -453,11 +453,11 @@ void SocketAddress::decode_sockaddr(std::string_view sockaddr_text, sa_family_t 
   {
     // Don't supply trailing characters.
     if (port_h == -1)
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": trailing characters after port number",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
     else
-      THROW_ALERTC(SocketAddress_decode_sockaddr_parse_error,
+      THROW_ALERTC(decode_sockaddr_parse_error,
           "\"[SOCKADDR_TEXT]\": trailing characters after address",
           AIArgs("[SOCKADDR_TEXT]", orig_sockaddr_text));
   }
@@ -592,6 +592,8 @@ bool SocketAddress::compare_with(SocketAddress const& sa, int val) const
 // Error code handling.
 // See https://akrzemi1.wordpress.com/2017/07/12/your-own-error-code/
 
+using error_codes = SocketAddress::error_codes;
+
 //----------------------------------------------------------------------------
 // evio error category
 
@@ -612,9 +614,9 @@ std::string ErrorCategory::message(int ev) const
 {
   switch (static_cast<error_codes>(ev))
   {
-    case SocketAddress_decode_sockaddr_parse_error:
+    case SocketAddress::decode_sockaddr_parse_error:
       return "evio::SocketAddress::decode_sockaddr parse error";
-    case SocketAddress_make_sockaddr_un_path_too_long:
+    case SocketAddress::make_sockaddr_un_path_too_long:
       return "UNIX socket path is too long";
     default:
       return "evio::SocketAddress::decode_sockaddr (unrecognized error)";
