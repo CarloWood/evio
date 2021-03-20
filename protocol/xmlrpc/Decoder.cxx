@@ -49,6 +49,7 @@ char const* element_to_string(elements element)
   {
     FOREACH_ELEMENT(XMLRPC_CASE_RETURN)
   }
+  AI_NEVER_REACHED
 }
 
 template<elements enum_type>
