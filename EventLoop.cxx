@@ -28,14 +28,18 @@
 #include "sys.h"
 #include "EventLoop.h"
 #include "debug.h"
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 
 namespace evio {
 
 // EventLoop constructor.
-EventLoop::EventLoop(AIQueueHandle handler) : m_normal_exit(false)
+EventLoop::EventLoop(AIQueueHandle handler, std::string color_on_str, std::string color_off_str) : m_normal_exit(false)
 {
-  DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ")");
-  EventLoopThread::instance().init(handler);
+  DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ", \"" <<
+      buf2str(color_on_str.data(), color_on_str.size()) << "\", \"" << buf2str(color_off_str.data(), color_off_str.size()) << "\")");
+  EventLoopThread::instance().init(handler, color_on_str, color_off_str);
 }
 
 EventLoop::~EventLoop()

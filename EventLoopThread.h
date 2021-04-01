@@ -81,6 +81,10 @@ class EventLoopThread : public Singleton<EventLoopThread>
   static struct epoll_event s_events[maxevents];
   int const m_epoll_signum;
   std::atomic_int m_active;
+#ifdef CWDEBUG
+  std::string m_color_on_str;
+  std::string m_color_off_str;
+#endif
 
 #if 0
   std::mutex m_loop_mutex;
@@ -102,7 +106,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   void emain();
 //  void handle_invoke_pending();
   friend class EventLoop;
-  void init(AIQueueHandle handler);     // Called from the constructor of EventLoop.
+  void init(AIQueueHandle handler COMMA_CWDEBUG_ONLY(std::string color_on_str, std::string color_off_str));        // Called from the constructor of EventLoop.
   void terminate(bool normal_exit);     // Called from the destructor of EventLoop; exit as soon as all watchers added by start() have finished.
 
   static void s_wakeup_handler(int);

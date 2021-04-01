@@ -48,10 +48,14 @@ std::string epoll_events_str(uint32_t events);
 namespace evio {
 
 // Singleton initialization.
-void EventLoopThread::init(AIQueueHandle handler)
+void EventLoopThread::init(AIQueueHandle handler COMMA_CWDEBUG_ONLY(std::string color_on_str, std::string color_off_str))
 {
   DoutEntering(dc::evio, "EventLoopThread::init(" << handler << ')');
   m_handler = handler;
+#ifdef CWDEBUG
+  m_color_on_str = color_on_str;
+  m_color_off_str = color_off_str;
+#endif
 
   // Create the thread running the loop around epoll_pwait.
   m_event_thread = std::thread(&EventLoopThread::emain, &EventLoopThread::instance());
@@ -94,6 +98,9 @@ void EventLoopThread::s_wakeup_handler(int)
 void EventLoopThread::emain()
 {
   Debug(NAMESPACE_DEBUG::init_thread("EventLoopThr"));
+  Debug(libcw_do.color_on().assign(m_color_on_str.c_str(), m_color_on_str.size()));
+  Debug(libcw_do.color_off().assign(m_color_off_str.c_str(), m_color_off_str.size()));
+
   Dout(dc::evio, "Entering EventLoopThread::emain() [no indentation]");
 
   Dout(dc::system|continued_cf, "epoll_create1(EPOLL_CLOEXEC) = ");

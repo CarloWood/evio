@@ -31,6 +31,7 @@
 #include "EventLoopThread.h"    // This drags in AIQueueHandle too though.
 // Same for this header.
 #include "threadpool/AIThreadPool.h"
+#include <string>
 
 namespace evio {
 
@@ -57,7 +58,7 @@ class EventLoop
   bool m_normal_exit;
 
  public:
-  EventLoop(AIQueueHandle handler);
+  EventLoop(AIQueueHandle handler, std::string color_on_str = "", std::string color_off_str = "");
   ~EventLoop();
 
  // Call this immediately before the EventLoop leaves scope in order
