@@ -39,7 +39,7 @@ EventLoop::EventLoop(AIQueueHandle handler, std::string color_on_str, std::strin
 {
   DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ", \"" <<
       buf2str(color_on_str.data(), color_on_str.size()) << "\", \"" << buf2str(color_off_str.data(), color_off_str.size()) << "\")");
-  EventLoopThread::instance().init(handler, color_on_str, color_off_str);
+  EventLoopThread::instance().init(handler COMMA_CWDEBUG_ONLY(color_on_str, color_off_str));
 }
 
 EventLoop::~EventLoop()
