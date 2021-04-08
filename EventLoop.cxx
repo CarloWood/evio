@@ -35,7 +35,7 @@
 namespace evio {
 
 // EventLoop constructor.
-EventLoop::EventLoop(AIQueueHandle handler, std::string color_on_str, std::string color_off_str) : m_normal_exit(false)
+EventLoop::EventLoop(AIQueueHandle handler COMMA_CWDEBUG_ONLY(std::string color_on_str, std::string color_off_str)) : m_normal_exit(false)
 {
   DoutEntering(dc::evio, "EventLoop::EventLoop(" << handler << ", \"" <<
       buf2str(color_on_str.data(), color_on_str.size()) << "\", \"" << buf2str(color_off_str.data(), color_off_str.size()) << "\")");

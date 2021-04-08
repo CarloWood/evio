@@ -58,7 +58,7 @@ class EventLoop
   bool m_normal_exit;
 
  public:
-  EventLoop(AIQueueHandle handler, std::string color_on_str = "", std::string color_off_str = "");
+  EventLoop(AIQueueHandle handler COMMA_CWDEBUG_ONLY(std::string color_on_str = "", std::string color_off_str = ""));
   ~EventLoop();
 
  // Call this immediately before the EventLoop leaves scope in order
