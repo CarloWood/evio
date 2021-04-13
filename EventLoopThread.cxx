@@ -45,6 +45,7 @@
 
 std::string epoll_events_str(uint32_t events);
 
+namespace utils { using namespace threading; }
 namespace evio {
 
 // Singleton initialization.
@@ -112,7 +113,7 @@ void EventLoopThread::emain()
   // Prepare a sigset for the signal(s) that we use to wake up epoll_pwait in epoll_sigmask.
   // Unblock those signals.
   sigset_t epoll_sigmask;
-  utils::Signals::unblock(&epoll_sigmask, m_epoll_signum, &s_wakeup_handler);
+  utils::Signal::unblock(&epoll_sigmask, m_epoll_signum, &s_wakeup_handler);
 
   // The current signal mask is the mask that we want to use while inside epoll_pwait too.
   // It will be copied to pwait_sigmask before entering epoll_pwait.
@@ -350,7 +351,7 @@ void EventLoopThread::emain()
   // Deinit.
   ASSERT(m_terminate == forced || m_active == 0);
   INotify::tear_down();
-  utils::Signals::block_and_unregister(m_epoll_signum);
+  utils::Signal::block_and_unregister(m_epoll_signum);
   Dout(dc::system|continued_cf, "close(" << m_epoll_fd << ") = ");
   CWDEBUG_ONLY(int res =) ::close(m_epoll_fd);
   Dout(dc::finish|cond_error_cf(res == -1), res);

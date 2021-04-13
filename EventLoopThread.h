@@ -33,7 +33,7 @@
 #include "threadpool/AIQueueHandle.h"
 #include "utils/Singleton.h"
 #include "utils/FuzzyBool.h"
-#include "utils/AISignals.h"
+#include "utils/Signals.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -69,7 +69,7 @@ class EventLoopThread : public Singleton<EventLoopThread>
   // However, you must call EventLoopThread::instance().init(handler) to initialize it before use.
   // See above for the normal usage (aka, don't use EventLoopThread directly).
   friend_Instance;
-  EventLoopThread() : m_epoll_fd(-1), m_epoll_signum(utils::Signals::reserve_and_next_rt_signum()), m_active(0), m_terminate(not_yet), m_running(false), m_stop_running(false), m_needs_deletion_list(nullptr) { }
+  EventLoopThread() : m_epoll_fd(-1), m_epoll_signum(utils::Signal::reserve_and_next_rt_signum()), m_active(0), m_terminate(not_yet), m_running(false), m_stop_running(false), m_needs_deletion_list(nullptr) { }
   ~EventLoopThread();
   EventLoopThread(EventLoopThread const&) = delete;
 
