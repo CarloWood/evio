@@ -162,7 +162,7 @@ void EventLoopThread::emain()
         all_threads_finished = 1;
         Dout(dc::system|continued_cf|flush_cf, "epoll_pwait(20ms) = ");
 #ifdef CWDEBUG
-        utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
+        utils::InstanceTracker<FileDescriptor>::for_each_instance([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
 #endif
         nfds = epoll_pwait(m_epoll_fd, s_events, maxevents, 20, &pwait_sigmask);
         Dout(dc::finish|cond_error_cf(nfds == -1), nfds);
@@ -171,7 +171,7 @@ void EventLoopThread::emain()
 
       Dout(dc::system|continued_cf|flush_cf, "epoll_pwait() = ");
 #ifdef CWDEBUG
-      utils::InstanceTracker<FileDescriptor>::for_each([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
+      utils::InstanceTracker<FileDescriptor>::for_each_instance([](FileDescriptor const* p){ Dout(dc::system, p << ": " << p->get_fd() << ", " << p->get_flags()); });
 #endif
       nfds = epoll_pwait(m_epoll_fd, s_events, maxevents, -1, &pwait_sigmask);
       Dout(dc::finish|cond_error_cf(nfds == -1), nfds);
@@ -383,7 +383,7 @@ void EventLoopThread::emain()
     // Calling stop_input_device() is not sufficient.
     bool open_files = false;
     bool unopened_file = false;
-    utils::InstanceTracker<FileDescriptor>::for_each([&open_files, &unopened_file](FileDescriptor const* p){
+    utils::InstanceTracker<FileDescriptor>::for_each_instance([&open_files, &unopened_file](FileDescriptor const* p){
       if (!p->get_flags().is_dead())
       {
         if (!open_files)
