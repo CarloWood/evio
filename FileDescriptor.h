@@ -676,10 +676,12 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     close_output_device(allow_deletion_count);
   }
 
+#if CW_DEBUG
   void print_tracker_info_on(std::ostream& os) const
   {
     os << this << ": " << get_fd() << ", " << get_flags();
   }
+#endif
 };
 
 std::ostream& operator<<(std::ostream& os, FileDescriptor::State const& state);
