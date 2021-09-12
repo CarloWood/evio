@@ -406,6 +406,12 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
   void allow_deletion(int count) const;
 
  protected:
+  // Note that 'config::cacheline_size_c' is defined in utils/config.h, generated from utils/config.h.in,
+  // which is included by cwds/sys.h iff HAVE_UTILS_CONFIG_H is defined, which gets defined by
+  // utils/CMakeLists.txt as part of the target utils_ObjLib.
+  //
+  // Hence, if you get the "error: use of undeclared identifier 'config'" here then most likely
+  // you didn't link the target that the current source file belongs to with AICxx::utils.
   alignas(config::cacheline_size_c) state_t m_state;    // Mutex protected state of this FileDescriptor.
   int m_fd;                                             // The file descriptor. In the case of a device that is derived from both,
                                                         // InputDevice and OutputDevice using multiple inheritance -- this fd is
