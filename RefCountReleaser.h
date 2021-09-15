@@ -95,7 +95,7 @@ struct RefCountReleaser         // TestSuite: test_RefCountReleaser.h
     m_device = device;
     ++m_allow_deletion_count;
   }
-  operator bool() const { return m_allow_deletion_count > 0; }
+  explicit operator bool() const { return m_allow_deletion_count > 0; }
 
   // The following is used by the test suite.
   void execute()
