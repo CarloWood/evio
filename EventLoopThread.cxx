@@ -235,9 +235,11 @@ void EventLoopThread::emain()
         }
       }
 
+
       // Because the threads of the thread pool run asynchronously, make sure the
       // device object won't be deleted while we're processing it.
-      if (AI_UNLIKELY(device->inhibit_deletion(DEBUG_ONLY(false)) == 0))
+      int count = device->inhibit_deletion(DEBUG_ONLY(false));
+      if (AI_UNLIKELY(count == 0))
       {
         // If inhibit_deletion returned zero then this device was marked for deletion in between
         // returning from epoll_pwait and the call to test_and_set_pending_events.
@@ -255,7 +257,8 @@ void EventLoopThread::emain()
 
       bool two_types_of_events = input_events && output_events;
       if (two_types_of_events)
-        device->inhibit_deletion();
+        CWDEBUG_ONLY(count =) device->inhibit_deletion();
+      Dout(dc::io, "Incremented ref count of device " << device << " to " << (count + 1));
 
       // Queue the events for processing by the thread pool.
       CWDEBUG_ONLY(bool queue_was_full = false;)
@@ -563,7 +566,8 @@ void EventLoopThread::handle_regular_file(FileDescriptorFlags::mask_t active_fla
       {
         Dout(dc::warning(queue_was_full), "Queue is no longer full; resuming I/O.");
         Dout(dc::evio, "Queuing call to " << ((active_flag == FileDescriptorFlags::FDS_R_ACTIVE) ? "read_event" : "write_event") << "() in thread pool queue " << m_handler);
-        device->inhibit_deletion();
+        CWDEBUG_ONLY(int count =) device->inhibit_deletion();
+        Dout(dc::io, "Incremented ref count of device " << device << " to " << (count + 1));
         if (active_flag == FileDescriptorFlags::FDS_R_ACTIVE)
           queue_access.move_in([device](){
               Dout(dc::evio, "Beginning of handling read event for " << device << ".");
@@ -690,7 +694,7 @@ int main(int argc, char* argv[])
       // as a result of calling InputDevice::remove_input_device() (or InputDevice::close_input_device,
       // which also calls InputDevice::remove_input_device).
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-      Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+      Dout(dc::io, "Incremented ref count of device " << device << " to " << (count + 1));
     }
     device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }
@@ -771,7 +775,7 @@ bool EventLoopThread::start_if(FileDescriptor::state_t::wat const& state_w, util
       // Increment ref count to stop device from being deleted while being active.
       // It is kept alive until a call to allow_deletion().
       CWDEBUG_ONLY(int count =) device->inhibit_deletion();
-      Dout(dc::io, "Incremented ref count (now " << (count + 1) << ") [" << device << ']');
+      Dout(dc::io, "Incremented ref count of device " << device << " to " << (count + 1));
     }
     device->start_watching(state_w, m_epoll_fd, FileDescriptorFlags::active_to_events(active_flag), needs_adding);
   }
