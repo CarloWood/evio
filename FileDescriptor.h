@@ -92,49 +92,49 @@ class FileDescriptorFlags
   //                                   | `-FDS_R
   //                                   `-FDS_W
 
-  static int constexpr epoll_width = utils::log2(EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP) + 1;
-  static int constexpr inferior_shft = epoll_width;
-  static int constexpr disabled_shft = 2 * epoll_width;
-  static int constexpr open_shft = 3 * epoll_width;
-  static int constexpr added_shft = 4 * epoll_width;
-  static int constexpr active_to_type_shft = 5 * epoll_width;
+  static constexpr int epoll_width = utils::log2(EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP) + 1;
+  static constexpr int inferior_shft = epoll_width;
+  static constexpr int disabled_shft = 2 * epoll_width;
+  static constexpr int open_shft = 3 * epoll_width;
+  static constexpr int added_shft = 4 * epoll_width;
+  static constexpr int active_to_type_shft = 5 * epoll_width;
 
-  static mask_t constexpr FDS_EPOLLIN_BUSY        = EPOLLIN;
-  static mask_t constexpr FDS_EPOLLOUT_BUSY       = EPOLLOUT;
-  static mask_t constexpr FDS_EPOLLERR_BUSY       = EPOLLERR;
-  static mask_t constexpr FDS_EPOLLHUP_BUSY       = EPOLLHUP;
+  static constexpr mask_t FDS_EPOLLIN_BUSY        = EPOLLIN;
+  static constexpr mask_t FDS_EPOLLOUT_BUSY       = EPOLLOUT;
+  static constexpr mask_t FDS_EPOLLERR_BUSY       = EPOLLERR;
+  static constexpr mask_t FDS_EPOLLHUP_BUSY       = EPOLLHUP;
 
-  static mask_t constexpr FDS_R_ACTIVE            = EPOLLIN << epoll_width;     // Set when epoll is using a pointer to this object (is watching this fd for input activity).
-  static mask_t constexpr FDS_W_ACTIVE            = EPOLLOUT << epoll_width;    // Set when epoll is using a pointer to this object (is watching this fd for output activity).
+  static constexpr mask_t FDS_R_ACTIVE            = EPOLLIN << epoll_width;     // Set when epoll is using a pointer to this object (is watching this fd for input activity).
+  static constexpr mask_t FDS_W_ACTIVE            = EPOLLOUT << epoll_width;    // Set when epoll is using a pointer to this object (is watching this fd for output activity).
 
-  static mask_t constexpr FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;        // See is_input_device() below.
-  static mask_t constexpr FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;        // See is_output_device() below.
-  static mask_t constexpr FDS_RW                  = FDS_R | FDS_W;
+  static constexpr mask_t FDS_R                   = FDS_R_ACTIVE << active_to_type_shft;        // See is_input_device() below.
+  static constexpr mask_t FDS_W                   = FDS_W_ACTIVE << active_to_type_shft;        // See is_output_device() below.
+  static constexpr mask_t FDS_RW                  = FDS_R | FDS_W;
 
-  static mask_t constexpr FDS_R_ADDED             = FDS_R >> added_shft;        // See is_r_added() below.
-  static mask_t constexpr FDS_W_ADDED             = FDS_W >> added_shft;        // See is_w_added() below.
-  static mask_t constexpr FDS_ADDED               = FDS_R_ADDED | FDS_W_ADDED;
-  static int constexpr active_to_added_shft = active_to_type_shft - added_shft;
+  static constexpr mask_t FDS_R_ADDED             = FDS_R >> added_shft;        // See is_r_added() below.
+  static constexpr mask_t FDS_W_ADDED             = FDS_W >> added_shft;        // See is_w_added() below.
+  static constexpr mask_t FDS_ADDED               = FDS_R_ADDED | FDS_W_ADDED;
+  static constexpr int active_to_added_shft = active_to_type_shft - added_shft;
 
-  static mask_t constexpr FDS_R_OPEN              = FDS_R >> open_shft;         // See is_open() below.
-  static mask_t constexpr FDS_W_OPEN              = FDS_W >> open_shft;
-  static int constexpr active_to_open_shft = active_to_type_shft - open_shft;
+  static constexpr mask_t FDS_R_OPEN              = FDS_R >> open_shft;         // See is_open() below.
+  static constexpr mask_t FDS_W_OPEN              = FDS_W >> open_shft;
+  static constexpr int active_to_open_shft = active_to_type_shft - open_shft;
 
-  static mask_t constexpr FDS_R_DISABLED          = FDS_R >> disabled_shft;     // See is_disabled() below.
-  static mask_t constexpr FDS_W_DISABLED          = FDS_W >> disabled_shft;
-  static int constexpr active_to_disabled_shft = active_to_type_shft - disabled_shft;
+  static constexpr mask_t FDS_R_DISABLED          = FDS_R >> disabled_shft;     // See is_disabled() below.
+  static constexpr mask_t FDS_W_DISABLED          = FDS_W >> disabled_shft;
+  static constexpr int active_to_disabled_shft = active_to_type_shft - disabled_shft;
 
-  static mask_t constexpr FDS_R_INFERIOR          = FDS_R >> inferior_shft;     // See is_r_inferior() below.
-  static mask_t constexpr FDS_W_INFERIOR          = FDS_W >> inferior_shft;     // See is_w_inferior() below.
-  static int constexpr active_to_inferior_shft = active_to_type_shft - inferior_shft;
+  static constexpr mask_t FDS_R_INFERIOR          = FDS_R >> inferior_shft;     // See is_r_inferior() below.
+  static constexpr mask_t FDS_W_INFERIOR          = FDS_W >> inferior_shft;     // See is_w_inferior() below.
+  static constexpr int active_to_inferior_shft = active_to_type_shft - inferior_shft;
 
-  static mask_t constexpr FDS_SAME                = 0x8000000000000000UL;       // See is_same() below.
-  static mask_t constexpr FDS_REGULAR_FILE        = 0x2000000000000000UL;       // See is_regular_file() below.
-  static mask_t constexpr FDS_W_CLOSE             = 0x1000000000000000UL;       // See is_w_close() below.
-  static mask_t constexpr FDS_W_FLUSHING          = 0x0800000000000000UL;       // See set_w_flushing() below.
-  static mask_t constexpr FDS_DEAD                = 0x0400000000000000UL;       // See is_dead() below.
-  static mask_t constexpr INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;       // See dont_close() and close() below.
-  static mask_t constexpr FDS_DEBUG               = 0x0100000000000000UL;
+  static constexpr mask_t FDS_SAME                = 0x8000000000000000UL;       // See is_same() below.
+  static constexpr mask_t FDS_REGULAR_FILE        = 0x2000000000000000UL;       // See is_regular_file() below.
+  static constexpr mask_t FDS_W_CLOSE             = 0x1000000000000000UL;       // See is_w_close() below.
+  static constexpr mask_t FDS_W_FLUSHING          = 0x0800000000000000UL;       // See set_w_flushing() below.
+  static constexpr mask_t FDS_DEAD                = 0x0400000000000000UL;       // See is_dead() below.
+  static constexpr mask_t INTERNAL_FDS_DONT_CLOSE = 0x0200000000000000UL;       // See dont_close() and close() below.
+  static constexpr mask_t FDS_DEBUG               = 0x0100000000000000UL;
   static_assert(FDS_W < FDS_DEBUG, "epoll_width is too large!");
 
  private:
