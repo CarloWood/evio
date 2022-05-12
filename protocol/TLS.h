@@ -162,7 +162,7 @@ class TLS
   // returned true, the inside_do_handshake bit must have been set.
   // Hence, if we see that neither post_handshake nor inside_do_handshake
   // are set then the read thread returned from do_handshake and
-  // signalled if it wants to continue with reading or writing by clearing
+  // signaled if it wants to continue with reading or writing by clearing
   // or setting the want_write bit; however, since we also get here when
   // state == 0, it is possible that in that case it was THIS thread that
   // just reset the inside_do_handshake bit (after having just executed
