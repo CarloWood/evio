@@ -988,7 +988,7 @@ class StreamBuf : public StreamBufProducer, public StreamBufConsumer
   void update_total_read(size_t data_size)
   {
     DoutEntering(dc::io, "update_total_read(" << data_size << ")");
-#ifdef CWDEBUG
+#if CW_DEBUG
     std::streamsize prev_total_read = m_total_read.load(std::memory_order_relaxed);
 #endif
     std::streamsize new_total_read = m_total_allocated - unused_in_last_block() + m_total_reset - data_size;

@@ -616,9 +616,9 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     DoutFatal(dc::core, "Calling FileDescriptor::write_to_fd() on object [" << this << "] that isn't an OutputDevice.");
   }
 
-#ifdef CWDEBUG
+#if CW_DEBUG
  public:
-  // Used for debug code.
+  // Used in ASSERTs.
 #endif
   // Reading or writing this fd is never safe, except when done from read_from_fd() / write_to_fd() of a specialized class like TLSSocket.
   int get_fd() const { return m_fd; }
