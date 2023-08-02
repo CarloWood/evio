@@ -28,7 +28,7 @@
 #include "sys.h"
 #include "INotify.h"
 #include "InputDevice.h"
-#include "threadsafe/aithreadsafe.h"
+#include "threadsafe/threadsafe.h"
 #include "threadsafe/AIReadWriteSpinLock.h"
 #include "utils/macros.h"
 #include "utils/nearest_power_of_two.h"
@@ -81,7 +81,7 @@ class INotifyDevice : public InputDevice, public virtual FileDescriptor
   // Map watch descriptors to their corresponding INotify objects.
   using wd_to_inotify_map_type = std::vector<std::pair<int, INotify*>>;
   // Use AIReadWriteSpinLock because we'll be doing vastly more read locks than write locks.
-  using wd_to_inotify_map_ts = aithreadsafe::Wrapper<wd_to_inotify_map_type, aithreadsafe::policy::ReadWrite<AIReadWriteSpinLock>>;
+  using wd_to_inotify_map_ts = threadsafe::Unlocked<wd_to_inotify_map_type, threadsafe::policy::ReadWrite<AIReadWriteSpinLock>>;
   wd_to_inotify_map_ts m_wd_to_inotify_map;
 
   static wd_to_inotify_map_type::const_iterator get_inotify_obj(wd_to_inotify_map_ts::crat const& wd_to_inotify_map_r, int wd, bool should_exists);
