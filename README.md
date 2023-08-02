@@ -155,7 +155,7 @@ where it was put when reading from the file decriptor.
 ## Using this git module
 
 The root project should be using
-[autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools) and
+[cmake](https://cmake.org/overview/) and
 [cwm4](https://github.com/CarloWood/cwm4).
 
 ## Example
