@@ -3,7 +3,7 @@
 #include "IgnoreElement.h"
 #include "utils/Dictionary.h"
 #include "threadsafe/AIReadWriteMutex.h"
-#include "threadsafe/aithreadsafe.h"
+#include "threadsafe/threadsafe.h"
 #include <magic_enum.hpp>
 #include "debug.h"
 
@@ -12,7 +12,7 @@ namespace evio::protocol::xmlrpc {
 template<typename T>
 class StructDictionary {
  protected:
-  using dictionary_type = aithreadsafe::Wrapper<utils::Dictionary<typename T::members, int>, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+  using dictionary_type = threadsafe::Unlocked<utils::Dictionary<typename T::members, int>, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
   using UnknownMember = typename dictionary_type::data_type::NonExistingWord;
 
   static dictionary_type s_dictionary;

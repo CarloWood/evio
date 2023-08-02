@@ -37,7 +37,7 @@
 #include "utils/FuzzyBool.h"
 #include "utils/AIAlert.h"
 #include "utils/c_escape.h"
-#include "threadsafe/aithreadsafe.h"
+#include "threadsafe/threadsafe.h"
 #include <atomic>
 #include <mutex>
 #include <string_view>

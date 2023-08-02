@@ -206,8 +206,7 @@ void RawOutputDevice::disable_output_device()
       if (is_flushing)
       {
         state_w->m_flags.unset_w_flushing();
-        disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
-        *disable_is_flushing_w = true;
+        m_disable_is_flushing = true;
       }
       stop_not_flushing_output_device(state_w);
     }
@@ -222,8 +221,7 @@ void RawOutputDevice::enable_output_device()
     state_t::wat state_w(m_state);
     was_disabled = state_w->m_flags.is_w_disabled();
     state_w->m_flags.unset_w_disabled();
-    disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
-    if (*disable_is_flushing_w)
+    if (m_disable_is_flushing)
       state_w->m_flags.set_w_flushing();
   }
   if (was_disabled)
@@ -262,8 +260,7 @@ bool RawOutputDevice::close_output_device(int& allow_deletion_count, state_t::wa
   if (state_w->m_flags.is_w_disabled())
   {
     state_w->m_flags.unset_w_disabled();
-    disable_is_flushing_t::wat disable_is_flushing_w(m_disable_is_flushing);
-    if (*disable_is_flushing_w)
+    if (m_disable_is_flushing)
       state_w->m_flags.set_w_flushing();
   }
   // Mark the device as dead when it has no longer an open file descriptor.

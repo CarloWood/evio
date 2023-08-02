@@ -41,12 +41,11 @@ class RawOutputDevice : public virtual FileDescriptor
  private:
   // List of InputDevice objects that have FDS_R_CLOSE set.
   // For this to work, ONLY set/unset FDS_R_CLOSE through calls to InputDevice::close_on_exit(bool)!
-  using w_close_list_t = aithreadsafe::Wrapper<std::vector<boost::intrusive_ptr<RawOutputDevice>>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using w_close_list_t = threadsafe::Unlocked<std::vector<boost::intrusive_ptr<RawOutputDevice>>, threadsafe::policy::Primitive<std::mutex>>;
   static w_close_list_t s_w_close_list;
 
  private:
-  using disable_is_flushing_t = aithreadsafe::Wrapper<bool, aithreadsafe::policy::Primitive<std::mutex>>;
-  disable_is_flushing_t m_disable_is_flushing;
+  std::atomic_bool m_disable_is_flushing;
 
  protected:
   // The remote peer closed the connection.

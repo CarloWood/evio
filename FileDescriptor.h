@@ -398,7 +398,7 @@ class FileDescriptor : public AIRefCount, public utils::InstanceTracker<FileDesc
     FileDescriptorFlags m_flags;
     struct epoll_event m_epoll_event;
   };
-  using state_t = aithreadsafe::Wrapper<State, aithreadsafe::policy::Primitive<std::mutex>>;
+  using state_t = threadsafe::Unlocked<State, threadsafe::policy::Primitive<std::mutex>>;
 
   // Overload intrusive_ptr_release for FileDescriptor (as opposed to AIRefCount).
   // This is a bit dangerous: make sure you never cast a FileDescriptor to an AIRefCount.
