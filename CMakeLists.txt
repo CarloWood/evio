@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12...3.16)
+cmake_minimum_required(VERSION 3.15...3.30)
 
 project(evio
   DESCRIPTION "A cwm4 git submodule for embedding epoll based io event support"
@@ -32,12 +32,6 @@ add_subdirectory(protocol)
 
 # This project is an OBJECT-library, used by other git submodules and the main project.
 add_library(evio_ObjLib OBJECT)
-
-# Set SOURCE_DIR to the current directory.
-set_property(
-  TARGET evio_ObjLib
-  PROPERTY SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-)
 
 # The list of source files.
 target_sources(evio_ObjLib
