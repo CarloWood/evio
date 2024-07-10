@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12...3.19)
+cmake_minimum_required(VERSION 3.15...3.30)
 
 project(xmlrpc
   DESCRIPTION "evio xmlrpc objects."
@@ -15,12 +15,6 @@ find_package(magic_enum REQUIRED)
 
 # This project is an OBJECT-library, used by other git submodules and the main project.
 add_library(evio_protocol_xmlrpc_ObjLib OBJECT)
-
-# Set SOURCE_DIR to the current directory.
-set_property(
-  TARGET evio_protocol_xmlrpc_ObjLib
-  PROPERTY SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-)
 
 # The list of source files.
 target_sources(evio_protocol_xmlrpc_ObjLib
