@@ -21,10 +21,10 @@ class ElementBase
   ElementBase(index_type id, ElementBase* parent) : m_id(id), m_parent(parent) { }
   virtual ~ElementBase() { }
   // Objects derived from ElementBase must be allocated with:
-  // utils::NodeMemoryPool pool(128, sizeof(LargestDerivedClass));
+  // memory::NodeMemoryPool pool(128, sizeof(LargestDerivedClass));
   // DerivedClass* foo = new(pool) DerivedClass(...constructor args...);        // Allocate memory from memory pool and construct object.
   // delete foo;
-  void operator delete(void* ptr) { utils::NodeMemoryPool::static_free(ptr); }
+  void operator delete(void* ptr) { memory::NodeMemoryPool::static_free(ptr); }
 
   index_type id() { return m_id; }
   ElementBase* parent() { return m_parent; }

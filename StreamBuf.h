@@ -46,7 +46,7 @@
 #include <libcwd/buf2str.h>
 #endif
 #ifdef DEBUGEVENTRECORDING
-#include "utils/NodeMemoryPool.h"
+#include "memory/NodeMemoryPool.h"
 #include <vector>
 #endif
 #ifdef DEBUGSTREAMBUFSTATS
@@ -293,7 +293,7 @@ struct RecordingData
   size_t m_length;
 
   RecordingData(size_t stream_offset, char* start, std::streamsize length) : m_stream_offset(stream_offset), m_start(start), m_length(length) { }
-  void operator delete(void* ptr) { utils::NodeMemoryPool::static_free(ptr); }
+  void operator delete(void* ptr) { memory::NodeMemoryPool::static_free(ptr); }
   friend std::ostream& operator<<(std::ostream& os, RecordingData const& data);
 };
 
@@ -449,7 +449,7 @@ class StreamBufCommon : public std::streambuf
 
 #ifdef DEBUGEVENTRECORDING
  public:
-  utils::NodeMemoryPool recording_pool;
+  memory::NodeMemoryPool recording_pool;
   std::vector<RecordingData*> recording_buffer;
   std::mutex recording_mutex;
 #endif

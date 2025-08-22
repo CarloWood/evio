@@ -422,7 +422,7 @@ class Element<element_string> : public ElementVariable
 
 constexpr size_t largest_size = std::max({FOREACH_ELEMENT(SIZEOF_ELEMENT_COMMA)});
 
-utils::NodeMemoryPool pool(128, largest_size);
+memory::NodeMemoryPool pool(128, largest_size);
 
 #define XMLRPC_CASE_CREATE(el) \
   case element_##el: \

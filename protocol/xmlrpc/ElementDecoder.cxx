@@ -69,6 +69,6 @@ void ElementDecoder::got_data()
 // ArrayOfStructDecoder is the largest.
 struct Dummy { enum members { one_ }; };
 static constexpr size_t largest_size = sizeof(ArrayOfStructDecoder<Dummy>);
-utils::NodeMemoryPool ElementDecoder::s_pool(8, largest_size);
+memory::NodeMemoryPool ElementDecoder::s_pool(8, largest_size);
 
 } // namespace evio::protocol::xmlrpc

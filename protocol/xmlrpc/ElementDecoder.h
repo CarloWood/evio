@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utils/NodeMemoryPool.h"
+#include "memory/NodeMemoryPool.h"
 #include <string_view>
 #include <array>
 #include <iosfwd>
@@ -50,7 +50,7 @@ class ElementDecoder
 
  public:
   // Should only be used from xmlrpc::create_member_decoder.
-  static utils::NodeMemoryPool s_pool;
+  static memory::NodeMemoryPool s_pool;
 };
 
 } // namespace evio::protocol::xmlrpc
