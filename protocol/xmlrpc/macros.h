@@ -15,7 +15,10 @@
 #define XMLRPC_BOOST_SERIALIZE(type, el, ...) ar & m_##el;
 
 // Generate code inside the print_to debug function.
-#define XMLRPC_WRITE_TO_OS(type, el, ...) os << prefix << "m_" #el ": " << m_##el; prefix = ", ";
+#define XMLRPC_WRITE_TO_OS(type, el, ...) do { \
+  LIBCWD_USING_OSTREAM_PRELUDE \
+  os << prefix << "m_" #el ": " << m_##el; prefix = ", "; \
+} while(0);
 
 // Count the number of 'X' macros used in the FOREACH_MEMBER declaration.
 #define XMLRPC_PLUS_ONE(type, el, ...) + 1
