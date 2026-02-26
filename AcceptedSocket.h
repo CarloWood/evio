@@ -57,6 +57,18 @@ class AcceptedSocket : public Socket
     set_source(m_output);
   }
 
+  // Pass INPUTDECODER as argument.
+  AcceptedSocket(input_protocol_type decoder) : m_decoder(std::move(decoder))
+  {
+#if CWDEBUG_LOCATION
+    DoutEntering(dc::evio, "AcceptedSocket<" << type_info_of<INPUTDECODER>().demangled_name() << ", " << type_info_of<OUTPUTDEVICEPTR>().demangled_name() << ">(" << decoder << ")");
+#else
+    DoutEntering(dc::evio, "AcceptedSocket<>(" << decoder << ")");
+#endif
+    set_protocol_decoder(m_decoder);
+    set_source(m_output);
+  }
+
   ~AcceptedSocket()
   {
 #if CWDEBUG_LOCATION
