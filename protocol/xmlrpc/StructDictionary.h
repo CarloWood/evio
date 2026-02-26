@@ -2,9 +2,9 @@
 
 #include "IgnoreElement.h"
 #include "utils/Dictionary.h"
+#include "utils/to_string.h"
 #include "threadsafe/AIReadWriteMutex.h"
 #include "threadsafe/threadsafe.h"
-#include <magic_enum.hpp>
 #include "debug.h"
 
 namespace evio::protocol::xmlrpc {
@@ -32,10 +32,10 @@ StructDictionary<T>::StructDictionary()
   // See https://stackoverflow.com/a/36596693/1487069
   static bool once = [](){
     typename dictionary_type::wat dictionary_w(s_dictionary);
-    for (int i = 0; i < magic_enum::enum_count<typename T::members>(); ++i)
+    for (int i = 0; i < enchantum::count<typename T::members>(); ++i)
     {
       typename T::members member = static_cast<typename T::members>(i);
-      std::string_view member_name = magic_enum::enum_name(member);
+      std::string_view member_name = utils::to_string(member);
       // All member names start with "member_".
       ASSERT(member_name.substr(0, 7) == "member_");
       member_name.remove_prefix(7);

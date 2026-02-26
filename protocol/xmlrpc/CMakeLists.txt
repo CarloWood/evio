@@ -7,8 +7,6 @@ project(xmlrpc
 
 include(AICxxProject)
 
-find_package(magic_enum REQUIRED)
-
 #==============================================================================
 # BUILD PROJECT
 #
@@ -57,7 +55,7 @@ target_compile_features(evio_protocol_xmlrpc_ObjLib
 target_link_libraries(evio_protocol_xmlrpc_ObjLib
   PRIVATE
     AICxx::utils
-    magic_enum::magic_enum
+    enchantum::enchantum
 )
 
 # Create an ALIAS target.
