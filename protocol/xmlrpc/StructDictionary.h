@@ -32,7 +32,7 @@ StructDictionary<T>::StructDictionary()
   // See https://stackoverflow.com/a/36596693/1487069
   static bool once = [](){
     typename dictionary_type::wat dictionary_w(s_dictionary);
-    for (int i = 0; i < enchantum::count<typename T::members>(); ++i)
+    for (int i = 0; i < enchantum::count<typename T::members>; ++i)
     {
       typename T::members member = static_cast<typename T::members>(i);
       std::string_view member_name = utils::to_string(member);
