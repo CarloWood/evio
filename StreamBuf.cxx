@@ -52,7 +52,7 @@ using namespace libcwd;
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct io("IO");
+Channel io("IO");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

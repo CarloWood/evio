@@ -147,12 +147,12 @@ template<typename... Args>
 void InputDevice::set_protocol_decoder(Sink& decoder, Args... input_create_buffer_arguments)
 {
 #ifdef CWDEBUG
-  LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
+  LibcwDoutScopeBegin(LIBCWD_DEBUG_CHANNELS, ::libcwd::libcw_do, dc::evio)
   LibcwDoutStream << "Entering InputDevice::set_protocol_decoder<";
   LibcwDoutStream << join(", ", libcwd::type_info_of<Args>().demangled_name()...) << ">(" <<
     (void*)&decoder << join_more(", ", input_create_buffer_arguments...) << ") [" << this << ']';
   LibcwDoutScopeEnd;
-  NAMESPACE_DEBUG::Indent __cwds_debug_indent(DEBUGCHANNELS::dc::evio.is_on() ? 2 : 0);
+  ::libcwd::Indent __cwds_debug_indent(LIBCWD_DEBUG_CHANNELS::dc::evio.is_on() ? 2 : 0);
 #endif
   // Only call set_protocol_decoder once.
   // Use Decoder::switch_protocol_decoder from the decode() of the current decoder to change protocol decoder.

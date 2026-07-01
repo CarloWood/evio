@@ -6,7 +6,7 @@
 
 #ifdef CWDEBUG
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct xmlrpc("XMLRPC");
+Channel xmlrpc("XMLRPC");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

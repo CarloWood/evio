@@ -55,7 +55,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct io;           // IO specific debug output.
+extern Channel io;           // IO specific debug output.
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -144,7 +144,6 @@ class MemoryBlock
     MemoryBlock* memory_block = (MemoryBlock*)malloc(sizeof(MemoryBlock) + block_size);
     if (!memory_block)
       THROW_FMALERTE("Failed to allocate [BLOCK_SIZE] bytes", AIArgs("[BLOCK_SIZE]", sizeof(MemoryBlock) + block_size));
-    AllocTag1(memory_block);
 #ifdef DEBUGKEEPMEMORYBLOCKS
     std::memset(reinterpret_cast<char*>(memory_block + 1), 0xff, block_size);
 #endif
