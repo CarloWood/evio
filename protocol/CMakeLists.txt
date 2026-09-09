@@ -42,6 +42,7 @@ target_link_libraries(evio_protocol_ObjLib
   PUBLIC
     wolfssl::wolfssl
     AICxx::utils
+    AICxx::cwds
 )
 
 # Create an ALIAS target.

@@ -39,7 +39,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct tls("TLS");
+Channel tls("TLS");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

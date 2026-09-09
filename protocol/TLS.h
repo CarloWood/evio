@@ -41,7 +41,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct tls;
+extern Channel tls;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

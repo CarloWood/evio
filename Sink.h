@@ -29,12 +29,13 @@
 
 #include "protocol/MessageLengthInterface.h"
 #include "evio/RefCountReleaser.h"
+#include <functional>
 #include <limits>
 
 #ifdef CWDEBUG
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct endofmsg;
-extern channel_ct decoder;
+extern Channel endofmsg;
+extern Channel decoder;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

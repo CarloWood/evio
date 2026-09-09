@@ -300,7 +300,6 @@ void InputDevice::data_received(int& allow_deletion_count, char const* new_data,
           if (AI_UNLIKELY(msg_len > block_size))
             block_size = utils::malloc_size(msg_len + sizeof(MemoryBlock)) - sizeof(MemoryBlock);
           MemoryBlock* memory_block = MemoryBlock::create(block_size);
-          AllocTag((void*)memory_block, "read_from_fd: memory block to make message contiguous");
           m_ibuffer->raw_sgetn(memory_block->block_start(), msg_len);
           decoder->decode(allow_deletion_count, MsgBlock(memory_block->block_start(), msg_len, memory_block));
           memory_block->release();

@@ -32,7 +32,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct io;           // IO specific debug output.
+extern Channel io;              // IO specific debug output.
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

@@ -4,8 +4,8 @@
 
 #ifdef CWDEBUG
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct endofmsg("ENDOFMSG");
-channel_ct decoder("DECODER");
+Channel endofmsg("ENDOFMSG");
+Channel decoder("DECODER");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 

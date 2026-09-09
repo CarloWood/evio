@@ -43,7 +43,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-extern channel_ct evio;
+extern Channel evio;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -698,17 +698,16 @@ boost::intrusive_ptr<DeviceType> create(ARGS&&... args)
 {
 #ifdef CWDEBUG
 #if CWDEBUG_LOCATION
-  LibcwDoutScopeBegin(LIBCWD_DEBUGCHANNELS, ::libcwd::libcw_do, dc::evio)
+  LibcwDoutScopeBegin(LIBCWD_DEBUG_CHANNELS, ::libcwd::libcw_do, dc::evio)
   LibcwDoutStream << "Entering evio::create<" << libcwd::type_info_of<DeviceType>().demangled_name();
   (LibcwDoutStream << ... << (std::string(", ") + libcwd::type_info_of<ARGS>().demangled_name())) << ">(" << join(", ", args...) << ')';
   LibcwDoutScopeEnd;
-  ::NAMESPACE_DEBUG::Indent indentation(2);
+  ::libcwd::Indent indentation(2);
 #else
   DoutEntering(dc::evio, "evio::create<>(" << join(", ", args...) << ')')
 #endif
 #endif
   DeviceType* device = new DeviceType(std::forward<ARGS>(args)...);
-  AllocTag2(device, "Created with evio::create");
   Dout(dc::evio, "Returning device pointer " << (void*)device << " [" << static_cast<FileDescriptor*>(device) << "].");
   return device;
 }

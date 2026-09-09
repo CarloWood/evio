@@ -34,7 +34,7 @@
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
-channel_ct evio("EVIO");
+Channel evio("EVIO");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
