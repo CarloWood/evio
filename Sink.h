@@ -29,6 +29,7 @@
 
 #include "protocol/MessageLengthInterface.h"
 #include "evio/RefCountReleaser.h"
+#include <functional>
 #include <limits>
 
 #ifdef CWDEBUG
